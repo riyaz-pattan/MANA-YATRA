@@ -28,6 +28,9 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   GoogleMapController? _mapController;
+  BitmapDescriptor? _autoIcon;
+  BitmapDescriptor? _bikeIcon;
+  BitmapDescriptor? _carIcon;
   List<Map<String, dynamic>> _nearbyRides = [];
   bool _loadingRides = false;
   bool _bidding = false;
@@ -43,6 +46,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _checkNotificationPermission();
     _getCurrentLocation();
     _listenForActiveRide();
+    _loadCustomMarkers();
+  }
+
+  Future<void> _loadCustomMarkers() async {
+    const config = ImageConfiguration(size: Size(48, 48));
+    _autoIcon = await BitmapDescriptor.asset(config, 'assets/images/map_icons/auto.png');
+    _bikeIcon = await BitmapDescriptor.asset(config, 'assets/images/map_icons/bike.png');
+    _carIcon = await BitmapDescriptor.asset(config, 'assets/images/map_icons/car.png');
+    if (mounted) setState(() {});
+  }
+
+  BitmapDescriptor _getVehicleIcon(String? vehicleType) {
+    if (vehicleType == 'bike' && _bikeIcon != null) return _bikeIcon!;
+    if (vehicleType == 'car' && _carIcon != null) return _carIcon!;
+    if (vehicleType == 'auto' && _autoIcon != null) return _autoIcon!;
+    return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
   }
 
   Future<void> _checkNotificationPermission() async {
@@ -509,13 +528,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _mapController = controller;
             },
             markers: {
-              if (provider.lat != null)
+              if (provider.lat != null && provider.isOnline)
                 Marker(
                   markerId: const MarkerId('driver'),
                   position: LatLng(provider.lat!, provider.lng!),
-                  icon: provider.isOnline
-                      ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen)
-                      : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
+                  icon: _getVehicleIcon(provider.profile?['vehicleType']),
                 ),
               // Nearby ride markers
               ..._nearbyRides.map((ride) {
