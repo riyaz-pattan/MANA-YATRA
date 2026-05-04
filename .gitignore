@@ -1,0 +1,37 @@
+# macOS
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+firebase-debug.log
+
+# Node
+node_modules/
+
+# Firebase
+.firebase/
+.firebaserc
+
+# Flutter / Dart
+**/build/
+**/.dart_tool/
+**/.packages
+**/.pub-cache/
+**/.pub/
+**/ios/Flutter/.last_build_id
+**/ios/Pods/
+**/android/.gradle/
+**/android/local.properties
+**/android/key.properties
+**/*.keystore
+**/*.jks
+
+# Sensitive Firebase files (optional, but usually ignored in public repos)
+**/google-services.json
+**/GoogleService-Info.plist

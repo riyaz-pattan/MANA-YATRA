@@ -1,0 +1,29 @@
+name: mana_yatra_admin
+description: "Mana Yatra Admin Dashboard - Platform management"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  firebase_core: ^3.13.0
+  firebase_auth: ^5.6.0
+  cloud_firestore: ^5.6.7
+  provider: ^6.1.2
+  google_fonts: ^6.2.1
+  intl: ^0.20.2
+  http: ^1.2.1
+  cloud_functions: ^5.6.2
+  firebase_messaging: ^15.2.10
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
