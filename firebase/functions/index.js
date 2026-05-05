@@ -1,6 +1,7 @@
 const functions = require("firebase-functions"); // Trigger redeployment
 const admin = require("firebase-admin");
 const cors = require("cors")({ origin: true });
+const ngeohash = require("ngeohash");
 
 admin.initializeApp();
 
@@ -158,14 +159,59 @@ exports.onDriverApproved = functions.firestore
 /**
  * onRideStatusChanged
  * Tracks cancellations and notifies rider/driver about ride status changes.
+ * Also cleans up RTDB signals and other bids when a ride is matched.
  */
 exports.onRideStatusChanged = functions.firestore
   .document("rides/{rideId}")
   .onUpdate(async (change, context) => {
     const before = change.before.data();
     const after = change.after.data();
+    const rideId = context.params.rideId;
 
-    // Cancellation tracking
+    // 1. If ride matched/accepted, clean up driver bids on OTHER active rides
+    // and delete the RTDB signal so no more drivers see it.
+    if (before.status !== "matched" && before.status !== "accepted" &&
+        (after.status === "accepted" || after.status === "matched")) {
+      const driverId = after.driverId;
+      if (driverId) {
+        // Increment assigned rides for driver
+        await admin.firestore().collection("drivers").doc(driverId).update({
+          totalAssignedRides: admin.firestore.FieldValue.increment(1)
+        });
+
+        // Cancel this driver's bids on other active rides
+        const otherBids = await admin.firestore().collection("bids")
+          .where("driverId", "==", driverId)
+          .where("status", "==", "pending")
+          .get();
+        
+        const batch = admin.firestore().batch();
+        otherBids.docs.forEach(doc => {
+          if (doc.data().rideId !== rideId) {
+            batch.update(doc.ref, { status: "withdrawn" });
+          }
+        });
+        await batch.commit();
+
+        // Reject all other pending bids for this ride
+        const otherRideBids = await admin.firestore().collection("bids")
+          .where("rideId", "==", rideId)
+          .where("status", "==", "pending")
+          .get();
+        
+        const rejectBatch = admin.firestore().batch();
+        otherRideBids.docs.forEach(doc => {
+          rejectBatch.update(doc.ref, { status: "rejected" });
+        });
+        await rejectBatch.commit();
+      }
+
+      // Cleanup RTDB signal
+      await admin.database().ref(`ride_signals/${rideId}`).remove();
+      console.log(`Cleaned up RTDB signal for matched ride ${rideId}`);
+    }
+
+    // 2. Cancellation tracking
     if (before.status !== "cancelled" && after.status === "cancelled") {
       if (after.driverId) {
         // Increment total cancelled rides for driver
@@ -173,18 +219,11 @@ exports.onRideStatusChanged = functions.firestore
           totalCancelledRides: admin.firestore.FieldValue.increment(1)
         });
       }
-    }
-    
-    // Total assigned tracking
-    if (before.status === "pending" && after.status === "accepted") {
-      if (after.driverId) {
-        await admin.firestore().collection("drivers").doc(after.driverId).update({
-          totalAssignedRides: admin.firestore.FieldValue.increment(1)
-        });
-      }
+      // Cleanup RTDB signal just in case
+      await admin.database().ref(`ride_signals/${rideId}`).remove();
     }
 
-    // Status change notifications
+    // 3. Status change notifications
     if (before.status !== after.status) {
       if (after.riderId) {
         await admin.messaging().send({
@@ -193,7 +232,7 @@ exports.onRideStatusChanged = functions.firestore
             title: "Ride Update",
             body: `Your ride status is now: ${after.status}`,
           },
-          data: { type: "ride_status", rideId: context.params.rideId, status: after.status },
+          data: { type: "ride_status", rideId, status: after.status },
         });
       }
       if (after.driverId) {
@@ -203,10 +242,139 @@ exports.onRideStatusChanged = functions.firestore
             title: "Ride Update",
             body: `Ride status updated to: ${after.status}`,
           },
-          data: { type: "ride_status", rideId: context.params.rideId, status: after.status },
+          data: { type: "ride_status", rideId, status: after.status },
         });
       }
     }
+  });
+
+/**
+ * onRideCreated (Dispatcher)
+ * When a rider requests a ride, this function calculates the geohash-5 center,
+ * computes the 8 neighbors, saves a signal to RTDB, and sends a wakeup push
+ * notification to the 9 corresponding FCM topics.
+ */
+exports.onRideCreated = functions.firestore
+  .document("rides/{rideId}")
+  .onCreate(async (snap, context) => {
+    const rideId = context.params.rideId;
+    const data = snap.data();
+
+    if (!data.pickup || !data.pickup.lat || !data.pickup.lng) {
+      console.log("Missing pickup location for ride", rideId);
+      return;
+    }
+
+    const lat = data.pickup.lat;
+    const lng = data.pickup.lng;
+    const vehicleType = data.vehicleType || "auto";
+
+    // Compute geohash level 5 for pickup location (~4.9km x 4.9km)
+    const centerHash = ngeohash.encode(lat, lng, 5);
+    const neighbors = ngeohash.neighbors(centerHash);
+    const targetHashes = [centerHash, ...neighbors];
+
+    console.log(`Dispatching ride ${rideId} to hashes: ${targetHashes.join(", ")}`);
+
+    // 1. Write the signal to RTDB so active drivers can see it immediately
+    const signalData = {
+      rideId,
+      riderId: data.riderId,
+      pickup: data.pickup,
+      drop: data.drop,
+      vehicleType,
+      createdAt: admin.database.ServerValue.TIMESTAMP,
+      status: "searching",
+      geohash5: centerHash,
+      targetHashes: targetHashes, // useful for multi-cell filtering
+      distanceKm: data.distanceKm || 0,
+      durationMin: data.durationMin || 0,
+      riderBid: data.riderBid || 0,
+    };
+
+
+    await admin.database().ref(`ride_signals/${rideId}`).set(signalData);
+
+    // 2. Send FCM wakeup to drivers in these 9 zones
+    // Drivers subscribe to: zone_{geohash5}_{vehicleType}
+    const topics = targetHashes.map(h => `'zone_${h}_${vehicleType}' in topics`).join(" || ");
+    
+    // FCM condition strings can only have up to 5 conditions. 
+    // We have 9 hashes. So we send 2 messages.
+    const chunk1 = targetHashes.slice(0, 5);
+    const chunk2 = targetHashes.slice(5, 9);
+
+    const pickupName = (data.pickup && data.pickup.short_name) || "Nearby";
+    const dropName = (data.drop && data.drop.short_name) || "Destination";
+    const fareLabel = data.riderBid ? `₹${data.riderBid}` : "Open bid";
+    const distLabel = data.distanceKm ? `${data.distanceKm} km` : "";
+
+    const sendWakeup = async (hashes) => {
+      if (hashes.length === 0) return;
+      const condition = hashes.map(h => `'zone_${h}_${vehicleType}' in topics`).join(" || ");
+      try {
+        await admin.messaging().send({
+          condition: condition,
+          notification: {
+            title: `New ${vehicleType} ride — ${fareLabel}`,
+            body: `${pickupName} → ${dropName}${distLabel ? " · " + distLabel : ""}`,
+          },
+          data: {
+            type: "new_ride",
+            rideId: rideId,
+          },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "ride_alerts",
+              sound: "default",
+              priority: "high",
+            },
+          },
+        });
+      } catch (e) {
+        console.error("FCM Send Error:", e);
+      }
+    };
+
+    await sendWakeup(chunk1);
+    await sendWakeup(chunk2);
+  });
+
+/**
+ * cleanupExpiredRides
+ * Runs every minute to find rides stuck in "searching" for more than 3 minutes
+ * and marks them as "expired". Also cleans up the RTDB signal.
+ */
+exports.cleanupExpiredRides = functions.pubsub
+  .schedule("* * * * *") // Every minute
+  .onRun(async (context) => {
+    const expiryTimeMs = Date.now() - (3 * 60 * 1000); // 3 minutes ago
+    const expiryDate = new Date(expiryTimeMs);
+
+    const expiredSnapshot = await admin.firestore().collection("rides")
+      .where("status", "==", "searching")
+      .where("createdAt", "<", admin.firestore.Timestamp.fromDate(expiryDate))
+      .get();
+
+    if (expiredSnapshot.empty) return null;
+
+    const batch = admin.firestore().batch();
+    const promises = [];
+
+    expiredSnapshot.docs.forEach((doc) => {
+      const rideId = doc.id;
+      // Update firestore status
+      batch.update(doc.ref, { status: "expired" });
+      
+      // Delete from RTDB
+      promises.push(admin.database().ref(`ride_signals/${rideId}`).remove());
+    });
+
+    promises.push(batch.commit());
+    await Promise.all(promises);
+    console.log(`Cleaned up ${expiredSnapshot.size} expired rides.`);
+    return null;
   });
 
 /**

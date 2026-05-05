@@ -39,7 +39,6 @@ flutter:
   uses-material-design: true
   assets:
     - .env
-    - assets/images/map_icons/car.png
     - assets/images/map_icons/auto.png
     - assets/images/map_icons/bike.png
     - assets/images/landing_illustration.png

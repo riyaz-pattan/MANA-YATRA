@@ -90,7 +90,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   Future<void> _loadIcon(String type) async {
     final path = 'assets/images/map_icons/$type.png';
     try {
-      _vehicleIcon = await MapUtils.getBytesFromAsset(path, 120);
+      _vehicleIcon = await MapUtils.getBytesFromAsset(path, 180);
       if (mounted) setState(() {});
     } catch (_) {}
   }
@@ -384,7 +384,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                 children: [
                   Icon(
                     status == 'started'
-                        ? Icons.directions_car
+                        ? Icons.navigation
                         : Icons.check_circle,
                     color: status == 'started'
                         ? AppTheme.success

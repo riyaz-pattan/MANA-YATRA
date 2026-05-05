@@ -101,7 +101,7 @@ class _MatchingScreenState extends State<MatchingScreen>
           final data = d.data();
           data['id'] = d.id;
           return data;
-        }).toList();
+        }).where((b) => b['status'] != 'rejected' && b['status'] != 'withdrawn').toList();
         _bids.sort((a, b) =>
             (a['price'] as num).compareTo(b['price'] as num));
       });
@@ -137,6 +137,16 @@ class _MatchingScreenState extends State<MatchingScreen>
       await batch.commit();
     } catch (e) {
       setState(() => _accepting = false);
+    }
+  }
+
+  Future<void> _declineBid(String bidId) async {
+    try {
+      await FirebaseFirestore.instance.collection('bids').doc(bidId).update({
+        'status': 'rejected',
+      });
+    } catch (e) {
+      debugPrint('Error declining bid: $e');
     }
   }
 
@@ -587,27 +597,55 @@ class _MatchingScreenState extends State<MatchingScreen>
                       ),
 
                     const SizedBox(height: 14),
-                    // Accept button
-                    SizedBox(
-                      width: double.infinity,
-                      height: 44,
-                      child: ElevatedButton(
-                        onPressed:
-                            _accepting ? null : () => _acceptBid(bid),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                    // Accept/Reject buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SizedBox(
+                            height: 44,
+                            child: OutlinedButton(
+                              onPressed: _accepting ? null : () => _declineBid(bid['id']),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: AppTheme.danger),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: Text(
+                                'Decline',
+                                style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  color: AppTheme.danger,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                        child: Text(
-                          'Accept Ride',
-                          style: GoogleFonts.inter(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: SizedBox(
+                            height: 44,
+                            child: ElevatedButton(
+                              onPressed:
+                                  _accepting ? null : () => _acceptBid(bid),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.primary,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: Text(
+                                'Accept',
+                                style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
                   ],
                 ),

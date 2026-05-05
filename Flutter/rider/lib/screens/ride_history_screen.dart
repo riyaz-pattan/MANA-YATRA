@@ -167,7 +167,7 @@ class RideHistoryScreen extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              _buildInfoChip(Icons.directions_car, vehicleType.toString().toUpperCase()),
+              _buildInfoChip(Icons.electric_rickshaw, vehicleType.toString().toUpperCase()),
               const SizedBox(width: 12),
               _buildInfoChip(Icons.route, '$distance km'),
               const SizedBox(width: 12),

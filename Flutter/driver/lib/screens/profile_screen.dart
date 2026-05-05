@@ -77,7 +77,7 @@ class ProfileScreen extends StatelessWidget {
 
                 // Details
                 _buildInfoTile(Icons.phone, 'Phone Number', profile['phone'] ?? ''),
-                _buildInfoTile(Icons.directions_car, 'Vehicle Type', (profile['vehicleType'] ?? '').toString().toUpperCase()),
+                _buildInfoTile(Icons.electric_rickshaw, 'Vehicle Type', (profile['vehicleType'] ?? '').toString().toUpperCase()),
                 _buildInfoTile(Icons.pin, 'Vehicle Number', profile['vehicleNumber'] ?? ''),
                 
                 const SizedBox(height: 32),

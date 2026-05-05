@@ -12,6 +12,7 @@ import '../config/theme.dart';
 import '../config/constants.dart';
 import '../utils/map_style.dart';
 import '../providers/driver_provider.dart';
+import '../services/ride_signal_service.dart';
 import 'active_ride_screen.dart';
 import 'ride_earnings_history_screen.dart';
 import 'subscription_screen.dart';
@@ -30,12 +31,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   GoogleMapController? _mapController;
   BitmapDescriptor? _autoIcon;
   BitmapDescriptor? _bikeIcon;
-  BitmapDescriptor? _carIcon;
+
   List<Map<String, dynamic>> _nearbyRides = [];
   bool _loadingRides = false;
   bool _bidding = false;
   StreamSubscription? _rideListener;
-  Timer? _pollTimer;
+  RideSignalService? _signalService;
+  StreamSubscription? _signalSub;
+  final Set<String> _declinedRides = {};
   final Map<String, int> _biddedRides = {}; // Maps rideId to bid amount
 
   bool _locating = true;
@@ -53,13 +56,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     const config = ImageConfiguration(size: Size(48, 48));
     _autoIcon = await BitmapDescriptor.asset(config, 'assets/images/map_icons/auto.png');
     _bikeIcon = await BitmapDescriptor.asset(config, 'assets/images/map_icons/bike.png');
-    _carIcon = await BitmapDescriptor.asset(config, 'assets/images/map_icons/car.png');
+
     if (mounted) setState(() {});
   }
 
   BitmapDescriptor _getVehicleIcon(String? vehicleType) {
     if (vehicleType == 'bike' && _bikeIcon != null) return _bikeIcon!;
-    if (vehicleType == 'car' && _carIcon != null) return _carIcon!;
+
     if (vehicleType == 'auto' && _autoIcon != null) return _autoIcon!;
     return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
   }
@@ -133,9 +136,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _mapController?.animateCamera(CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 15));
         setState(() => _locating = false);
         
-        // If online, start polling rides
+        // If online, start RTDB signal listener
         if (provider.isOnline) {
-          _startPollingRides();
+          _startSignalService(provider);
         }
       }
     } catch (e) {
@@ -146,7 +149,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void dispose() {
     _rideListener?.cancel();
-    _pollTimer?.cancel();
+    _signalSub?.cancel();
+    _signalService?.dispose();
     super.dispose();
   }
 
@@ -188,87 +192,105 @@ class _DashboardScreenState extends State<DashboardScreen> {
     provider.setOnline(newState);
 
     if (newState) {
-      _startPollingRides();
+      _startSignalService(provider);
     } else {
-      _pollTimer?.cancel();
+      _signalSub?.cancel();
+      _signalService?.dispose();
+      _signalService = null;
       setState(() => _nearbyRides = []);
     }
   }
 
-  void _startPollingRides() {
-    _loadNearbyRides();
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      _loadNearbyRides();
-    });
-  }
+  /// Initialize the RTDB-based ride signal listener.
+  /// Replaces the old 10-second Firestore polling.
+  void _startSignalService(DriverProvider provider) {
+    if (_signalService != null) return; // already running
 
-  Future<void> _loadNearbyRides() async {
-    final provider = context.read<DriverProvider>();
-    if (provider.lat == null) return;
-
-    setState(() => _loadingRides = true);
-    try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      
-      // Fetch user's pending bids
-      if (uid != null) {
-        final bidsSnap = await FirebaseFirestore.instance
-            .collection('bids')
-            .where('driverId', isEqualTo: uid)
-            .where('status', isEqualTo: 'pending')
-            .get();
-        
-        _biddedRides.clear();
-        for (final doc in bidsSnap.docs) {
-          _biddedRides[doc['rideId'] as String] = doc['price'] as int;
+    final vehicleType = provider.profile?['vehicleType'] as String? ?? 'auto';
+    _signalService = RideSignalService(
+      vehicleType: vehicleType,
+      onErrorCallback: (errorMsg) {
+        if (mounted) {
+          CustomToast.show(
+            context: context,
+            message: errorMsg,
+            isError: true,
+          );
         }
-      }
+      },
+    );
 
-      // Get driver's vehicle type for filtering
-      final driverVehicleType = provider.profile?['vehicleType'] as String? ?? 'auto';
+    // Set the vehicle type on the tracker for FCM topic subscriptions
+    provider.tracker?.setVehicleType(vehicleType);
 
-      final snap = await FirebaseFirestore.instance
-          .collection('rides')
-          .where('status', whereIn: ['searching', 'bidding'])
-          .orderBy('createdAt', descending: true)
-          .limit(40)
-          .get();
+    // Seed initial zone from current location
+    if (provider.lat != null && provider.lng != null) {
+      _signalService!.updateZone(provider.lat!, provider.lng!);
+    }
 
-      final rides = <Map<String, dynamic>>[];
-      for (final doc in snap.docs) {
-        final data = doc.data();
-        data['id'] = doc.id;
+    // Listen for zone changes from SmartTracker
+    provider.tracker?.onZoneChanged = (lat, lng) {
+      _signalService?.updateZone(lat, lng);
+    };
 
-        // ── Vehicle Type Filter ──
-        // Only show rides that match this driver's vehicle type
-        final rideVehicleType = (data['vehicleType'] as String?) ?? 'auto';
-        if (rideVehicleType != driverVehicleType) continue;
+    // Start the RTDB listener
+    _signalService!.start();
+    setState(() => _loadingRides = true);
 
-        // Filter by distance
-        if (data['pickup']?['lat'] != null) {
+    // Load existing bids for this driver
+    _loadExistingBids();
+
+    // Listen to the stream and update UI
+    _signalSub = _signalService!.ridesStream.listen((rides) {
+      if (!mounted) return;
+
+      // Compute distance from driver to each ride pickup
+      final enriched = <Map<String, dynamic>>[];
+      for (final signal in rides) {
+        final pickup = signal['pickup'];
+        if (pickup == null || pickup['lat'] == null) continue;
+
+        if (provider.lat != null) {
           final dist = Geolocator.distanceBetween(
             provider.lat!,
             provider.lng!,
-            (data['pickup']['lat'] as num).toDouble(),
-            (data['pickup']['lng'] as num).toDouble(),
+            (pickup['lat'] as num).toDouble(),
+            (pickup['lng'] as num).toDouble(),
           );
           if (dist < AppConstants.searchRadiusMeters) {
-            data['distance'] = dist;
-            rides.add(data);
+            signal['distance'] = dist;
+            enriched.add(signal);
           }
         }
       }
-      rides.sort((a, b) =>
-          (a['distance'] as double).compareTo(b['distance'] as double));
+
+      enriched.sort((a, b) =>
+          ((a['distance'] as double?) ?? 0).compareTo((b['distance'] as double?) ?? 0));
 
       setState(() {
-        _nearbyRides = rides;
+        _nearbyRides = enriched.where((r) => !_declinedRides.contains(r['id'])).toList();
         _loadingRides = false;
       });
-    } catch (e) {
-      setState(() => _loadingRides = false);
-    }
+    });
+  }
+
+  /// One-time load of this driver's existing pending bids.
+  Future<void> _loadExistingBids() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final bidsSnap = await FirebaseFirestore.instance
+          .collection('bids')
+          .where('driverId', isEqualTo: uid)
+          .where('status', isEqualTo: 'pending')
+          .get();
+
+      _biddedRides.clear();
+      for (final doc in bidsSnap.docs) {
+        _biddedRides[doc['rideId'] as String] = doc['price'] as int;
+      }
+      if (mounted) setState(() {});
+    } catch (_) {}
   }
 
   Future<void> _placeBid(Map<String, dynamic> ride, int bidPrice) async {
@@ -291,12 +313,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'status': 'pending',
         'createdAt': FieldValue.serverTimestamp(),
       });
-
-      // Update ride status to bidding
-      await FirebaseFirestore.instance
-          .collection('rides')
-          .doc(ride['id'])
-          .update({'status': 'bidding'});
       
       setState(() {
         _biddedRides[ride['id']] = bidPrice;
@@ -322,8 +338,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _showBidDialog(Map<String, dynamic> ride) {
-    int bidPrice = ride['riderBid'] ?? 80;
+    final riderOffer = (ride['offeredPrice'] ?? ride['riderBid'] ?? 80) as num;
+    int bidPrice = riderOffer.toInt();
+    final maxBid = (riderOffer * 2).toInt(); // 100% cap
     final bidController = TextEditingController(text: bidPrice.toString());
+    String? capWarning;
 
     // Distance info
     final distMeters = (ride['distance'] as double?) ?? 0;
@@ -383,7 +402,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      'Rider offered ₹${ride['riderBid']}',
+                      'Rider offered ₹${riderOffer.toInt()}  (max ₹$maxBid)',
                       style: GoogleFonts.inter(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -452,6 +471,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             final parsed = int.tryParse(val);
                             if (parsed != null && parsed > 0) {
                               bidPrice = parsed;
+                              if (parsed > maxBid) {
+                                capWarning = 'Max counter price is ₹$maxBid (2× rider offer)';
+                              } else {
+                                capWarning = null;
+                              }
                               setSheetState(() {});
                             }
                           },
@@ -478,20 +502,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ],
                   ),
+                  // Cap warning
+                  if (capWarning != null) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.danger.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: AppTheme.danger, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(capWarning!,
+                                style: GoogleFonts.inter(fontSize: 12, color: AppTheme.danger, fontWeight: FontWeight.w600)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 24),
                   SizedBox(
                     width: double.infinity,
                     height: 54,
                     child: ElevatedButton(
-                      onPressed: _bidding
+                      onPressed: (_bidding || bidPrice > maxBid)
                           ? null
                           : () {
                               final finalPrice = int.tryParse(bidController.text) ?? bidPrice;
+                              if (finalPrice > maxBid) return;
                               Navigator.pop(ctx);
                               _placeBid(ride, finalPrice);
                             },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.success,
+                        backgroundColor: bidPrice > maxBid ? AppTheme.text3 : AppTheme.success,
                       ),
                       child: Text('Place Bid ₹$bidPrice',
                           style: GoogleFonts.inter(
@@ -758,7 +804,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 const SizedBox(height: 4),
                                 Row(
                                   children: [
-                                    const Icon(Icons.directions_car, color: AppTheme.primary, size: 20),
+                                    const Icon(Icons.electric_rickshaw, color: AppTheme.primary, size: 20),
                                     const SizedBox(width: 6),
                                     Text(
                                       '${ride['distanceKm']} km',
@@ -865,24 +911,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   ],
                                 ),
                               )
-                            : InkWell(
-                                onTap: () => _showBidDialog(ride),
-                                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.primary.withValues(alpha: 0.1),
-                                    borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+                            : Row(
+                                children: [
+                                  Expanded(
+                                    child: InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          _declinedRides.add(rideId);
+                                          _nearbyRides.removeWhere((r) => r['id'] == rideId);
+                                        });
+                                      },
+                                      borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(16)),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(vertical: 16),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.danger.withValues(alpha: 0.1),
+                                          borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(16)),
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          'Decline',
+                                          style: GoogleFonts.inter(
+                                              color: AppTheme.danger,
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 16),
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    'Place Bid',
-                                    style: GoogleFonts.inter(
-                                        color: AppTheme.primary,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 16),
+                                  Expanded(
+                                    child: InkWell(
+                                      onTap: () => _showBidDialog(ride),
+                                      borderRadius: const BorderRadius.only(bottomRight: Radius.circular(16)),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(vertical: 16),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.primary.withValues(alpha: 0.1),
+                                          borderRadius: const BorderRadius.only(bottomRight: Radius.circular(16)),
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          'Place Bid',
+                                          style: GoogleFonts.inter(
+                                              color: AppTheme.primary,
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 16),
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                ],
                               ),
                       ),
                     ],

@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dart_geohash/dart_geohash.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import '../config/constants.dart';
 
 enum TrackingMode { offline, discovery, activeRide }
@@ -20,8 +21,20 @@ class SmartTracker {
   double? _currentLat;
   double? _currentLng;
   void Function(double lat, double lng)? onLocationUpdate;
+  void Function(double lat, double lng)? onZoneChanged;
+
+  // FCM zone topic tracking
+  String? _currentGeohash5;
+  String? _vehicleType;
+  final Set<String> _subscribedTopics = {};
 
   SmartTracker(this.driverId);
+
+  String? get currentGeohash5 => _currentGeohash5;
+
+  void setVehicleType(String type) {
+    _vehicleType = type;
+  }
 
   TrackingMode get mode => _mode;
 
@@ -130,10 +143,45 @@ class SmartTracker {
         'lastLocationUpdate': FieldValue.serverTimestamp(),
       });
 
+      // 3. Update FCM zone topics if geohash-5 changed
+      final newHash5 = GeoHasher().encode(lng, lat, precision: 5);
+      if (newHash5 != _currentGeohash5 && _mode == TrackingMode.discovery) {
+        _currentGeohash5 = newHash5;
+        await _updateZoneTopics(newHash5);
+        onZoneChanged?.call(lat, lng);
+      }
+
       _lastLat = lat;
       _lastLng = lng;
       _lastUpdateTime = DateTime.now().millisecondsSinceEpoch;
     } catch (_) {}
+  }
+
+  /// Subscribe to 9-cell FCM topics, unsubscribe from old ones.
+  Future<void> _updateZoneTopics(String centerHash) async {
+    if (_vehicleType == null) return;
+
+    final neighbors = GeoHasher().neighbors(centerHash);
+    final newTopics = <String>{
+      'zone_${centerHash}_$_vehicleType',
+      ...neighbors.values.map((h) => 'zone_${h}_$_vehicleType'),
+    };
+
+    // Unsubscribe from old topics not in the new set
+    final toUnsub = _subscribedTopics.difference(newTopics);
+    for (final t in toUnsub) {
+      await FirebaseMessaging.instance.unsubscribeFromTopic(t);
+    }
+
+    // Subscribe to new topics not in the old set
+    final toSub = newTopics.difference(_subscribedTopics);
+    for (final t in toSub) {
+      await FirebaseMessaging.instance.subscribeToTopic(t);
+    }
+
+    _subscribedTopics
+      ..clear()
+      ..addAll(newTopics);
   }
 
   double _haversine(double? lat1, double? lng1, double lat2, double lng2) {

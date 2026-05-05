@@ -1,0 +1,16 @@
+{
+  "rules": {
+    ".read": "false",
+    ".write": "false",
+    "ride_signals": {
+      ".read": "auth != null",
+      ".write": "false"
+    },
+    "liveLocations": {
+      "$driverId": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $driverId"
+      }
+    }
+  }
+}

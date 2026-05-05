@@ -19,6 +19,13 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
+  // For 'new_ride' data messages: the app is woken up.
+  // The RTDB listener (RideSignalService) will handle ride discovery
+  // once the app comes to foreground. No heavy work needed here.
+  if (message.data['type'] == 'new_ride') {
+    // App woken from background/killed — RTDB listener will sync on resume.
+    return;
+  }
 }
 
 final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -34,7 +41,18 @@ void main() async {
 
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
+  // Handle messages when the app is in foreground
   FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+    final type = message.data['type'];
+
+    // New ride notification
+    // If app is in foreground, RTDB listener will pick it up instantly.
+    // We don't need to show a SnackBar or Toast to avoid redundancy.
+    if (type == 'new_ride') {
+      return;
+    }
+
+    // Regular notification messages
     if (message.notification != null) {
       rootScaffoldMessengerKey.currentState?.showSnackBar(
         SnackBar(
