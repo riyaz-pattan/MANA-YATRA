@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:dart_geohash/dart_geohash.dart';
+import '../config/constants.dart';
 
 /// Listens to `ride_signals/` in RTDB and emits rides matching the driver's
 /// current geohash-5 zone and vehicle type.
@@ -98,7 +99,14 @@ class RideSignalService {
         return false;
       }
 
-      // 2. Must be in one of our 9 neighboring cells
+      // 2. Filter out expired signals locally
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final createdAtMs = (signal['createdAt'] as num?)?.toInt() ?? now;
+      if (now - createdAtMs >= AppConstants.rideExpiryMinutes * 60 * 1000) {
+        return false;
+      }
+
+      // 3. Must be in one of our 9 neighboring cells
       final signalHash = signal['geohash5'] as String?;
       if (signalHash == null || !myZones.contains(signalHash)) {
         zoneFiltered++;

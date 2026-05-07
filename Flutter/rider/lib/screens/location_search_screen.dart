@@ -61,14 +61,39 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
     // Populate existing values if any
     final provider = context.read<RideProvider>();
     if (provider.pickup != null) {
-      _pickupController.text = provider.pickup!.displayName;
-      _pickupIsCurrentLocation = false;
+      final distance = Geolocator.distanceBetween(
+        widget.currentPosition.latitude,
+        widget.currentPosition.longitude,
+        provider.pickup!.lat,
+        provider.pickup!.lng,
+      );
+      // If within 100m, consider it "Your Location"
+      if (distance < 100) {
+        _pickupController.text = 'Your Location';
+        _pickupIsCurrentLocation = true;
+      } else {
+        _pickupController.text = provider.pickup!.displayName;
+        _pickupIsCurrentLocation = false;
+      }
+    } else {
+      _pickupController.text = 'Your Location';
+      _pickupIsCurrentLocation = true;
     }
+
     if (provider.drop != null) {
       _dropController.text = provider.drop!.displayName;
     }
 
-    // Auto-focus logic
+    // Listen to focus changes to restore "Your Location" if cleared
+    _pickupFocus.addListener(() {
+      if (mounted) setState(() {});
+      if (!_pickupFocus.hasFocus && 
+          _pickupController.text.isEmpty && 
+          _pickupIsCurrentLocation) {
+        _pickupController.text = 'Your Location';
+      }
+    });
+    _dropFocus.addListener(() { if (mounted) setState(() {}); });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.focusDrop == true) {
         setState(() => _activeField = _ActiveField.drop);
@@ -101,6 +126,12 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
 
   void _onSearchChanged(String query) {
     _debounce?.cancel();
+    
+    // If user starts typing in pickup, it's no longer "Current Location"
+    if (_activeField == _ActiveField.pickup && _pickupIsCurrentLocation && query.isNotEmpty) {
+      setState(() => _pickupIsCurrentLocation = false);
+    }
+
     if (query.trim().isEmpty) {
       setState(() {
         _searchResults = [];
@@ -281,7 +312,7 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
           ),
 
           // ── Confirm Route Button ──
-          if (_pickupController.text.isNotEmpty && 
+          if ((_pickupController.text.isNotEmpty || _pickupIsCurrentLocation) && 
               _dropController.text.isNotEmpty && 
               _searchResults.isEmpty && 
               !_searching)
@@ -375,7 +406,7 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
           style: GoogleFonts.inter(
             fontSize: 14,
             fontWeight: FontWeight.w500,
-            color: _pickupIsCurrentLocation && _pickupController.text.isEmpty
+            color: _pickupIsCurrentLocation && (_pickupController.text == 'Your Location' || _pickupController.text.isEmpty)
                 ? AppTheme.success
                 : AppTheme.text,
           ),
@@ -521,59 +552,96 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
   }
 
   Widget _buildSearchResultsList() {
-    return ListView.separated(
+    return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: _searchResults.length,
-      separatorBuilder: (_, __) => const Divider(
-        height: 1,
-        indent: 68,
-        color: AppTheme.border,
-      ),
+      itemCount: _searchResults.length + (_activeField == _ActiveField.pickup ? 1 : 0),
       itemBuilder: (_, i) {
-        final r = _searchResults[i];
+        // Add "Current Location" as first item if searching for pickup
+        if (_activeField == _ActiveField.pickup && i == 0) {
+          return ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+            leading: Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                color: AppTheme.success.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.my_location, size: 20, color: AppTheme.success),
+            ),
+            title: Text(
+              'Your Current Location',
+              style: GoogleFonts.inter(
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+                color: AppTheme.success,
+              ),
+            ),
+            onTap: () async {
+              final provider = context.read<RideProvider>();
+              final loc = await GoogleMapsService.reverseGeocode(
+                widget.currentPosition.latitude,
+                widget.currentPosition.longitude,
+              );
+              provider.setPickup(loc);
+              _pickupController.text = 'Your Location';
+              _pickupIsCurrentLocation = true;
+              setState(() => _searchResults = []);
+              _dropFocus.requestFocus();
+              _activeField = _ActiveField.drop;
+            },
+          );
+        }
+
+        final r = _searchResults[_activeField == _ActiveField.pickup ? i - 1 : i];
         final dist = _formatDistance(r);
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
-          leading: Container(
-            width: 40, height: 40,
-            decoration: BoxDecoration(
-              color: AppTheme.bg2,
-              borderRadius: BorderRadius.circular(10),
+        return Column(
+          children: [
+            if (i > 0 || _activeField == _ActiveField.drop)
+              const Divider(height: 1, indent: 68, color: AppTheme.border),
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+              leading: Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.bg2,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.location_on_rounded,
+                  size: 20,
+                  color: AppTheme.text2,
+                ),
+              ),
+              title: Text(
+                r.shortName,
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                  color: AppTheme.text,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                r.displayName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.inter(
+                  color: AppTheme.text3,
+                  fontSize: 12,
+                ),
+              ),
+              trailing: Text(
+                dist,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.text3,
+                ),
+              ),
+              onTap: () => _selectLocation(r),
             ),
-            child: const Icon(
-              Icons.location_on_rounded,
-              size: 20,
-              color: AppTheme.text2,
-            ),
-          ),
-          title: Text(
-            r.shortName,
-            style: GoogleFonts.inter(
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-              color: AppTheme.text,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          subtitle: Text(
-            r.displayName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.inter(
-              color: AppTheme.text3,
-              fontSize: 12,
-            ),
-          ),
-          trailing: Text(
-            dist,
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.text3,
-            ),
-          ),
-          onTap: () => _selectLocation(r),
+          ],
         );
       },
     );

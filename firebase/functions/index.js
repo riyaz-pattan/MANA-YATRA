@@ -211,7 +211,7 @@ exports.onRideStatusChanged = functions.firestore
       console.log(`Cleaned up RTDB signal for matched ride ${rideId}`);
     }
 
-    // 2. Cancellation tracking
+    // 2. Cancellation and Expiration tracking
     if (before.status !== "cancelled" && after.status === "cancelled") {
       if (after.driverId) {
         // Increment total cancelled rides for driver
@@ -221,10 +221,13 @@ exports.onRideStatusChanged = functions.firestore
       }
       // Cleanup RTDB signal just in case
       await admin.database().ref(`ride_signals/${rideId}`).remove();
+    } else if (before.status !== "expired" && after.status === "expired") {
+      // Cleanup RTDB signal if the ride was locally expired by the app
+      await admin.database().ref(`ride_signals/${rideId}`).remove();
     }
 
     // 3. Status change notifications
-    if (before.status !== after.status) {
+    if (before.status !== after.status && after.status !== "expired") {
       if (after.riderId) {
         await admin.messaging().send({
           topic: `rider_${after.riderId}`,

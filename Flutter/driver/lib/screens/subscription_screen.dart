@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../config/theme.dart';
 import '../config/constants.dart';
 import '../providers/driver_provider.dart';
+import '../utils/custom_toast.dart';
 
 class SubscriptionScreen extends StatefulWidget {
   const SubscriptionScreen({super.key});
@@ -69,14 +70,17 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       
       if (mounted) {
         Navigator.pop(context); // Close bottom sheet
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Subscription activated successfully!'), backgroundColor: AppTheme.success),
+        CustomToast.show(
+          context: context,
+          message: 'Subscription activated successfully!',
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to activate. Try again.'), backgroundColor: AppTheme.danger),
+        CustomToast.show(
+          context: context,
+          message: 'Failed to activate. Try again.',
+          isError: true,
         );
       }
     }

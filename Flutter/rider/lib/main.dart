@@ -13,6 +13,7 @@ import 'screens/login_screen.dart';
 import 'screens/main_screen.dart';
 import 'screens/profile_setup_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'utils/custom_toast.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -20,6 +21,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
 
 final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,13 +36,21 @@ void main() async {
 
   FirebaseMessaging.onMessage.listen((RemoteMessage message) {
     if (message.notification != null) {
-      rootScaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(
-          content: Text('${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}'),
-          duration: const Duration(seconds: 4),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      final type = message.data['type'];
+      
+      // If the user is actively using the app, don't spam them with ride status popups
+      // because the UI will already be updating instantly via Firestore listeners.
+      if (type == 'ride_status') {
+        return;
+      }
+
+      final ctx = navigatorKey.currentContext;
+      if (ctx != null) {
+        CustomToast.show(
+          context: ctx,
+          message: '${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}',
+        );
+      }
     }
   });
 
@@ -56,6 +66,7 @@ class ManaYatraRiderApp extends StatelessWidget {
       create: (_) => RideProvider(),
       child: MaterialApp(
         scaffoldMessengerKey: rootScaffoldMessengerKey,
+        navigatorKey: navigatorKey,
         title: 'Mana Yatra - Rider',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,

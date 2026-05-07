@@ -14,7 +14,8 @@ import '../providers/ride_provider.dart';
 import '../services/google_maps_service.dart';
 import '../utils/map_style.dart';
 import '../utils/map_utils.dart';
-import 'home_screen.dart';
+import 'main_screen.dart';
+import '../utils/custom_toast.dart';
 
 class ActiveRideScreen extends StatefulWidget {
   final String rideId;
@@ -32,6 +33,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   StreamSubscription? _locationListener;
   bool _cameraFitted = false;
   BitmapDescriptor? _vehicleIcon;
+  BitmapDescriptor? _driverLabelIcon;
   List<LatLng> _approachRouteCoords = [];
   bool _isFetchingApproach = false;
   double _driverHeading = 0.0;
@@ -90,7 +92,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   Future<void> _loadIcon(String type) async {
     final path = 'assets/images/map_icons/$type.png';
     try {
-      _vehicleIcon = await MapUtils.getBytesFromAsset(path, 180);
+      _vehicleIcon = await MapUtils.getBytesFromAsset(path, 100);
+      _driverLabelIcon = await MapUtils.createLabelMarker('Driver is here');
       if (mounted) setState(() {});
     } catch (_) {}
   }
@@ -262,7 +265,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                     context.read<RideProvider>().resetRide();
                     Navigator.of(context).pushAndRemoveUntil(
                       MaterialPageRoute(
-                          builder: (_) => const HomeScreen()),
+                          builder: (_) => const MainScreen()),
                       (_) => false,
                     );
                   },
@@ -306,6 +309,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
           // Map
           GoogleMap(
             style: lightMapStyle,
+            myLocationEnabled: true,
+            myLocationButtonEnabled: false,
             initialCameraPosition: CameraPosition(
               target: _driverPos ??
                   (routeCoords.isNotEmpty
@@ -358,6 +363,15 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                   icon: _vehicleIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
                   rotation: _driverHeading,
                   anchor: const Offset(0.5, 0.5),
+                  zIndex: 1,
+                ),
+              if (_driverPos != null && _driverLabelIcon != null)
+                Marker(
+                  markerId: const MarkerId('driver_label'),
+                  position: _driverPos!,
+                  icon: _driverLabelIcon!,
+                  anchor: const Offset(0.5, 1.8),
+                  zIndex: 2,
                 ),
             },
           ),
@@ -669,8 +683,10 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                         await launchUrl(uri);
                       } else {
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('WhatsApp is not installed on your device.')),
+                          CustomToast.show(
+                            context: context,
+                            message: 'WhatsApp is not installed on your device.',
+                            isError: true,
                           );
                         }
                       }

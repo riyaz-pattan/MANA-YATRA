@@ -6,7 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:fluttertoast/fluttertoast.dart';
+import '../utils/custom_toast.dart';
 import 'package:geolocator/geolocator.dart';
 import '../config/theme.dart';
 import '../services/google_maps_service.dart';
@@ -28,8 +28,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   StreamSubscription? _rideListener;
   bool _updating = false;
   bool _cameraFitted = false;
-
-  BitmapDescriptor? _vehicleIcon;
+  BitmapDescriptor? _riderPinIcon;
+  BitmapDescriptor? _riderLabelIcon;
   List<LatLng> _approachRouteCoords = [];
   bool _isFetchingApproach = false;
   LatLng? _lastDriverPos;
@@ -51,6 +51,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _driverProvider = context.read<DriverProvider>();
       _driverProvider?.addListener(_onDriverLocationChanged);
+      _loadCustomIcons();
     });
   }
 
@@ -86,11 +87,6 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
           // Fit camera to route bounds once
           if (!_cameraFitted && _mapController != null) {
             _fitCameraToCurrentRoute();
-          }
-
-          // Load custom vehicle icon
-          if (_vehicleIcon == null) {
-            _loadIcon(data['vehicleType'] ?? 'auto');
           }
 
           // Fetch approach route if matched
@@ -151,10 +147,10 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     }
   }
 
-  Future<void> _loadIcon(String type) async {
-    final path = 'assets/images/map_icons/$type.png';
+  Future<void> _loadCustomIcons() async {
     try {
-      _vehicleIcon = await MapUtils.getBytesFromAsset(path, 180);
+      _riderPinIcon = await MapUtils.createPersonMarker();
+      _riderLabelIcon = await MapUtils.createLabelMarker('Rider is here');
       if (mounted) setState(() {});
     } catch (_) {}
   }
@@ -247,26 +243,19 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     final expectedOtp = _ride?['rideOtp'] ?? '';
 
     if (enteredOtp.length != 4) {
-      Fluttertoast.showToast(
-        msg: '⚠️ Please enter the complete 4-digit OTP',
-        toastLength: Toast.LENGTH_LONG,
-        gravity: ToastGravity.TOP,
-        backgroundColor: Colors.orange.shade800,
-        textColor: Colors.white,
-        fontSize: 15,
+      CustomToast.show(
+        context: context,
+        message: '⚠️ Please enter the complete 4-digit OTP',
+        isError: true,
       );
       return;
     }
 
     if (enteredOtp != expectedOtp) {
-      Fluttertoast.showToast(
-        msg:
-            '❌ Wrong OTP! This rider may not be the one who booked this ride. Please verify.',
-        toastLength: Toast.LENGTH_LONG,
-        gravity: ToastGravity.TOP,
-        backgroundColor: Colors.red.shade800,
-        textColor: Colors.white,
-        fontSize: 15,
+      CustomToast.show(
+        context: context,
+        message: '❌ Wrong OTP! Please verify the rider.',
+        isError: true,
       );
       // Clear OTP fields
       for (final c in _otpControllers) {
@@ -281,13 +270,9 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     // OTP matched!
     setState(() => _updating = true);
 
-    Fluttertoast.showToast(
-      msg: '✅ OTP Verified! Starting ride...',
-      toastLength: Toast.LENGTH_SHORT,
-      gravity: ToastGravity.TOP,
-      backgroundColor: Colors.green.shade700,
-      textColor: Colors.white,
-      fontSize: 15,
+    CustomToast.show(
+      context: context,
+      message: '✅ OTP Verified! Starting ride...',
     );
 
     await FirebaseFirestore.instance
@@ -419,6 +404,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         children: [
           GoogleMap(
             style: lightMapStyle,
+            myLocationEnabled: true,
+            myLocationButtonEnabled: false,
             initialCameraPosition: CameraPosition(
               target: provider.lat != null
                   ? LatLng(provider.lat!, provider.lng!)
@@ -454,9 +441,20 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                     (_ride!['pickup']['lat'] as num).toDouble(),
                     (_ride!['pickup']['lng'] as num).toDouble(),
                   ),
-                  icon: BitmapDescriptor.defaultMarkerWithHue(
-                    BitmapDescriptor.hueGreen,
+                  icon: _riderPinIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+                  anchor: const Offset(0.5, 0.5),
+                  zIndex: 1,
+                ),
+              if (_ride!['pickup'] != null && status == 'matched' && _riderLabelIcon != null)
+                Marker(
+                  markerId: const MarkerId('rider_label'),
+                  position: LatLng(
+                    (_ride!['pickup']['lat'] as num).toDouble(),
+                    (_ride!['pickup']['lng'] as num).toDouble(),
                   ),
+                  icon: _riderLabelIcon!,
+                  anchor: const Offset(0.5, 1.8),
+                  zIndex: 2,
                 ),
               if (_ride!['drop'] != null && status == 'started')
                 Marker(
@@ -468,18 +466,6 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                   icon: BitmapDescriptor.defaultMarkerWithHue(
                     BitmapDescriptor.hueRed,
                   ),
-                ),
-              if (provider.lat != null)
-                Marker(
-                  markerId: const MarkerId('driver'),
-                  position: LatLng(provider.lat!, provider.lng!),
-                  icon:
-                      _vehicleIcon ??
-                      BitmapDescriptor.defaultMarkerWithHue(
-                        BitmapDescriptor.hueYellow,
-                      ),
-                  rotation: _driverHeading,
-                  anchor: const Offset(0.5, 0.5),
                 ),
             },
           ),

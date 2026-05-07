@@ -29,7 +29,6 @@ dependencies:
   intl: ^0.20.2
   dart_geohash: ^2.1.0
   url_launcher: ^6.3.2
-  fluttertoast: ^9.0.0
   permission_handler: ^12.0.1
   firebase_messaging: ^15.2.10
 

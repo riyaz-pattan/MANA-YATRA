@@ -9,7 +9,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import '../config/constants.dart';
 import 'active_ride_screen.dart';
-import 'home_screen.dart';
+import '../screens/main_screen.dart';
+import 'package:provider/provider.dart';
+import '../providers/ride_provider.dart';
 
 class MatchingScreen extends StatefulWidget {
   final String rideId;
@@ -53,9 +55,16 @@ class _MatchingScreenState extends State<MatchingScreen>
 
   void _startExpiryTimer() {
     _expiryTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      setState(() => _elapsedSeconds++);
+      if (_ride != null && _ride!['createdAt'] != null) {
+        final createdAt = (_ride!['createdAt'] as Timestamp).toDate();
+        final elapsed = DateTime.now().difference(createdAt).inSeconds;
+        setState(() => _elapsedSeconds = elapsed > 0 ? elapsed : 0);
+      } else {
+        setState(() => _elapsedSeconds++);
+      }
+
       if (_elapsedSeconds >= AppConstants.rideExpiryMinutes * 60) {
-        _cancelRide();
+        _expireRide();
       }
     });
   }
@@ -80,11 +89,13 @@ class _MatchingScreenState extends State<MatchingScreen>
           ),
         );
       }
-      // If cancelled, go back home
-      if (data['status'] == 'cancelled') {
+      // If cancelled or expired, go back home
+      if (data['status'] == 'cancelled' || data['status'] == 'expired') {
         if (!mounted) return;
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        context.read<RideProvider>().resetRide();
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const MainScreen()),
+          (_) => false,
         );
       }
     });
@@ -156,8 +167,24 @@ class _MatchingScreenState extends State<MatchingScreen>
         .doc(widget.rideId)
         .update({'status': 'cancelled'});
     if (mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      context.read<RideProvider>().resetRide();
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const MainScreen()),
+        (_) => false,
+      );
+    }
+  }
+
+  Future<void> _expireRide() async {
+    await FirebaseFirestore.instance
+        .collection('rides')
+        .doc(widget.rideId)
+        .update({'status': 'expired'});
+    if (mounted) {
+      context.read<RideProvider>().resetRide();
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const MainScreen()),
+        (_) => false,
       );
     }
   }
@@ -165,7 +192,7 @@ class _MatchingScreenState extends State<MatchingScreen>
   @override
   Widget build(BuildContext context) {
     final remaining =
-        (AppConstants.rideExpiryMinutes * 60) - _elapsedSeconds;
+        max(0, (AppConstants.rideExpiryMinutes * 60) - _elapsedSeconds);
     final minutes = (remaining ~/ 60).toString().padLeft(2, '0');
     final seconds = (remaining % 60).toString().padLeft(2, '0');
 

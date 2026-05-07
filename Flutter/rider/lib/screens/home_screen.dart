@@ -95,6 +95,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
         final status = data['status'];
         if (status == 'searching' || status == 'bidding') {
+          final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+          if (createdAt != null && DateTime.now().difference(createdAt).inMinutes >= AppConstants.rideExpiryMinutes) {
+            // Force expire locally if the app was closed and server hasn't cleaned it up yet
+            FirebaseFirestore.instance.collection('rides').doc(ride.id).update({'status': 'expired'});
+            provider.setActiveRide(null);
+            return;
+          }
+          
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
               builder: (_) => MatchingScreen(rideId: ride.id),
@@ -106,6 +114,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               builder: (_) => ActiveRideScreen(rideId: ride.id),
             ),
           );
+        }
+      } else {
+        if (mounted) {
+          context.read<RideProvider>().setActiveRide(null);
         }
       }
     });

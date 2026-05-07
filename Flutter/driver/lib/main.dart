@@ -15,6 +15,7 @@ import 'screens/subscription_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'utils/custom_toast.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -29,6 +30,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
 
 final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,16 +53,20 @@ void main() async {
     if (type == 'new_ride') {
       return;
     }
+    
+    if (type == 'ride_status') {
+      return;
+    }
 
-    // Regular notification messages
+    // Regular notification messages (e.g., admin broadcasts, driver approval)
     if (message.notification != null) {
-      rootScaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(
-          content: Text('${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}'),
-          duration: const Duration(seconds: 4),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      final ctx = navigatorKey.currentContext;
+      if (ctx != null) {
+        CustomToast.show(
+          context: ctx,
+          message: '${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}',
+        );
+      }
     }
   });
 
@@ -76,6 +82,7 @@ class ManaYatraDriverApp extends StatelessWidget {
       create: (_) => DriverProvider(),
       child: MaterialApp(
         scaffoldMessengerKey: rootScaffoldMessengerKey,
+        navigatorKey: navigatorKey,
         title: 'Mana Yatra - Driver',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,

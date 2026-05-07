@@ -1,0 +1,27 @@
+name: NVIDIA Free Models
+version: 0.0.1
+schema: v1
+
+models:
+  # === Best Free Coding Models from NVIDIA ===
+  - name: MiniMax M2.7 (Recommended)
+    provider: nvidia
+    model: minimaxai/minimax-m2.7
+    apiKey: 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
+    contextLength: 128000
+    completionOptions:
+      temperature: 0.3
+
+  - name: DeepSeek V3.2
+    provider: nvidia
+    model: deepseek-ai/deepseek-v3.2
+    apiKey: nvapi-YOUR_API_KEY_HERE
+
+  - name: Kimi K2.5
+    provider: nvidia
+    model: kimi/kimi-k2.5
+    apiKey: nvapi-YOUR_API_KEY_HERE
+    contextLength: 256000
+
+# Set default model
+defaultModel: MiniMax M2.7 (Recommended)

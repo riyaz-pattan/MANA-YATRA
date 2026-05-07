@@ -797,9 +797,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'Ride Request',
-                                  style: GoogleFonts.inter(fontSize: 12, color: AppTheme.text3, fontWeight: FontWeight.w600),
+                                Row(
+                                  children: [
+                                    Text(
+                                      'Ride Request',
+                                      style: GoogleFonts.inter(fontSize: 12, color: AppTheme.text3, fontWeight: FontWeight.w600),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    const Icon(Icons.timer_outlined, size: 14, color: AppTheme.primary),
+                                    const SizedBox(width: 4),
+                                    RideTimerText(
+                                      createdAtMs: (ride['createdAt'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
+                                      onExpired: () {
+                                        if (mounted) {
+                                          setState(() {
+                                            _nearbyRides.removeWhere((r) => r['id'] == rideId);
+                                          });
+                                        }
+                                      },
+                                    ),
+                                  ],
                                 ),
                                 const SizedBox(height: 4),
                                 Row(
@@ -1085,6 +1102,76 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 24),
         ],
+      ),
+    );
+  }
+}
+
+class RideTimerText extends StatefulWidget {
+  final int createdAtMs;
+  final VoidCallback onExpired;
+
+  const RideTimerText({super.key, required this.createdAtMs, required this.onExpired});
+
+  @override
+  State<RideTimerText> createState() => _RideTimerTextState();
+}
+
+class _RideTimerTextState extends State<RideTimerText> {
+  Timer? _timer;
+  int _remainingSeconds = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _calculateRemaining();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _calculateRemaining();
+    });
+  }
+
+  void _calculateRemaining() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final elapsed = ((now - widget.createdAtMs) / 1000).floor();
+    final remaining = AppConstants.rideExpiryMinutes * 60 - elapsed;
+    if (remaining <= 0) {
+      if (_remainingSeconds > 0 || _timer?.isActive == true) {
+        if (mounted) setState(() => _remainingSeconds = 0);
+        _timer?.cancel();
+        widget.onExpired();
+      }
+    } else {
+      if (mounted) setState(() => _remainingSeconds = remaining);
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_remainingSeconds <= 0) {
+      return Text(
+        'Expired',
+        style: GoogleFonts.inter(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.danger,
+        ),
+      );
+    }
+    final mins = _remainingSeconds ~/ 60;
+    final secs = _remainingSeconds % 60;
+    final color = _remainingSeconds < 30 ? AppTheme.danger : AppTheme.primary;
+    return Text(
+      '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}',
+      style: GoogleFonts.inter(
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        color: color,
       ),
     );
   }
