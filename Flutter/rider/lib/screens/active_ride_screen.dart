@@ -16,6 +16,7 @@ import '../utils/map_style.dart';
 import '../utils/map_utils.dart';
 import 'main_screen.dart';
 import '../utils/custom_toast.dart';
+import '../widgets/swipe_action.dart';
 
 class ActiveRideScreen extends StatefulWidget {
   final String rideId;
@@ -38,6 +39,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   bool _isFetchingApproach = false;
   double _driverHeading = 0.0;
   String _driverProximity = '';
+  bool _updating = false;
 
   @override
   void initState() {
@@ -277,6 +279,43 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         ),
       );
     });
+  }
+
+  Future<void> _cancelRide() async {
+    if (_updating) return;
+    setState(() => _updating = true);
+
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      batch.update(
+        FirebaseFirestore.instance.collection('rides').doc(widget.rideId),
+        {
+          'status': 'cancelled',
+          'cancelledBy': 'rider',
+          'cancelledAt': FieldValue.serverTimestamp(),
+        },
+      );
+
+      // Reset driver state if a driver was matched
+      final driverId = _ride?['driverId'];
+      if (driverId != null) {
+        batch.update(
+          FirebaseFirestore.instance.collection('drivers').doc(driverId),
+          {
+            'driverState': 'ONLINE_IDLE',
+            'activeRideId': null,
+            'activeBidCount': 0,
+          },
+        );
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint('Error cancelling ride: $e');
+    }
+
+    if (!mounted) return;
+    context.read<RideProvider>().setActiveRide(null);
+    setState(() => _updating = false);
   }
 
   @override
@@ -706,6 +745,16 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                   ),
                 ),
               ],
+            ),
+          ],
+          
+          if (_ride!['status'] == 'matched') ...[
+            const SizedBox(height: 16),
+            SwipeAction(
+              text: 'Swipe to Cancel',
+              onSwipe: _cancelRide,
+              baseColor: AppTheme.danger,
+              activeColor: AppTheme.danger,
             ),
           ],
         ],

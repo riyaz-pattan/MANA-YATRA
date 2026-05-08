@@ -29,11 +29,30 @@ dependencies:
   image_picker: ^1.1.2
   permission_handler: ^11.3.1
   firebase_messaging: ^15.2.10
+  cloud_functions: ^5.3.3
+  uuid: ^4.5.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.0
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/logo/ashvo_logo.png"
+
+flutter_native_splash:
+  color: "#000000"
+  image: "assets/images/logo/ashvo_splash.png"
+  android: true
+  ios: true
+  fullscreen: true
+  android_12:
+    image: "assets/images/logo/ashvo_splash.png"
+    color: "#000000"
 
 flutter:
   uses-material-design: true

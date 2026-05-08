@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:geolocator/geolocator.dart';
 
 import 'package:google_fonts/google_fonts.dart';
@@ -122,31 +123,32 @@ class _MatchingScreenState extends State<MatchingScreen>
   Future<void> _acceptBid(Map<String, dynamic> bid) async {
     setState(() => _accepting = true);
     try {
-      // Generate random 4-digit OTP
-      final otp = (1000 + Random().nextInt(9000)).toString();
-
-      final batch = FirebaseFirestore.instance.batch();
-      // Update ride
-      batch.update(
-        FirebaseFirestore.instance.collection('rides').doc(widget.rideId),
-        {
-          'status': 'matched',
-          'driverId': bid['driverId'],
-          'driverName': bid['driverName'] ?? 'Driver',
-          'driverPhone': bid['driverPhone'],
-          'vehicleNumber': bid['vehicleNumber'],
-          'finalPrice': bid['price'],
-          'rideOtp': otp,
-          'matchedAt': FieldValue.serverTimestamp(),
-        },
-      );
-      // Update bid status
-      batch.update(
-        FirebaseFirestore.instance.collection('bids').doc(bid['id']),
-        {'status': 'accepted'},
-      );
-      await batch.commit();
+      final callable = FirebaseFunctions.instance.httpsCallable('acceptBid');
+      await callable.call<dynamic>({
+        'rideId': widget.rideId,
+        'bidId': bid['id'],
+      });
+      // Success! The _listenRide() listener will detect status='matched'
+      // and navigate to ActiveRideScreen automatically.
+    } on FirebaseFunctionsException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message ?? 'Failed to accept bid.'),
+            backgroundColor: AppTheme.danger,
+          ),
+        );
+      }
+      setState(() => _accepting = false);
     } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Something went wrong. Please try again.'),
+            backgroundColor: AppTheme.danger,
+          ),
+        );
+      }
       setState(() => _accepting = false);
     }
   }
@@ -306,6 +308,26 @@ class _MatchingScreenState extends State<MatchingScreen>
               color: AppTheme.warning,
               fontWeight: FontWeight.w600,
               fontSize: 13,
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        // Phase indicator — shows rider the system is actively expanding
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 400),
+          child: Text(
+            _elapsedSeconds < 180
+                ? '📡 Searching nearby drivers...'
+                : '🌐 Expanding search area...',
+            key: ValueKey(_elapsedSeconds < 180),
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: _elapsedSeconds < 180
+                  ? AppTheme.text3
+                  : AppTheme.primary,
+              fontWeight: _elapsedSeconds < 180
+                  ? FontWeight.w400
+                  : FontWeight.w600,
             ),
           ),
         ),

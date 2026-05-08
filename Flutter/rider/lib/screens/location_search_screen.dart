@@ -47,8 +47,9 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
   final _dropFocus = FocusNode();
 
   _ActiveField _activeField = _ActiveField.drop;
-  List<LocationResult> _searchResults = [];
+  List<PlacePrediction> _searchResults = [];
   bool _searching = false;
+  bool _fetchingDetails = false;
   Timer? _debounce;
 
   // Track if pickup is "Your Current Location" (auto-set)
@@ -86,6 +87,7 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
 
     // Listen to focus changes to restore "Your Location" if cleared
     _pickupFocus.addListener(() {
+      if (_pickupFocus.hasFocus) GoogleMapsService.startNewSearchSession();
       if (mounted) setState(() {});
       if (!_pickupFocus.hasFocus && 
           _pickupController.text.isEmpty && 
@@ -93,7 +95,10 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
         _pickupController.text = 'Your Location';
       }
     });
-    _dropFocus.addListener(() { if (mounted) setState(() {}); });
+    _dropFocus.addListener(() { 
+      if (_dropFocus.hasFocus) GoogleMapsService.startNewSearchSession();
+      if (mounted) setState(() {}); 
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.focusDrop == true) {
         setState(() => _activeField = _ActiveField.drop);
@@ -141,7 +146,7 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
     }
     _debounce = Timer(const Duration(milliseconds: 400), () async {
       setState(() => _searching = true);
-      final results = await GoogleMapsService.searchLocation(query);
+      final results = await GoogleMapsService.getPlacePredictions(query);
       if (mounted) {
         setState(() {
           _searchResults = results;
@@ -302,7 +307,7 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
 
           // ── Search results or empty state ──
           Expanded(
-            child: _searching
+            child: _searching || _fetchingDetails
                 ? const Center(
                     child: CircularProgressIndicator(color: AppTheme.primary),
                   )
@@ -593,7 +598,6 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
         }
 
         final r = _searchResults[_activeField == _ActiveField.pickup ? i - 1 : i];
-        final dist = _formatDistance(r);
         return Column(
           children: [
             if (i > 0 || _activeField == _ActiveField.drop)
@@ -613,7 +617,7 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
                 ),
               ),
               title: Text(
-                r.shortName,
+                r.primaryText,
                 style: GoogleFonts.inter(
                   fontWeight: FontWeight.w600,
                   fontSize: 14,
@@ -623,7 +627,7 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
               subtitle: Text(
-                r.displayName,
+                r.secondaryText,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.inter(
@@ -631,15 +635,14 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
                   fontSize: 12,
                 ),
               ),
-              trailing: Text(
-                dist,
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.text3,
-                ),
-              ),
-              onTap: () => _selectLocation(r),
+              onTap: () async {
+                setState(() => _fetchingDetails = true);
+                final location = await GoogleMapsService.getPlaceDetails(r.placeId);
+                if (mounted) {
+                  setState(() => _fetchingDetails = false);
+                  if (location != null) _selectLocation(location);
+                }
+              },
             ),
           ],
         );

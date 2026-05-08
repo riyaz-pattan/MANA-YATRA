@@ -5,6 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
 import '../config/theme.dart';
+import 'main_screen.dart';
+import 'profile_setup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -59,7 +61,35 @@ class _LoginScreenState extends State<LoginScreen>
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: '+91$phone',
         verificationCompleted: (PhoneAuthCredential credential) async {
-          await FirebaseAuth.instance.signInWithCredential(credential);
+          try {
+            final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+            final user = userCredential.user;
+            if (user == null || !mounted) return;
+
+            final userDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .get();
+
+            if (!mounted) return;
+
+            final data = userDoc.data();
+            final hasName = data != null &&
+                data.containsKey('name') &&
+                (data['name']?.toString() ?? '').trim().isNotEmpty;
+
+            if (hasName) {
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const MainScreen()),
+                (route) => false,
+              );
+            } else {
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const ProfileSetupScreen()),
+                (route) => false,
+              );
+            }
+          } catch (_) {}
         },
         verificationFailed: (FirebaseAuthException e) {
           if (!mounted) return;
@@ -98,6 +128,9 @@ class _LoginScreenState extends State<LoginScreen>
       setState(() => _error = 'Enter the 6-digit OTP');
       return;
     }
+    // Guard against duplicate calls (from onCompleted + button tap)
+    if (_loading) return;
+    
     setState(() {
       _loading = true;
       _error = '';
@@ -108,7 +141,34 @@ class _LoginScreenState extends State<LoginScreen>
         verificationId: _verificationId!,
         smsCode: otp,
       );
-      await FirebaseAuth.instance.signInWithCredential(credential);
+      final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+      final user = userCredential.user;
+      if (user == null || !mounted) return;
+
+      // Explicitly check if user has a profile name set
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (!mounted) return;
+
+      final data = userDoc.data();
+      final hasName = data != null &&
+          data.containsKey('name') &&
+          (data['name']?.toString() ?? '').trim().isNotEmpty;
+
+      if (hasName) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const MainScreen()),
+          (route) => false,
+        );
+      } else {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const ProfileSetupScreen()),
+          (route) => false,
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {

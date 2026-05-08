@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
@@ -56,11 +57,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _getCurrentLocation();
+    _requestPermissionsSequentially();
     _listenForActiveRide();
     _loadSavedPlaces();
     _pickupFocusNode.addListener(() { setState(() {}); });
     _dropFocusNode.addListener(() { setState(() {}); });
+  }
+
+  /// Request notification permission first, then location permission.
+  /// Android cannot show two permission dialogs at the same time,
+  /// so they must be chained sequentially.
+  Future<void> _requestPermissionsSequentially() async {
+    await _requestNotificationPermission();
+    await _getCurrentLocation();
   }
 
   @override
@@ -94,8 +103,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         provider.setActiveRide(data);
 
         final status = data['status'];
+        final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+
         if (status == 'searching' || status == 'bidding') {
-          final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
           if (createdAt != null && DateTime.now().difference(createdAt).inMinutes >= AppConstants.rideExpiryMinutes) {
             // Force expire locally if the app was closed and server hasn't cleaned it up yet
             FirebaseFirestore.instance.collection('rides').doc(ride.id).update({'status': 'expired'});
@@ -108,7 +118,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               builder: (_) => MatchingScreen(rideId: ride.id),
             ),
           );
-        } else if (status == 'matched' || status == 'started') {
+        } else if (status == 'matched') {
+          if (createdAt != null && DateTime.now().difference(createdAt).inMinutes >= 60) {
+            // Force expire locally if it's been stuck in matched for over 60 minutes
+            FirebaseFirestore.instance.collection('rides').doc(ride.id).update({
+              'status': 'cancelled',
+              'cancelReason': 'local_stale_cleanup'
+            });
+            provider.setActiveRide(null);
+            return;
+          }
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => ActiveRideScreen(rideId: ride.id),
+            ),
+          );
+        } else if (status == 'started') {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
               builder: (_) => ActiveRideScreen(rideId: ride.id),
@@ -121,6 +146,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         }
       }
     });
+  }
+
+  Future<void> _requestNotificationPermission() async {
+    try {
+      await Permission.notification.request();
+    } catch (e) {
+      // Silently fail
+    }
   }
 
   Future<void> _getCurrentLocation() async {
@@ -572,6 +605,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   /// Opens the LocationSearchScreen and processes the result.
   Future<void> _openSearchScreen({bool? focusDrop}) async {
+    // If location is not available, try to get it now
+    if (_currentPos == null) {
+      await _getCurrentLocation();
+      // If still null after requesting, show toast
+      if (_currentPos == null && mounted) {
+        CustomToast.show(
+          context: context,
+          message: 'Location permission is required to book a ride. Please allow location access.',
+          isError: true,
+        );
+        return;
+      }
+    }
     if (_currentPos == null) return;
     final provider = context.read<RideProvider>();
 

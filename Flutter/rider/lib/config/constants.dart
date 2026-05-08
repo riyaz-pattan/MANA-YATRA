@@ -13,7 +13,7 @@ class AppConstants {
     'bike': VehicleInfo(label: 'Bike', icon: '🏍️', seats: 1),
   };
 
-  static const int rideExpiryMinutes = 3;
+  static const int rideExpiryMinutes = 5;
 
   static const Map<String, double> pricePerKm = {
     'auto': 12,

@@ -141,6 +141,7 @@ class SmartTracker {
         'lng': lng,
         'geohash': geohash,
         'lastLocationUpdate': FieldValue.serverTimestamp(),
+        'lastHeartbeat': FieldValue.serverTimestamp(),
       });
 
       // 3. Update FCM zone topics if geohash-5 changed
@@ -157,7 +158,8 @@ class SmartTracker {
     } catch (_) {}
   }
 
-  /// Subscribe to 9-cell FCM topics, unsubscribe from old ones.
+  /// Subscribe to 9-cell FCM topics (geohash-5) + 1 wider geohash-4 topic.
+  /// The geohash-4 topic enables the expanded search phase (Phase 2).
   Future<void> _updateZoneTopics(String centerHash) async {
     if (_vehicleType == null) return;
 
@@ -166,6 +168,10 @@ class SmartTracker {
       'zone_${centerHash}_$_vehicleType',
       ...neighbors.values.map((h) => 'zone_${h}_$_vehicleType'),
     };
+
+    // Add geohash-4 topic for expanded search reach (~20km radius)
+    final geohash4 = centerHash.substring(0, 4);
+    newTopics.add('zone_${geohash4}_$_vehicleType');
 
     // Unsubscribe from old topics not in the new set
     final toUnsub = _subscribedTopics.difference(newTopics);

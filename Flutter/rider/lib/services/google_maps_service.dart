@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:uuid/uuid.dart';
 
 class LocationResult {
   final String placeId;
@@ -27,6 +28,18 @@ class LocationResult {
       };
 }
 
+class PlacePrediction {
+  final String placeId;
+  final String primaryText;
+  final String secondaryText;
+
+  PlacePrediction({
+    required this.placeId,
+    required this.primaryText,
+    required this.secondaryText,
+  });
+}
+
 class RouteInfo {
   final double distanceKm;
   final int durationMin;
@@ -41,6 +54,83 @@ class RouteInfo {
 
 class GoogleMapsService {
   static String get _apiKey => dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
+  static String? _sessionToken;
+  static const _uuid = Uuid();
+
+  static void startNewSearchSession() {
+    _sessionToken = _uuid.v4();
+  }
+
+  static Future<List<PlacePrediction>> getPlacePredictions(String query) async {
+    if (_apiKey.isEmpty) {
+      debugPrint('[GoogleMapsService] API key is empty! Check .env file.');
+      return [];
+    }
+    
+    if (_sessionToken == null) startNewSearchSession();
+
+    try {
+      final uri = Uri.parse(
+        'https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${Uri.encodeComponent(query)}&components=country:in&sessiontoken=$_sessionToken&key=$_apiKey',
+      );
+      final res = await http.get(uri);
+      if (res.statusCode != 200) return [];
+      
+      final data = jsonDecode(res.body);
+      if (data['status'] != 'OK' && data['status'] != 'ZERO_RESULTS') {
+        debugPrint('[GoogleMapsService] Autocomplete API error: ${data['status']}');
+        return [];
+      }
+      
+      final predictions = data['predictions'] as List? ?? [];
+      return predictions.map((p) {
+        final struct = p['structured_formatting'] ?? {};
+        return PlacePrediction(
+          placeId: p['place_id'] ?? '',
+          primaryText: struct['main_text'] ?? p['description'] ?? '',
+          secondaryText: struct['secondary_text'] ?? '',
+        );
+      }).toList();
+    } catch (e) {
+      debugPrint('Error fetching predictions: $e');
+      return [];
+    }
+  }
+
+  static Future<LocationResult?> getPlaceDetails(String placeId) async {
+    if (_apiKey.isEmpty) return null;
+    
+    try {
+      final tokenParam = _sessionToken != null ? '&sessiontoken=$_sessionToken' : '';
+      final uri = Uri.parse(
+        'https://maps.googleapis.com/maps/api/place/details/json?place_id=$placeId&fields=geometry,name,formatted_address$tokenParam&key=$_apiKey',
+      );
+      
+      final res = await http.get(uri);
+      
+      // End the session after detail fetch
+      _sessionToken = null;
+      
+      if (res.statusCode != 200) return null;
+      
+      final data = jsonDecode(res.body);
+      if (data['status'] != 'OK') return null;
+      
+      final r = data['result'];
+      final geometry = r['geometry']['location'];
+      
+      return LocationResult(
+        placeId: placeId,
+        displayName: r['formatted_address'] ?? r['name'] ?? '',
+        shortName: r['name'] ?? '',
+        lat: geometry['lat']?.toDouble() ?? 0.0,
+        lng: geometry['lng']?.toDouble() ?? 0.0,
+      );
+    } catch (e) {
+      debugPrint('Error fetching place details: $e');
+      return null;
+    }
+  }
 
   static Future<List<LocationResult>> searchLocation(String query) async {
     if (_apiKey.isEmpty) {

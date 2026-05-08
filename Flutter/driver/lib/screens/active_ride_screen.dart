@@ -14,6 +14,7 @@ import '../utils/map_style.dart';
 import '../utils/map_utils.dart';
 import '../providers/driver_provider.dart';
 import 'dashboard_screen.dart';
+import '../widgets/swipe_action.dart';
 
 class ActiveRideScreen extends StatefulWidget {
   final String rideId;
@@ -287,13 +288,33 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
 
   Future<void> _completeRide() async {
     setState(() => _updating = true);
-    await FirebaseFirestore.instance
-        .collection('rides')
-        .doc(widget.rideId)
-        .update({
+    final uid = context.read<DriverProvider>().user?.uid;
+
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      batch.update(
+        FirebaseFirestore.instance.collection('rides').doc(widget.rideId),
+        {
           'status': 'completed',
           'completedAt': FieldValue.serverTimestamp(),
-        });
+        },
+      );
+
+      if (uid != null) {
+        batch.update(
+          FirebaseFirestore.instance.collection('drivers').doc(uid),
+          {
+            'driverState': 'ONLINE_IDLE',
+            'activeRideId': null,
+            'activeBidCount': 0,
+          },
+        );
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint('Error completing ride: $e');
+    }
+
     if (!mounted) return;
     context.read<DriverProvider>().setActiveRide(null);
     setState(() => _updating = false);
@@ -301,13 +322,33 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
 
   Future<void> _cancelRide() async {
     setState(() => _updating = true);
-    await FirebaseFirestore.instance
-        .collection('rides')
-        .doc(widget.rideId)
-        .update({
+    final uid = context.read<DriverProvider>().user?.uid;
+
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      batch.update(
+        FirebaseFirestore.instance.collection('rides').doc(widget.rideId),
+        {
           'status': 'cancelled',
           'cancelledAt': FieldValue.serverTimestamp(),
-        });
+        },
+      );
+
+      if (uid != null) {
+        batch.update(
+          FirebaseFirestore.instance.collection('drivers').doc(uid),
+          {
+            'driverState': 'ONLINE_IDLE',
+            'activeRideId': null,
+            'activeBidCount': 0,
+          },
+        );
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint('Error cancelling ride: $e');
+    }
+
     if (!mounted) return;
     context.read<DriverProvider>().setActiveRide(null);
     setState(() => _updating = false);
@@ -819,25 +860,13 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
             ],
 
             const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              height: 44,
-              child: OutlinedButton(
-                onPressed: _updating ? null : _cancelRide,
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: AppTheme.danger),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: Text(
-                  'Cancel Ride',
-                  style: GoogleFonts.inter(
-                    color: AppTheme.danger,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
+            SwipeAction(
+              text: 'Swipe to Cancel',
+              onSwipe: () {
+                if (!_updating) _cancelRide();
+              },
+              baseColor: AppTheme.danger,
+              activeColor: AppTheme.danger,
             ),
           ],
         ),

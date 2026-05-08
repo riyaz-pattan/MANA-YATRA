@@ -4,11 +4,20 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/smart_tracker.dart';
 
+/// Driver states for the state machine.
+/// OFFLINE → ONLINE_IDLE → BIDDING → ON_RIDE
+class DriverState {
+  static const String offline = 'OFFLINE';
+  static const String onlineIdle = 'ONLINE_IDLE';
+  static const String bidding = 'BIDDING';
+  static const String onRide = 'ON_RIDE';
+}
+
 class DriverProvider extends ChangeNotifier {
   User? _user;
   bool _authLoading = true;
   Map<String, dynamic>? _profile;
-  bool _isOnline = false;
+  String _driverState = DriverState.offline;
   SmartTracker? _tracker;
   double? _lat;
   double? _lng;
@@ -19,11 +28,15 @@ class DriverProvider extends ChangeNotifier {
   bool get authLoading => _authLoading;
   bool get isLoggedIn => _user != null && !_authLoading;
   Map<String, dynamic>? get profile => _profile;
-  bool get isOnline => _isOnline;
+  String get driverState => _driverState;
   double? get lat => _lat;
   double? get lng => _lng;
   Map<String, dynamic>? get activeRide => _activeRide;
   SmartTracker? get tracker => _tracker;
+
+  // Backward-compatible getters
+  bool get isOnline => _driverState != DriverState.offline;
+  bool get isBusy => _driverState == DriverState.onRide;
 
   bool get isApproved => _profile?['isApproved'] == true || _profile?['isApproved'] == 'true';
   bool get isBlocked => _profile?['isBlocked'] == true || _profile?['isBlocked'] == 'true';
@@ -54,17 +67,31 @@ class DriverProvider extends ChangeNotifier {
   void setProfile(Map<String, dynamic>? profile) {
     _profile = profile;
     if (profile != null) {
-      _isOnline = profile['isOnline'] == true;
+      // Read driverState, with migration fallback from old isOnline field
+      final state = profile['driverState'] as String?;
+      if (state != null) {
+        _driverState = state;
+      } else {
+        // Migration: old documents only have isOnline
+        _driverState = profile['isOnline'] == true
+            ? DriverState.onlineIdle
+            : DriverState.offline;
+      }
     }
     notifyListeners();
   }
 
   void setOnline(bool online) {
-    _isOnline = online;
+    _driverState = online ? DriverState.onlineIdle : DriverState.offline;
     if (_tracker != null) {
       _tracker!.setMode(
           online ? TrackingMode.discovery : TrackingMode.offline);
     }
+    notifyListeners();
+  }
+
+  void setDriverState(String state) {
+    _driverState = state;
     notifyListeners();
   }
 
@@ -73,7 +100,7 @@ class DriverProvider extends ChangeNotifier {
     if (_tracker != null) {
       _tracker!.setMode(ride != null
           ? TrackingMode.activeRide
-          : (_isOnline ? TrackingMode.discovery : TrackingMode.offline));
+          : (isOnline ? TrackingMode.discovery : TrackingMode.offline));
     }
     notifyListeners();
   }

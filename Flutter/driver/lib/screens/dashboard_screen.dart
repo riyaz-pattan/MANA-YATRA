@@ -41,15 +41,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final Set<String> _declinedRides = {};
   final Map<String, int> _biddedRides = {}; // Maps rideId to bid amount
 
-  bool _locating = true;
+  bool _locating = false;
+  bool _locationGranted = false;
 
   @override
   void initState() {
     super.initState();
-    _checkNotificationPermission();
-    _getCurrentLocation();
+    _requestPermissionsSequentially();
     _listenForActiveRide();
     _loadCustomMarkers();
+  }
+
+  /// Request notification permission first, then location permission.
+  /// Android cannot show two permission dialogs at the same time,
+  /// so they must be chained sequentially.
+  Future<void> _requestPermissionsSequentially() async {
+    await _checkNotificationPermission();
+    await _getCurrentLocation();
   }
 
   Future<void> _loadCustomMarkers() async {
@@ -75,6 +83,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _getCurrentLocation() async {
+    if (mounted) setState(() => _locating = true);
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
@@ -84,7 +93,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             message: 'Please enable location services',
             isError: true,
           );
-          setState(() => _locating = false);
+          setState(() {
+            _locating = false;
+            _locationGranted = false;
+          });
         }
         return;
       }
@@ -92,17 +104,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
-      if (permission == LocationPermission.deniedForever) {
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
         if (mounted) {
           CustomToast.show(
             context: context,
-            message: 'Location permission denied. Please enable in settings.',
+            message: 'Location permission is required. Please enable in settings.',
             isError: true,
           );
-          setState(() => _locating = false);
+          setState(() {
+            _locating = false;
+            _locationGranted = false;
+          });
         }
         return;
       }
+      _locationGranted = true;
 
       // Try getCurrentPosition with a longer timeout
       Position? pos;
@@ -169,6 +185,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final ride = snap.docs.first;
         final data = ride.data();
         data['id'] = ride.id;
+
+        final status = data['status'];
+        final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+        
+        if (status == 'matched' && createdAt != null && DateTime.now().difference(createdAt).inMinutes >= 60) {
+          // Force expire locally if it's been stuck in matched for over 60 minutes
+          final batch = FirebaseFirestore.instance.batch();
+          batch.update(FirebaseFirestore.instance.collection('rides').doc(ride.id), {
+            'status': 'cancelled',
+            'cancelReason': 'local_stale_cleanup'
+          });
+          batch.update(FirebaseFirestore.instance.collection('drivers').doc(uid), {
+            'driverState': 'ONLINE_IDLE',
+            'activeRideId': null,
+            'activeBidCount': 0,
+          });
+          batch.commit();
+          context.read<DriverProvider>().setActiveRide(null);
+          return;
+        }
+
         context.read<DriverProvider>().setActiveRide(data);
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
@@ -182,16 +219,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _toggleOnline() async {
     final provider = context.read<DriverProvider>();
     final uid = FirebaseAuth.instance.currentUser!.uid;
-    final newState = !provider.isOnline;
+    final goingOnline = !provider.isOnline;
+
+    // If going online, check location permission first
+    if (goingOnline) {
+      if (!_locationGranted) {
+        // Try to get location permission
+        await _getCurrentLocation();
+        if (!_locationGranted) {
+          if (mounted) {
+            CustomToast.show(
+              context: context,
+              message: 'Location permission is required to go online. Please allow location access.',
+              isError: true,
+            );
+          }
+          return;
+        }
+      }
+    }
+
+    final newDriverState = goingOnline ? 'ONLINE_IDLE' : 'OFFLINE';
 
     await FirebaseFirestore.instance
         .collection('drivers')
         .doc(uid)
-        .update({'isOnline': newState});
+        .update({
+          'driverState': newDriverState,
+          'isOnline': goingOnline, // Keep for backward compat during migration
+        });
 
-    provider.setOnline(newState);
+    provider.setOnline(goingOnline);
 
-    if (newState) {
+    if (goingOnline) {
       _startSignalService(provider);
     } else {
       _signalSub?.cancel();
@@ -268,7 +328,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ((a['distance'] as double?) ?? 0).compareTo((b['distance'] as double?) ?? 0));
 
       setState(() {
-        _nearbyRides = enriched.where((r) => !_declinedRides.contains(r['id'])).toList();
+        _nearbyRides = enriched
+            .where((r) => !_declinedRides.contains(r['id']))
+            .take(AppConstants.maxVisibleRides)
+            .toList();
         _loadingRides = false;
       });
     });
@@ -294,10 +357,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _placeBid(Map<String, dynamic> ride, int bidPrice) async {
+    final provider = context.read<DriverProvider>();
+
+    // Block if driver is in ON_RIDE state
+    if (provider.isBusy) {
+      CustomToast.show(
+        context: context,
+        message: '⚠️ You are already in an active ride!',
+        isError: true,
+      );
+      return;
+    }
+
+    // Block if driver has too many active bids
+    if (_biddedRides.length >= AppConstants.maxActiveBids) {
+      CustomToast.show(
+        context: context,
+        message: '⚠️ Maximum ${AppConstants.maxActiveBids} active bids reached.',
+        isError: true,
+      );
+      return;
+    }
+
     setState(() => _bidding = true);
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
-      final provider = context.read<DriverProvider>();
 
       await FirebaseFirestore.instance.collection('bids').add({
         'rideId': ride['id'],
@@ -313,7 +397,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'status': 'pending',
         'createdAt': FieldValue.serverTimestamp(),
       });
-      
+
+      // Update driver state: ONLINE_IDLE → BIDDING, and increment activeBidCount
+      final driverUpdates = <String, dynamic>{
+        'activeBidCount': FieldValue.increment(1),
+      };
+      if (provider.driverState == 'ONLINE_IDLE') {
+        driverUpdates['driverState'] = 'BIDDING';
+        provider.setDriverState('BIDDING');
+      }
+      await FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(uid)
+          .update(driverUpdates);
+
       setState(() {
         _biddedRides[ride['id']] = bidPrice;
       });
@@ -1096,7 +1193,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               await FirebaseFirestore.instance
                   .collection('drivers')
                   .doc(FirebaseAuth.instance.currentUser!.uid)
-                  .update({'isOnline': false});
+                  .update({
+                    'isOnline': false,
+                    'driverState': 'OFFLINE',
+                  });
               await FirebaseAuth.instance.signOut();
             },
           ),

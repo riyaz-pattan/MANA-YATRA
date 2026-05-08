@@ -13,8 +13,13 @@ class AppConstants {
     'bike': VehicleInfo(label: 'Bike', icon: '🏍️', seats: 1),
   };
 
-  static const int rideExpiryMinutes = 3;
+  static const int rideExpiryMinutes = 5;
   static const int subscriptionDailyRate = 15;
+
+  // Matching & safety
+  static const int maxVisibleRides = 10;
+  static const int maxActiveBids = 10;
+  static const int heartbeatMaxAgeSec = 120; // 2 minutes
 
   // Ride search & estimation
   static const double searchRadiusMeters = 5000; // 5 km

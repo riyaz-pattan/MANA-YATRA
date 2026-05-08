@@ -11,11 +11,13 @@ import 'providers/driver_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/pending_screen.dart';
+import 'screens/account_deletion_pending_screen.dart';
 import 'screens/subscription_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'utils/custom_toast.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -29,31 +31,40 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 }
 
-final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+
+  // Only await the bare essentials — dotenv + Firebase Auth need to be ready
   await dotenv.load(fileName: ".env");
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
-  
-  // Base FCM initialization
-  FirebaseMessaging messaging = FirebaseMessaging.instance;
-  await messaging.requestPermission();
 
+  // Remove splash immediately — UI is ready to render
+  FlutterNativeSplash.remove();
+  runApp(const ManaYatraDriverApp());
+
+  // Initialize FCM in the background (non-blocking)
+  _initFCM();
+}
+
+/// Sets up Firebase Cloud Messaging listeners.
+/// Called after runApp so the splash screen doesn't wait for FCM handshake.
+void _initFCM() {
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   // Handle messages when the app is in foreground
   FirebaseMessaging.onMessage.listen((RemoteMessage message) {
     final type = message.data['type'];
 
-    // New ride notification
-    // If app is in foreground, RTDB listener will pick it up instantly.
-    // We don't need to show a SnackBar or Toast to avoid redundancy.
+    // New ride notification — RTDB listener handles this in foreground
     if (type == 'new_ride') {
       return;
     }
-    
+
     if (type == 'ride_status') {
       return;
     }
@@ -64,13 +75,12 @@ void main() async {
       if (ctx != null) {
         CustomToast.show(
           context: ctx,
-          message: '${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}',
+          message:
+              '${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}',
         );
       }
     }
   });
-
-  runApp(const ManaYatraDriverApp());
 }
 
 class ManaYatraDriverApp extends StatelessWidget {
@@ -123,12 +133,32 @@ class AuthGate extends StatelessWidget {
           context.read<DriverProvider>().setUser(user);
         });
 
-        // Listen to driver profile
-        return StreamBuilder<DocumentSnapshot>(
+        // Listen to driver profile and deletion requests
+        return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
-              .collection('drivers')
-              .doc(user.uid)
+              .collection('account_deletion_requests')
+              .where('uid', isEqualTo: user.uid)
+              .where('role', isEqualTo: 'driver')
+              .where('status', isEqualTo: 'pending')
               .snapshots(),
+          builder: (context, deletionSnap) {
+            if (deletionSnap.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                body: Center(
+                  child: CircularProgressIndicator(color: AppTheme.primary),
+                ),
+              );
+            }
+
+            if (deletionSnap.hasData && deletionSnap.data!.docs.isNotEmpty) {
+              return const AccountDeletionPendingScreen();
+            }
+
+            return StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('drivers')
+                  .doc(user.uid)
+                  .snapshots(),
           builder: (context, profileSnap) {
             if (profileSnap.connectionState == ConnectionState.waiting) {
               return const Scaffold(
@@ -186,6 +216,8 @@ class AuthGate extends StatelessWidget {
 
             // All clear — show dashboard
             return const DashboardScreen();
+          },
+        );
           },
         );
       },

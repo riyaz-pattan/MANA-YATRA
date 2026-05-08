@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'config/firebase_config.dart';
 import 'config/theme.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'screens/login_screen.dart';
 import 'screens/drivers_screen.dart';
 import 'screens/users_screen.dart';
@@ -17,15 +18,26 @@ import 'screens/notification_settings_screen.dart';
 import 'screens/account_handling_screen.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+  
+  // Only await the bare essential — Firebase Auth needs to be ready
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
   
-  // Initialize FCM
-  FirebaseMessaging messaging = FirebaseMessaging.instance;
+  // Remove splash immediately — UI is ready to render
+  FlutterNativeSplash.remove();
+  runApp(const ManaYatraAdminApp());
+
+  // Initialize FCM in the background (non-blocking)
+  _initFCM();
+}
+
+/// Sets up Firebase Cloud Messaging — permission + topic subscription.
+/// Called after runApp so the splash screen doesn't wait for network calls.
+Future<void> _initFCM() async {
+  final messaging = FirebaseMessaging.instance;
   await messaging.requestPermission();
   await messaging.subscribeToTopic('admins');
-
-  runApp(const ManaYatraAdminApp());
 }
 
 class ManaYatraAdminApp extends StatelessWidget {

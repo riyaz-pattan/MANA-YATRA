@@ -5,15 +5,16 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'config/firebase_config.dart';
 import 'config/theme.dart';
 import 'providers/ride_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_screen.dart';
 import 'screens/profile_setup_screen.dart';
+import 'screens/account_deletion_pending_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'utils/custom_toast.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -24,22 +25,30 @@ final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey = GlobalKey<Sca
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+  
+  // Only await the bare essentials — dotenv + Firebase Auth need to be ready
   await dotenv.load(fileName: ".env");
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
   
-  // Base initialization (will request permissions if needed via PermissionHandler later)
-  FirebaseMessaging messaging = FirebaseMessaging.instance;
-  await messaging.requestPermission();
+  // Remove splash immediately — UI is ready to render
+  FlutterNativeSplash.remove();
+  runApp(const ManaYatraRiderApp());
 
+  // Initialize FCM in the background (non-blocking)
+  _initFCM();
+}
+
+/// Sets up Firebase Cloud Messaging listeners.
+/// Called after runApp so the splash screen doesn't wait for FCM handshake.
+void _initFCM() {
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   FirebaseMessaging.onMessage.listen((RemoteMessage message) {
     if (message.notification != null) {
       final type = message.data['type'];
       
-      // If the user is actively using the app, don't spam them with ride status popups
-      // because the UI will already be updating instantly via Firestore listeners.
       if (type == 'ride_status') {
         return;
       }
@@ -53,8 +62,6 @@ void main() async {
       }
     }
   });
-
-  runApp(const ManaYatraRiderApp());
 }
 
 class ManaYatraRiderApp extends StatelessWidget {
@@ -76,26 +83,8 @@ class ManaYatraRiderApp extends StatelessWidget {
   }
 }
 
-class AuthGate extends StatefulWidget {
+class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
-
-  @override
-  State<AuthGate> createState() => _AuthGateState();
-}
-
-class _AuthGateState extends State<AuthGate> {
-  @override
-  void initState() {
-    super.initState();
-    _requestNotificationPermission();
-  }
-
-  Future<void> _requestNotificationPermission() async {
-    final status = await Permission.notification.status;
-    if (status.isDenied) {
-      await Permission.notification.request();
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -113,11 +102,40 @@ class _AuthGateState extends State<AuthGate> {
           final user = snapshot.data!;
           // Set user in provider
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            context.read<RideProvider>().setUser(user);
+            if (context.mounted) {
+              context.read<RideProvider>().setUser(user);
+            }
           });
-          
-          // Check if user has set their name
-          return _NameCheckGate(user: user);
+
+          // Subscribe to FCM Topics
+          FirebaseMessaging.instance.subscribeToTopic('riders');
+          FirebaseMessaging.instance.subscribeToTopic('rider_${user.uid}');
+
+          // Check for pending deletion requests
+          return StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('account_deletion_requests')
+                .where('uid', isEqualTo: user.uid)
+                .where('role', isEqualTo: 'rider')
+                .where('status', isEqualTo: 'pending')
+                .snapshots(),
+            builder: (context, deletionSnap) {
+              if (deletionSnap.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(
+                    child: CircularProgressIndicator(color: AppTheme.primary),
+                  ),
+                );
+              }
+
+              if (deletionSnap.hasData && deletionSnap.data!.docs.isNotEmpty) {
+                return const AccountDeletionPendingScreen();
+              }
+
+              // Check if user has set their name
+              return _NameCheckGate(user: user);
+            },
+          );
         }
         return const LoginScreen();
       },

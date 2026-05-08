@@ -24,6 +24,23 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.0
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo/ashvo_admin.png"
+
+flutter_native_splash:
+  color: "#000000"
+  image: "assets/logo/ashvo_admin_splash.png"
+  android: true
+  ios: true
+  fullscreen: true
+  android_12:
+    image: "assets/logo/ashvo_admin_splash.png"
+    color: "#000000"
 
 flutter:
   uses-material-design: true

@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../config/theme.dart';
 import '../providers/driver_provider.dart';
 import 'profile_status_screen.dart';
+import 'delete_account_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -93,6 +94,27 @@ class ProfileScreen extends StatelessWidget {
                     ),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: AppTheme.danger),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const DeleteAccountScreen()),
+                      );
+                    },
+                    child: Text(
+                      'Delete Account',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.text3,
+                        decoration: TextDecoration.underline,
+                      ),
                     ),
                   ),
                 ),

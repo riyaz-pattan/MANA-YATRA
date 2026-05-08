@@ -143,23 +143,37 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                         ],
                       ),
-                      child: const Text('🧑‍✈️', style: TextStyle(fontSize: 52)),
+                      child: const Text(
+                        '🧑‍✈️',
+                        style: TextStyle(fontSize: 52),
+                      ),
                     ),
                     const SizedBox(height: 16),
-                    Text('Mana Yatra',
-                        style: GoogleFonts.inter(
-                            fontSize: 32,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.5)),
-                    Text('Driver',
-                        style: GoogleFonts.inter(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.primary)),
+                    Text(
+                      'Mana Yatra',
+                      style: GoogleFonts.inter(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
+                        color: const Color.fromARGB(255, 255, 255, 255),
+                      ),
+                    ),
+                    Text(
+                      'Driver',
+                      style: GoogleFonts.inter(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: const Color.fromARGB(255, 255, 255, 255),
+                      ),
+                    ),
                     const SizedBox(height: 8),
-                    Text('Earn fairly, drive freely',
-                        style: GoogleFonts.inter(
-                            fontSize: 15, color: AppTheme.text2)),
+                    Text(
+                      'Earn fairly, drive freely',
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        color: const Color.fromARGB(255, 148, 156, 168),
+                      ),
+                    ),
                     const SizedBox(height: 48),
 
                     // Card
@@ -187,7 +201,9 @@ class _LoginScreenState extends State<LoginScreen>
                                 ? 'Enter your number'
                                 : 'Verify OTP',
                             style: GoogleFonts.inter(
-                                fontSize: 20, fontWeight: FontWeight.w700),
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                           const SizedBox(height: 6),
                           Text(
@@ -195,7 +211,9 @@ class _LoginScreenState extends State<LoginScreen>
                                 ? "We'll send a 6-digit OTP via SMS"
                                 : 'OTP sent to +91 ${_phoneController.text}',
                             style: GoogleFonts.inter(
-                                fontSize: 14, color: AppTheme.text2),
+                              fontSize: 14,
+                              color: AppTheme.text2,
+                            ),
                           ),
                           const SizedBox(height: 28),
                           if (_step == 'phone') ...[
@@ -207,27 +225,37 @@ class _LoginScreenState extends State<LoginScreen>
                               style: GoogleFonts.inter(fontSize: 16),
                               decoration: InputDecoration(
                                 prefixIcon: Padding(
-                                  padding:
-                                      const EdgeInsets.only(left: 16, right: 8),
-                                  child: Text('+91',
-                                      style: GoogleFonts.inter(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 15,
-                                          color: AppTheme.text2)),
+                                  padding: const EdgeInsets.only(
+                                    left: 16,
+                                    right: 8,
+                                  ),
+                                  child: Text(
+                                    '+91',
+                                    style: GoogleFonts.inter(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 15,
+                                      color: AppTheme.text2,
+                                    ),
+                                  ),
                                 ),
-                                prefixIconConstraints:
-                                    const BoxConstraints(minWidth: 0),
+                                prefixIconConstraints: const BoxConstraints(
+                                  minWidth: 0,
+                                ),
                                 hintText: '9876543210',
                                 counterText: '',
                               ),
                               onSubmitted: (_) => _sendOtp(),
                             ),
                             const SizedBox(height: 16),
-                            _btn('Send OTP →', _sendOtp,
-                                enabled: _phoneController.text
-                                        .replaceAll(RegExp(r'\D'), '')
-                                        .length >=
-                                    10),
+                            _btn(
+                              'Send OTP →',
+                              _sendOtp,
+                              enabled:
+                                  _phoneController.text
+                                      .replaceAll(RegExp(r'\D'), '')
+                                      .length >=
+                                  10,
+                            ),
                           ] else ...[
                             PinCodeTextField(
                               appContext: context,
@@ -253,11 +281,16 @@ class _LoginScreenState extends State<LoginScreen>
                               ),
                               enableActiveFill: true,
                               textStyle: GoogleFonts.inter(
-                                  fontSize: 22, fontWeight: FontWeight.w700),
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                             const SizedBox(height: 16),
-                            _btn('Verify & Continue →', _verifyOtp,
-                                enabled: _otpController.text.length == 6),
+                            _btn(
+                              'Verify & Continue →',
+                              _verifyOtp,
+                              enabled: _otpController.text.length == 6,
+                            ),
                             const SizedBox(height: 10),
                             SizedBox(
                               width: double.infinity,
@@ -269,10 +302,13 @@ class _LoginScreenState extends State<LoginScreen>
                                     _error = '';
                                   });
                                 },
-                                child: Text('← Change number',
-                                    style: GoogleFonts.inter(
-                                        color: AppTheme.text2,
-                                        fontWeight: FontWeight.w600)),
+                                child: Text(
+                                  '← Change number',
+                                  style: GoogleFonts.inter(
+                                    color: AppTheme.text2,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ),
                             ),
                           ],
@@ -284,12 +320,17 @@ class _LoginScreenState extends State<LoginScreen>
                                 color: AppTheme.danger.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
-                                    color: AppTheme.danger.withValues(alpha: 0.3)),
+                                  color: AppTheme.danger.withValues(alpha: 0.3),
+                                ),
                               ),
-                              child: Text(_error,
-                                  textAlign: TextAlign.center,
-                                  style: GoogleFonts.inter(
-                                      color: AppTheme.danger, fontSize: 13)),
+                              child: Text(
+                                _error,
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.inter(
+                                  color: AppTheme.danger,
+                                  fontSize: 13,
+                                ),
+                              ),
                             ),
                           ],
                         ],
@@ -316,7 +357,10 @@ class _LoginScreenState extends State<LoginScreen>
                 width: 22,
                 height: 22,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2.5, color: Colors.white))
+                  strokeWidth: 2.5,
+                  color: Colors.white,
+                ),
+              )
             : Text(label),
       ),
     );
