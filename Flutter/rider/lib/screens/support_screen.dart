@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/theme.dart';
+import '../config/constants.dart';
 
 class SupportScreen extends StatelessWidget {
   const SupportScreen({super.key});
@@ -29,9 +30,9 @@ class SupportScreen extends StatelessWidget {
           _buildContactCard(
             icon: Icons.phone,
             title: 'Call Support',
-            subtitle: '+91 8000 000 000',
+            subtitle: AppConstants.supportNumber,
             onTap: () async {
-              final Uri launchUri = Uri(scheme: 'tel', path: '+918000000000');
+              final Uri launchUri = Uri(scheme: 'tel', path: AppConstants.supportNumber.replaceAll(' ', ''));
               if (await canLaunchUrl(launchUri)) {
                 await launchUrl(launchUri);
               }

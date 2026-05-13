@@ -223,6 +223,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     // If going online, check location permission first
     if (goingOnline) {
+      if (!provider.isSubscriptionActive) {
+        if (mounted) {
+          CustomToast.show(
+            context: context,
+            message: 'Your subscription is expired. Please renew to go online.',
+            isError: true,
+          );
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+          );
+        }
+        return;
+      }
+
       if (!_locationGranted) {
         // Try to get location permission
         await _getCurrentLocation();

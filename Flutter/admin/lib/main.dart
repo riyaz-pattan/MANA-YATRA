@@ -20,10 +20,10 @@ import 'screens/account_handling_screen.dart';
 void main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
-  
+
   // Only await the bare essential — Firebase Auth needs to be ready
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
-  
+
   // Remove splash immediately — UI is ready to render
   FlutterNativeSplash.remove();
   runApp(const ManaYatraAdminApp());

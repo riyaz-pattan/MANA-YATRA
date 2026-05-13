@@ -13,7 +13,19 @@ class DocumentManagementScreen extends StatefulWidget {
 }
 
 class _DocumentManagementScreenState extends State<DocumentManagementScreen> {
-  String _filter = 'pending'; // pending | approved | blocked
+  String _filter = 'pending'; // pending | approved | rejected | blocked
+
+  // Pre-filled rejection reasons
+  static const List<String> _rejectionReasons = [
+    'Selfie does not match Aadhaar/License photo',
+    'Name does not match documents',
+    'Documents are blurred or unreadable',
+    'Incomplete or missing documents',
+    'Vehicle number not clearly visible in vehicle photo',
+    'Vehicle photo is missing or unclear',
+    'Aadhaar card details are invalid',
+    'Driving license has expired',
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -39,17 +51,25 @@ class _DocumentManagementScreenState extends State<DocumentManagementScreen> {
         final filtered = allDrivers.where((d) {
           final isAppr = d['isApproved'] == true;
           final isBlk = d['isBlocked'] == true;
-          if (_filter == 'pending') return !isAppr && !isBlk;
+          final isRej = d['isRejected'] == true;
+          if (_filter == 'pending') return !isAppr && !isBlk && !isRej;
           if (_filter == 'approved') return isAppr && !isBlk;
+          if (_filter == 'rejected') return isRej && !isBlk;
           if (_filter == 'blocked') return isBlk;
           return true;
         }).toList();
 
         final pendingCount = allDrivers
-            .where((d) => d['isApproved'] != true && d['isBlocked'] != true)
+            .where((d) =>
+                d['isApproved'] != true &&
+                d['isBlocked'] != true &&
+                d['isRejected'] != true)
             .length;
         final approvedCount = allDrivers
             .where((d) => d['isApproved'] == true && d['isBlocked'] != true)
+            .length;
+        final rejectedCount = allDrivers
+            .where((d) => d['isRejected'] == true && d['isBlocked'] != true)
             .length;
         final blockedCount =
             allDrivers.where((d) => d['isBlocked'] == true).length;
@@ -88,6 +108,7 @@ class _DocumentManagementScreenState extends State<DocumentManagementScreen> {
                   children: [
                     _filterTab('Pending', pendingCount, 'pending'),
                     _filterTab('Approved', approvedCount, 'approved'),
+                    _filterTab('Rejected', rejectedCount, 'rejected'),
                     _filterTab('Blocked', blockedCount, 'blocked'),
                   ],
                 ),
@@ -141,7 +162,7 @@ class _DocumentManagementScreenState extends State<DocumentManagementScreen> {
               Text(
                 label,
                 style: GoogleFonts.inter(
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                   color: isActive ? AppTheme.text : AppTheme.text3,
                 ),
@@ -191,12 +212,17 @@ class _DocumentManagementScreenState extends State<DocumentManagementScreen> {
     final selfieUrl = docs['selfieUrl'] as String?;
     final isAppr = d['isApproved'] == true;
     final isBlk = d['isBlocked'] == true;
+    final isRej = d['isRejected'] == true;
+    final rejectionReason = d['rejectionReason'] as String?;
 
     String statusLabel;
     Color statusColor;
     if (isBlk) {
       statusLabel = 'Blocked';
       statusColor = AppTheme.danger;
+    } else if (isRej) {
+      statusLabel = 'Rejected';
+      statusColor = const Color(0xFFDC2626);
     } else if (isAppr) {
       statusLabel = 'Approved';
       statusColor = AppTheme.success;
@@ -294,22 +320,87 @@ class _DocumentManagementScreenState extends State<DocumentManagementScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
+                // Row 1: Selfie, Aadhaar, License
                 Row(
                   children: [
                     _docThumbnail('Selfie', docs['selfieUrl'], Icons.person),
                     const SizedBox(width: 10),
-                    _docThumbnail(
-                        'Aadhaar', docs['aadharUrl'], Icons.credit_card),
+                    _docThumbnail('Aadhaar', docs['aadharUrl'], Icons.credit_card),
                     const SizedBox(width: 10),
-                    _docThumbnail(
-                        'License', docs['licenseUrl'], Icons.badge),
+                    _docThumbnail('License', docs['licenseUrl'], Icons.badge),
                   ],
                 ),
+                // Row 2: Vehicle photo (if present)
+                if (docs['vehicleUrl'] != null && (docs['vehicleUrl'] as String).isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      _docThumbnail('Vehicle', docs['vehicleUrl'], Icons.directions_car),
+                      const SizedBox(width: 10),
+                      const Expanded(child: SizedBox()),
+                      const Expanded(child: SizedBox()),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
 
-          // ── Action Buttons (only for pending) ──
+          // ── Show rejection reason for rejected drivers ──
+          if (isRej && rejectionReason != null && rejectionReason.isNotEmpty) ...[
+            Container(height: 1, color: AppTheme.borderLight),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.danger.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: AppTheme.danger.withValues(alpha: 0.15),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: AppTheme.danger.withValues(alpha: 0.7),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Rejection Reason',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.danger,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            rejectionReason,
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: AppTheme.text2,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+
+          // ── Action Buttons (pending OR rejected — allow re-evaluation) ──
           if (!isAppr && !isBlk) ...[
             Container(height: 1, color: AppTheme.borderLight),
             Padding(
@@ -318,11 +409,10 @@ class _DocumentManagementScreenState extends State<DocumentManagementScreen> {
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: () =>
-                          _updateDriverStatus(d['id'], false, true),
+                      onPressed: () => _showRejectionSheet(d['id'], name),
                       icon: const Icon(Icons.close, size: 16),
                       label: Text(
-                        'Reject',
+                        isRej ? 'Re-Reject' : 'Reject',
                         style: GoogleFonts.inter(fontWeight: FontWeight.w600),
                       ),
                       style: OutlinedButton.styleFrom(
@@ -525,10 +615,300 @@ class _DocumentManagementScreenState extends State<DocumentManagementScreen> {
     );
   }
 
+  // ── Rejection Bottom Sheet ──
+  void _showRejectionSheet(String driverId, String driverName) {
+    List<String> selectedReasons = [];
+    final customReasonController = TextEditingController();
+    bool submitting = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                24,
+                24,
+                24,
+                MediaQuery.of(ctx).viewInsets.bottom +
+                    MediaQuery.of(ctx).padding.bottom +
+                    20,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Drag handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppTheme.text3,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Title
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.danger.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.cancel_outlined,
+                          color: AppTheme.danger,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Reject Application',
+                              style: GoogleFonts.inter(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              driverName,
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                color: AppTheme.text3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Section label
+                  Text(
+                    'Select reasons (Multiple allowed)',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.text2,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Pre-filled reason chips
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _rejectionReasons.map((reason) {
+                      final isSelected = selectedReasons.contains(reason);
+                      return GestureDetector(
+                        onTap: () {
+                          setSheetState(() {
+                            if (isSelected) {
+                              selectedReasons.remove(reason);
+                            } else {
+                              selectedReasons.add(reason);
+                            }
+                          });
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? AppTheme.danger.withValues(alpha: 0.1)
+                                : AppTheme.surface,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: isSelected
+                                  ? AppTheme.danger
+                                  : AppTheme.border,
+                              width: isSelected ? 1.5 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isSelected
+                                    ? Icons.check_circle
+                                    : Icons.circle_outlined,
+                                size: 16,
+                                color: isSelected
+                                    ? AppTheme.danger
+                                    : AppTheme.text3,
+                              ),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  reason,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    fontWeight: isSelected
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    color: isSelected
+                                        ? AppTheme.danger
+                                        : AppTheme.text2,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Custom reason
+                  Text(
+                    'Additional Comments',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.text2,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: customReasonController,
+                    maxLines: 3,
+                    style: GoogleFonts.inter(fontSize: 14),
+                    decoration: InputDecoration(
+                      hintText: 'Type any specific details...',
+                      hintStyle: GoogleFonts.inter(
+                        fontSize: 13,
+                        color: AppTheme.text3,
+                      ),
+                      filled: true,
+                      fillColor: AppTheme.bg2,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppTheme.border),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppTheme.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: AppTheme.danger,
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Submit button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton.icon(
+                      onPressed: submitting
+                          ? null
+                          : () async {
+                              // Combine selected reasons + custom text
+                              List<String> allReasons = List.from(selectedReasons);
+                              if (customReasonController.text.trim().isNotEmpty) {
+                                allReasons.add(customReasonController.text.trim());
+                              }
+
+                              if (allReasons.isEmpty) {
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Please select at least one reason',
+                                      style: GoogleFonts.inter(),
+                                    ),
+                                    backgroundColor: AppTheme.danger,
+                                  ),
+                                );
+                                return;
+                              }
+
+                              // Format reason string: join with newlines for clean list display
+                              final combinedReason = allReasons.length == 1 
+                                  ? allReasons.first 
+                                  : allReasons.map((r) => '• $r').join('\n');
+
+                              setSheetState(() => submitting = true);
+
+                              await FirebaseFirestore.instance
+                                  .collection('drivers')
+                                  .doc(driverId)
+                                  .update({
+                                'isApproved': false,
+                                'isBlocked': false,
+                                'isRejected': true,
+                                'rejectionReason': combinedReason,
+                                'rejectedAt': FieldValue.serverTimestamp(),
+                              });
+
+                              if (ctx.mounted) Navigator.pop(ctx);
+                            },
+                      icon: submitting
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.cancel_outlined, size: 18),
+                      label: Text(
+                        submitting ? 'Rejecting...' : 'Reject Application',
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.danger,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _updateDriverStatus(String id, bool isApproved, bool isBlocked) {
     FirebaseFirestore.instance.collection('drivers').doc(id).update({
       'isApproved': isApproved,
       'isBlocked': isBlocked,
+      'isRejected': false,
+      'rejectionReason': null,
     });
   }
 }

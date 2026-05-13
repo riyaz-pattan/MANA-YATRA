@@ -19,11 +19,63 @@ class SubscriptionScreen extends StatefulWidget {
 class _SubscriptionScreenState extends State<SubscriptionScreen> {
   bool _processing = false;
   int _selectedDays = 7;
+  bool _activatingTrial = false;
   final _plans = [
     {'days': 1, 'label': '1 Day', 'emoji': '🌅'},
     {'days': 7, 'label': '7 Days', 'emoji': '📅'},
     {'days': 30, 'label': '30 Days', 'emoji': '🗓️'},
   ];
+
+  bool get _hasFreeTrialUsed {
+    final provider = context.read<DriverProvider>();
+    return provider.profile?['hasFreeTrialUsed'] == true;
+  }
+
+  Future<void> _activateFreeTrial() async {
+    setState(() => _activatingTrial = true);
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final now = DateTime.now();
+      final until = now.add(const Duration(days: 7));
+
+      final batch = FirebaseFirestore.instance.batch();
+      batch.update(
+        FirebaseFirestore.instance.collection('drivers').doc(uid),
+        {
+          'subscriptionActiveUntil': Timestamp.fromDate(until),
+          'hasFreeTrialUsed': true,
+        },
+      );
+      batch.set(
+        FirebaseFirestore.instance.collection('payments').doc(),
+        {
+          'driverId': uid,
+          'amount': 0,
+          'days': 7,
+          'type': 'free_trial',
+          'method': 'free',
+          'createdAt': FieldValue.serverTimestamp(),
+        },
+      );
+      await batch.commit();
+
+      if (mounted) {
+        CustomToast.show(
+          context: context,
+          message: '🎉 7-day free trial activated!',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        CustomToast.show(
+          context: context,
+          message: 'Failed to activate trial. Try again.',
+          isError: true,
+        );
+      }
+    }
+    if (mounted) setState(() => _activatingTrial = false);
+  }
 
   Future<void> _subscribe() async {
     setState(() => _processing = true);
@@ -175,6 +227,192 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     );
   }
 
+  Widget _buildFreeTrialCard() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF6C63FF),
+            Color(0xFF9B59B6),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF6C63FF).withValues(alpha: 0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          // Decorative circles
+          Positioned(
+            top: -20,
+            right: -20,
+            child: Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.1),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -30,
+            left: -15,
+            child: Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.08),
+              ),
+            ),
+          ),
+          // Content
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.star,
+                        size: 14,
+                        color: Colors.amber,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'FREE TRIAL',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                Text(
+                  'Start Your 7-Day\nFree Trial',
+                  style: GoogleFonts.inter(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                Text(
+                  'Experience all features for free. No credit card or payment required!',
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    color: Colors.white.withValues(alpha: 0.85),
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                // Benefits
+                _trialBenefit('Go online & receive rides'),
+                _trialBenefit('Full access for 7 days'),
+                _trialBenefit('No payment needed'),
+                const SizedBox(height: 20),
+
+                // CTA Button
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: _activatingTrial ? null : _activateFreeTrial,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFF6C63FF),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: _activatingTrial
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Color(0xFF6C63FF),
+                            ),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.rocket_launch, size: 20),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Start Free Trial',
+                                style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _trialBenefit(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          Icon(
+            Icons.check_circle,
+            size: 16,
+            color: Colors.white.withValues(alpha: 0.9),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: Colors.white.withValues(alpha: 0.9),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActiveStatus(DriverProvider provider) {
     DateTime? until;
     if (provider.profile != null && provider.profile!['subscriptionActiveUntil'] != null) {
@@ -252,7 +490,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       stream: FirebaseFirestore.instance
           .collection('payments')
           .where('driverId', isEqualTo: uid)
-          .where('type', isEqualTo: 'subscription')
+          .where('type', whereIn: ['subscription', 'free_trial'])
           .orderBy('createdAt', descending: true)
           .limit(20)
           .snapshots(),
@@ -281,6 +519,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               final date = (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
               final amount = data['amount'] ?? 0;
               final days = data['days'] ?? 0;
+              final isFreeTrial = data['type'] == 'free_trial';
               
               return Container(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -295,23 +534,36 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: AppTheme.success.withValues(alpha: 0.1),
+                        color: (isFreeTrial ? AppTheme.accent : AppTheme.success).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Icon(Icons.receipt_long, color: AppTheme.success),
+                      child: Icon(
+                        isFreeTrial ? Icons.star : Icons.receipt_long,
+                        color: isFreeTrial ? AppTheme.accent : AppTheme.success,
+                      ),
                     ),
                     const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('$days Days Plan', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15)),
+                          Text(
+                            isFreeTrial ? '7 Days Free Trial' : '$days Days Plan',
+                            style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15),
+                          ),
                           const SizedBox(height: 4),
                           Text(DateFormat('dd MMM yyyy, hh:mm a').format(date), style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 12)),
                         ],
                       ),
                     ),
-                    Text('₹$amount', style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 16, color: AppTheme.success)),
+                    Text(
+                      isFreeTrial ? 'FREE' : '₹$amount',
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                        color: isFreeTrial ? AppTheme.accent : AppTheme.success,
+                      ),
+                    ),
                   ],
                 ),
               );
@@ -347,7 +599,12 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildActiveStatus(provider),
+                // Show free trial card if not yet used and subscription is expired
+                if (!_hasFreeTrialUsed && !provider.isSubscriptionActive)
+                  _buildFreeTrialCard(),
+                // Show status card only after trial has been used or sub is active
+                if (_hasFreeTrialUsed || provider.isSubscriptionActive)
+                  _buildActiveStatus(provider),
                 const SizedBox(height: 32),
                 _buildHistory(),
               ],

@@ -1,4 +1,4 @@
-// lib/providers/driver_provider.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -22,6 +22,7 @@ class DriverProvider extends ChangeNotifier {
   double? _lat;
   double? _lng;
   Map<String, dynamic>? _activeRide;
+  StreamSubscription<DocumentSnapshot>? _profileSubscription;
 
   // Getters
   User? get user => _user;
@@ -53,13 +54,35 @@ class DriverProvider extends ChangeNotifier {
   void setUser(User? user) {
     _user = user;
     _authLoading = false;
-    if (user != null && _tracker == null) {
-      _tracker = SmartTracker(user.uid);
-      _tracker!.onLocationUpdate = (lat, lng) {
-        _lat = lat;
-        _lng = lng;
-        notifyListeners();
-      };
+    
+    // Cancel existing subscription if any
+    _profileSubscription?.cancel();
+    
+    if (user != null) {
+      if (_tracker == null) {
+        _tracker = SmartTracker(user.uid);
+        _tracker!.onLocationUpdate = (lat, lng) {
+          _lat = lat;
+          _lng = lng;
+          notifyListeners();
+        };
+      }
+      
+      // Start real-time profile listener
+      _profileSubscription = FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(user.uid)
+          .snapshots()
+          .listen((snap) {
+        if (snap.exists) {
+          setProfile(snap.data() as Map<String, dynamic>?);
+        }
+      });
+    } else {
+      _profile = null;
+      _driverState = DriverState.offline;
+      _tracker?.destroy();
+      _tracker = null;
     }
     notifyListeners();
   }
@@ -113,6 +136,7 @@ class DriverProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    _profileSubscription?.cancel();
     _tracker?.destroy();
     super.dispose();
   }

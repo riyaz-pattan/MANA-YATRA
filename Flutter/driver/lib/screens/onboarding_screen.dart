@@ -12,7 +12,9 @@ import '../config/theme.dart';
 import '../config/constants.dart';
 
 class OnboardingScreen extends StatefulWidget {
-  const OnboardingScreen({super.key});
+  final bool isResubmission;
+
+  const OnboardingScreen({super.key, this.isResubmission = false});
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
@@ -24,10 +26,55 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   File? _selfieFile;
   File? _aadharFile;
   File? _licenseFile;
+  File? _vehicleFile;
+  String? _existingSelfieUrl;
+  String? _existingAadharUrl;
+  String? _existingLicenseUrl;
+  String? _existingVehicleUrl;
+  String? _rejectionReason;
   bool _submitting = false;
   String _error = '';
   double _uploadProgress = 0;
   final _picker = ImagePicker();
+  bool _loadingProfile = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isResubmission) {
+      _prefillFromExistingProfile();
+    }
+  }
+
+  Future<void> _prefillFromExistingProfile() async {
+    setState(() => _loadingProfile = true);
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+      final doc = await FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(uid)
+          .get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        _nameController.text = data['name'] ?? '';
+        _vehicleNumberController.text = data['vehicleNumber'] ?? '';
+        if (data['vehicleType'] != null &&
+            AppConstants.vehicleTypes.containsKey(data['vehicleType'])) {
+          _vehicleType = data['vehicleType'];
+        }
+        final docs = data['documents'] as Map<String, dynamic>?;
+        if (docs != null) {
+          _existingSelfieUrl = docs['selfieUrl'];
+          _existingAadharUrl = docs['aadharUrl'];
+          _existingLicenseUrl = docs['licenseUrl'];
+          _existingVehicleUrl = docs['vehicleUrl'];
+        }
+        _rejectionReason = data['rejectionReason'];
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _loadingProfile = false);
+  }
 
   @override
   void dispose() {
@@ -59,9 +106,79 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
+  /// Show a dialog to choose Camera or Gallery for selfie
   Future<void> _pickSelfie() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: AppTheme.bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.text3,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Choose Photo Source',
+                  style: GoogleFonts.inter(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Take a selfie or choose from gallery',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: AppTheme.text3,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _sourceOption(
+                        icon: Icons.camera_alt_outlined,
+                        label: 'Camera',
+                        onTap: () =>
+                            Navigator.pop(ctx, ImageSource.camera),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _sourceOption(
+                        icon: Icons.photo_library_outlined,
+                        label: 'Gallery',
+                        onTap: () =>
+                            Navigator.pop(ctx, ImageSource.gallery),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (source == null) return;
+
     final picked = await _picker.pickImage(
-      source: ImageSource.camera,
+      source: source,
       preferredCameraDevice: CameraDevice.front,
       maxWidth: 1200,
       imageQuality: 70,
@@ -69,6 +186,38 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (picked != null) {
       setState(() => _selfieFile = File(picked.path));
     }
+  }
+
+  Widget _sourceOption({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, size: 32, color: AppTheme.primary),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.text,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _pickDocument(String type) async {
@@ -86,6 +235,53 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         }
       });
     }
+  }
+
+  /// Pick the vehicle image — allows both Camera and Gallery
+  Future<void> _pickVehicleImage() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: AppTheme.bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(color: AppTheme.text3, borderRadius: BorderRadius.circular(2)),
+                ),
+                const SizedBox(height: 20),
+                Text('Vehicle Photo Source', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                Text('Make sure the number plate is clearly visible', style: GoogleFonts.inter(fontSize: 13, color: AppTheme.text3)),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(child: _sourceOption(icon: Icons.camera_alt_outlined, label: 'Camera', onTap: () => Navigator.pop(ctx, ImageSource.camera))),
+                    const SizedBox(width: 12),
+                    Expanded(child: _sourceOption(icon: Icons.photo_library_outlined, label: 'Gallery', onTap: () => Navigator.pop(ctx, ImageSource.gallery))),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (source == null) return;
+    final picked = await _picker.pickImage(
+      source: source,
+      maxWidth: 1600,
+      imageQuality: 75,
+    );
+    if (picked != null) setState(() => _vehicleFile = File(picked.path));
   }
 
   Future<String?> _uploadFile(File file, String path) async {
@@ -108,12 +304,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       setState(() => _error = 'Please enter your vehicle number');
       return;
     }
-    if (_selfieFile == null) {
+    if (_selfieFile == null && _existingSelfieUrl == null) {
       setState(() => _error = 'Please take a selfie');
       return;
     }
-    if (_aadharFile == null || _licenseFile == null) {
-      setState(() => _error = 'Please upload both documents');
+    if ((_aadharFile == null && _existingAadharUrl == null) || 
+        (_licenseFile == null && _existingLicenseUrl == null)) {
+      setState(() => _error = 'Please upload Aadhaar Card and Driving License');
+      return;
+    }
+    if (_vehicleFile == null && _existingVehicleUrl == null) {
+      setState(() => _error = 'Please upload a vehicle photo showing the number plate');
       return;
     }
     setState(() {
@@ -126,23 +327,28 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       final phone = FirebaseAuth.instance.currentUser!.phoneNumber;
 
       setState(() => _uploadProgress = 0.1);
-      final selfieUrl = await _uploadFile(
-        _selfieFile!,
-        'drivers/$uid/selfie.jpg',
-      );
-      setState(() => _uploadProgress = 0.4);
-      final aadharUrl = await _uploadFile(
-        _aadharFile!,
-        'drivers/$uid/aadhar.jpg',
-      );
-      setState(() => _uploadProgress = 0.7);
-      final licenseUrl = await _uploadFile(
-        _licenseFile!,
-        'drivers/$uid/license.jpg',
-      );
+      final selfieUrl = _selfieFile != null 
+          ? await _uploadFile(_selfieFile!, 'drivers/$uid/selfie.jpg')
+          : _existingSelfieUrl;
+
+      setState(() => _uploadProgress = 0.35);
+      final aadharUrl = _aadharFile != null 
+          ? await _uploadFile(_aadharFile!, 'drivers/$uid/aadhar.jpg')
+          : _existingAadharUrl;
+
+      setState(() => _uploadProgress = 0.6);
+      final licenseUrl = _licenseFile != null 
+          ? await _uploadFile(_licenseFile!, 'drivers/$uid/license.jpg')
+          : _existingLicenseUrl;
+
+      setState(() => _uploadProgress = 0.8);
+      final vehicleUrl = _vehicleFile != null 
+          ? await _uploadFile(_vehicleFile!, 'drivers/$uid/vehicle.jpg')
+          : _existingVehicleUrl;
+
       setState(() => _uploadProgress = 0.9);
 
-      await FirebaseFirestore.instance.collection('drivers').doc(uid).set({
+      final profileData = {
         'name': _nameController.text.trim(),
         'phone': phone,
         'vehicleType': _vehicleType,
@@ -151,13 +357,36 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           'selfieUrl': selfieUrl,
           'aadharUrl': aadharUrl,
           'licenseUrl': licenseUrl,
+          'vehicleUrl': vehicleUrl,
         },
         'isApproved': false,
         'isBlocked': false,
+        'isRejected': false,
+        'rejectionReason': null,
         'isOnline': false,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      };
+
+      if (widget.isResubmission) {
+        // Merge so we don't overwrite createdAt, subscription fields, etc.
+        await FirebaseFirestore.instance
+            .collection('drivers')
+            .doc(uid)
+            .set(profileData, SetOptions(merge: true));
+      } else {
+        // First time — include createdAt
+        profileData['createdAt'] = FieldValue.serverTimestamp();
+        await FirebaseFirestore.instance
+            .collection('drivers')
+            .doc(uid)
+            .set(profileData);
+      }
+
       setState(() => _uploadProgress = 1.0);
+
+      // If resubmission, pop back (AuthGate stream will handle navigation)
+      if (widget.isResubmission && mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     } catch (e) {
       setState(() {
         _error = 'Failed to submit. Try again.';
@@ -169,6 +398,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loadingProfile) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(color: AppTheme.primary),
+        ),
+      );
+    }
+
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -184,11 +421,29 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 20),
+                // Back button for resubmission
+                if (widget.isResubmission) ...[
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surface,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.arrow_back, size: 20),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
+                const SizedBox(height: 4),
                 const Text('🧑‍✈️', style: TextStyle(fontSize: 40)),
                 const SizedBox(height: 12),
                 Text(
-                  'Complete Your Profile',
+                  widget.isResubmission
+                      ? 'Resubmit Your Documents'
+                      : 'Complete Your Profile',
                   style: GoogleFonts.inter(
                     fontSize: 26,
                     fontWeight: FontWeight.w800,
@@ -196,16 +451,64 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Tell us about yourself and your vehicle',
+                  widget.isResubmission
+                      ? 'Please upload clear photos to get approved'
+                      : 'Tell us about yourself and your vehicle',
                   style: GoogleFonts.inter(fontSize: 15, color: AppTheme.text2),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
+
+                // Rejection reasons display for resubmission
+                if (widget.isResubmission && _rejectionReason != null && _rejectionReason!.isNotEmpty) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.danger.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: AppTheme.danger.withValues(alpha: 0.15),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.info_outline, size: 16, color: AppTheme.danger),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Reasons for Rejection',
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.danger,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          _rejectionReason!,
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            color: AppTheme.text,
+                            height: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                ] else ...[
+                  const SizedBox(height: 8),
+                ],
 
                 // Selfie
                 _label('Your Photo'),
                 _hintNote(
                   Icons.camera_alt_outlined,
-                  'Take a clear selfie. Must match your Aadhaar & Driving License photo.',
+                  'Take a clear selfie or choose from gallery. Must match your Aadhaar & Driving License photo.',
                 ),
                 const SizedBox(height: 12),
                 Center(child: _selfieCapture()),
@@ -301,21 +604,77 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: _docUploader(
-                        'Aadhaar Card',
-                        _aadharFile,
-                        'aadhar',
-                      ),
+                      child: _docUploader('Aadhaar Card', _aadharFile, 'aadhar'),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: _docUploader(
-                        'Driving License',
-                        _licenseFile,
-                        'license',
-                      ),
+                      child: _docUploader('Driving License', _licenseFile, 'license'),
                     ),
                   ],
+                ),
+                const SizedBox(height: 20),
+
+                // Vehicle photo
+                _label('Vehicle Photo'),
+                _hintNote(
+                  Icons.directions_car_outlined,
+                  'Photo must show the vehicle clearly with the number plate fully visible. This helps verify your vehicle details.',
+                ),
+                const SizedBox(height: 12),
+                GestureDetector(
+                  onTap: _pickVehicleImage,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: double.infinity,
+                    height: 140,
+                    decoration: BoxDecoration(
+                      color: (_vehicleFile != null || _existingVehicleUrl != null)
+                          ? AppTheme.success.withValues(alpha: 0.08)
+                          : AppTheme.surface,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: (_vehicleFile != null || _existingVehicleUrl != null) ? AppTheme.success : AppTheme.border,
+                        width: (_vehicleFile != null || _existingVehicleUrl != null) ? 2 : 1,
+                      ),
+                    ),
+                    child: (_vehicleFile != null || _existingVehicleUrl != null)
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(13),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                _vehicleFile != null 
+                                    ? Image.file(_vehicleFile!, fit: BoxFit.cover)
+                                    : Image.network(_existingVehicleUrl!, fit: BoxFit.cover),
+                                Container(
+                                  color: Colors.black.withValues(alpha: 0.35),
+                                  child: Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.check_circle, color: AppTheme.success, size: 32),
+                                        const SizedBox(height: 6),
+                                        Text(_vehicleFile != null ? 'Vehicle photo added' : 'Existing photo kept', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
+                                        const SizedBox(height: 2),
+                                        Text('Tap to change', style: GoogleFonts.inter(fontSize: 10, color: Colors.white70)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.directions_car_outlined, color: AppTheme.text3, size: 36),
+                              const SizedBox(height: 8),
+                              Text('Tap to add vehicle photo', style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 13, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 4),
+                              Text('Camera or Gallery', style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 11)),
+                            ],
+                          ),
+                  ),
                 ),
                 const SizedBox(height: 32),
 
@@ -383,7 +742,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             ),
                           )
                         : Text(
-                            'Submit for Review →',
+                            widget.isResubmission
+                                ? 'Resubmit for Review →'
+                                : 'Submit for Review →',
                             style: GoogleFonts.inter(
                               fontWeight: FontWeight.w700,
                               fontSize: 16,
@@ -395,9 +756,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: TextButton(
-                    onPressed: () => FirebaseAuth.instance.signOut(),
+                    onPressed: () {
+                      if (widget.isResubmission) {
+                        Navigator.of(context).pop();
+                      } else {
+                        FirebaseAuth.instance.signOut();
+                      }
+                    },
                     child: Text(
-                      'Logout',
+                      widget.isResubmission ? 'Go Back' : 'Logout',
                       style: GoogleFonts.inter(color: AppTheme.text3),
                     ),
                   ),
@@ -449,6 +816,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Widget _selfieCapture() {
+    final bool hasImage = _selfieFile != null || _existingSelfieUrl != null;
     return GestureDetector(
       onTap: _pickSelfie,
       child: AnimatedContainer(
@@ -457,14 +825,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         height: 140,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: _selfieFile != null
+          color: hasImage
               ? AppTheme.success.withValues(alpha: 0.1)
               : AppTheme.surface,
           border: Border.all(
-            color: _selfieFile != null ? AppTheme.success : AppTheme.border,
-            width: _selfieFile != null ? 3 : 2,
+            color: hasImage ? AppTheme.success : AppTheme.border,
+            width: hasImage ? 3 : 2,
           ),
-          boxShadow: _selfieFile != null
+          boxShadow: hasImage
               ? [
                   BoxShadow(
                     color: AppTheme.success.withValues(alpha: 0.2),
@@ -474,12 +842,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ]
               : null,
         ),
-        child: _selfieFile != null
+        child: hasImage
             ? ClipOval(
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.file(_selfieFile!, fit: BoxFit.cover),
+                    _selfieFile != null 
+                        ? Image.file(_selfieFile!, fit: BoxFit.cover)
+                        : Image.network(_existingSelfieUrl!, fit: BoxFit.cover),
                     Positioned(
                       bottom: 0,
                       left: 0,
@@ -506,7 +876,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              'Retake',
+                              _selfieFile != null ? 'Change' : 'Existing',
                               style: GoogleFonts.inter(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,
@@ -524,13 +894,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Icon(
-                    Icons.camera_alt_outlined,
+                    Icons.add_a_photo_outlined,
                     color: AppTheme.text3,
                     size: 36,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Take Selfie',
+                    'Add Photo',
                     style: GoogleFonts.inter(
                       color: AppTheme.text3,
                       fontSize: 12,
@@ -544,28 +914,36 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Widget _docUploader(String label, File? file, String type) {
+    String? existingUrl;
+    if (type == 'aadhar') existingUrl = _existingAadharUrl;
+    if (type == 'license') existingUrl = _existingLicenseUrl;
+
+    final bool hasImage = file != null || existingUrl != null;
+
     return GestureDetector(
       onTap: () => _pickDocument(type),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         height: 120,
         decoration: BoxDecoration(
-          color: file != null
+          color: hasImage
               ? AppTheme.success.withValues(alpha: 0.1)
               : AppTheme.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: file != null ? AppTheme.success : AppTheme.border,
-            width: file != null ? 2 : 1,
+            color: hasImage ? AppTheme.success : AppTheme.border,
+            width: hasImage ? 2 : 1,
           ),
         ),
-        child: file != null
+        child: hasImage
             ? ClipRRect(
                 borderRadius: BorderRadius.circular(13),
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.file(file, fit: BoxFit.cover),
+                    file != null 
+                        ? Image.file(file, fit: BoxFit.cover)
+                        : Image.network(existingUrl!, fit: BoxFit.cover),
                     Container(
                       color: Colors.black.withValues(alpha: 0.4),
                       child: Center(
@@ -588,7 +966,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              'Tap to change',
+                              file != null ? 'Tap to change' : 'Existing file',
                               style: GoogleFonts.inter(
                                 fontSize: 9,
                                 color: Colors.white70,

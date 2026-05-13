@@ -10,6 +10,7 @@ import 'profile_details_screen.dart';
 import 'ride_history_screen.dart';
 import 'settings_screen.dart';
 import 'support_screen.dart';
+import 'emergency_contacts_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -24,7 +25,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final searchCtrl = TextEditingController();
-    List<LocationResult> results = [];
+    List<PlacePrediction> predictions = [];
     bool searching = false;
 
     await showModalBottomSheet(
@@ -38,80 +39,141 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
             return Padding(
-              padding: EdgeInsets.fromLTRB(
-                  20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        label == 'Home' ? Icons.home : Icons.work,
-                        color: AppTheme.primary,
-                        size: 24,
+              padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+              child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.8,
+                ),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Handle bar
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppTheme.border,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
-                      const SizedBox(width: 12),
-                      Text('Set $label Location',
-                          style: GoogleFonts.inter(
-                              fontSize: 20, fontWeight: FontWeight.w700)),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: searchCtrl,
-                    autofocus: true,
-                    style: GoogleFonts.inter(fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText: 'Search for $label location...',
-                      prefixIcon: const Icon(Icons.search, size: 20),
                     ),
-                    onChanged: (q) async {
-                      if (q.isEmpty) {
-                        setSheetState(() => results = []);
-                        return;
-                      }
-                      setSheetState(() => searching = true);
-                      final res = await GoogleMapsService.searchLocation(q);
-                      setSheetState(() {
-                        results = res;
-                        searching = false;
-                      });
-                    },
-                  ),
-                  if (searching)
-                    const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Center(
-                          child: CircularProgressIndicator(
-                              color: AppTheme.primary, strokeWidth: 2)),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Icon(
+                          label == 'Home' ? Icons.home : Icons.work,
+                          color: AppTheme.primary,
+                          size: 24,
+                        ),
+                        const SizedBox(width: 12),
+                        Text('Set $label Location',
+                            style: GoogleFonts.inter(
+                                fontSize: 20, fontWeight: FontWeight.w700)),
+                      ],
                     ),
-                  ...results.take(5).map((r) => ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.location_on,
-                            size: 18, color: AppTheme.primary),
-                        title: Text(r.shortName,
-                            style: GoogleFonts.inter(
-                                fontWeight: FontWeight.w600, fontSize: 14)),
-                        subtitle: Text(r.displayName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.inter(
-                                color: AppTheme.text3, fontSize: 12)),
-                        onTap: () async {
-                          await FirebaseFirestore.instance
-                              .collection('users')
-                              .doc(uid)
-                              .update({firestoreKey: r.toMap()});
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          if (mounted) {
-                            CustomToast.show(
-                                context: context,
-                                message: '$label location saved');
-                          }
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: searchCtrl,
+                      autofocus: true,
+                      style: GoogleFonts.inter(fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'Search for $label location...',
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        suffixIcon: searchCtrl.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: () {
+                                  searchCtrl.clear();
+                                  setSheetState(() => predictions = []);
+                                },
+                              )
+                            : null,
+                      ),
+                      onChanged: (q) async {
+                        if (q.isEmpty) {
+                          setSheetState(() => predictions = []);
+                          return;
+                        }
+                        setSheetState(() => searching = true);
+                        final res = await GoogleMapsService.getPlacePredictions(q);
+                        setSheetState(() {
+                          predictions = res;
+                          searching = false;
+                        });
+                      },
+                    ),
+                    if (searching)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 20),
+                        child: Center(
+                            child: CircularProgressIndicator(
+                                color: AppTheme.primary, strokeWidth: 2)),
+                      ),
+                    
+                    // Results list
+                    Flexible(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: predictions.length,
+                        padding: const EdgeInsets.only(top: 8),
+                        itemBuilder: (context, index) {
+                          final p = predictions[index];
+                          return ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: AppTheme.bg2,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(Icons.location_on_outlined,
+                                  size: 18, color: AppTheme.primary),
+                            ),
+                            title: Text(p.primaryText,
+                                style: GoogleFonts.inter(
+                                    fontWeight: FontWeight.w600, fontSize: 14)),
+                            subtitle: Text(p.secondaryText,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.inter(
+                                    color: AppTheme.text3, fontSize: 12)),
+                            onTap: () async {
+                              setSheetState(() => searching = true);
+                              
+                              // Fetch full details (lat/lng) for the selected place
+                              final detail = await GoogleMapsService.getPlaceDetails(p.placeId);
+                              
+                              if (detail != null) {
+                                await FirebaseFirestore.instance
+                                    .collection('users')
+                                    .doc(uid)
+                                    .update({firestoreKey: detail.toMap()});
+                                
+                                if (ctx.mounted) Navigator.pop(ctx);
+                                if (mounted) {
+                                  CustomToast.show(
+                                      context: context,
+                                      message: '$label location saved');
+                                }
+                              } else {
+                                setSheetState(() => searching = false);
+                                if (mounted) {
+                                  CustomToast.show(
+                                      context: context,
+                                      message: 'Failed to fetch location details');
+                                }
+                              }
+                            },
+                          );
                         },
-                      )),
-                ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             );
           },
@@ -239,6 +301,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       title: 'Ride History',
                       onTap: () {
                         Navigator.push(context, MaterialPageRoute(builder: (_) => const RideHistoryScreen()));
+                      },
+                    ),
+                    _buildTile(
+                      icon: Icons.emergency_share_outlined,
+                      title: 'Emergency Contacts',
+                      onTap: () {
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => const EmergencyContactsScreen()));
                       },
                     ),
                     _buildTile(

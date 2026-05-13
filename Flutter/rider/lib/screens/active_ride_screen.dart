@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -716,15 +717,73 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                     onPressed: () async {
                       final lat = _driverPos?.latitude ?? _ride!['pickup']['lat'];
                       final lng = _driverPos?.longitude ?? _ride!['pickup']['lng'];
-                      final message = "SOS! I am in an emergency during my Mana Yatra ride. My location is: https://maps.google.com/?q=$lat,$lng . Driver info: ${_ride!['driverName']}, ${_ride!['vehicleNumber']}, Phone: ${_ride!['driverPhone']}";
-                      final uri = Uri.parse('whatsapp://send?text=${Uri.encodeComponent(message)}');
-                      if (await canLaunchUrl(uri)) {
-                        await launchUrl(uri);
-                      } else {
+                      final message = "🚨 SOS EMERGENCY ALERT! 🚨\n"
+                          "I am in an emergency during my Mana Yatra ride.\n\n"
+                          "📍 My Live Location: https://maps.google.com/?q=$lat,$lng\n\n"
+                          "🚗 Ride Details:\n"
+                          "- Driver: ${_ride!['driverName']}\n"
+                          "- Vehicle: ${_ride!['vehicleNumber']}\n"
+                          "- Driver Phone: ${_ride!['driverPhone']}";
+                      
+                      // 1. Fetch user's custom emergency contacts
+                      final uid = FirebaseAuth.instance.currentUser?.uid;
+                      String emergencyNumber = '';
+                      
+                      if (uid != null) {
+                        final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+                        final userData = userDoc.data();
+                        final customContacts = (userData?['emergencyContacts'] as List<dynamic>?) ?? [];
+                        
+                        if (customContacts.isNotEmpty) {
+                          // Use the first contact's phone
+                          String rawPhone = customContacts.first['phone'] as String;
+                          // Remove all non-digit characters
+                          emergencyNumber = rawPhone.replaceAll(RegExp(r'\D'), '');
+                          
+                          // Normalize: If it's a 10-digit number, assume it's Indian and prefix 91
+                          if (emergencyNumber.length == 10) {
+                            emergencyNumber = '91$emergencyNumber';
+                          } else if (emergencyNumber.length > 10 && emergencyNumber.startsWith('0')) {
+                            // If it starts with 0 and is more than 10 digits, replace 0 with 91
+                            emergencyNumber = '91${emergencyNumber.substring(1)}';
+                          }
+                        }
+                      }
+
+                      // 2. Build URI: If no emergency number, it opens WhatsApp contact picker
+                      final uriString = emergencyNumber.isNotEmpty 
+                          ? 'whatsapp://send?phone=$emergencyNumber&text=${Uri.encodeComponent(message)}'
+                          : 'whatsapp://send?text=${Uri.encodeComponent(message)}';
+                      
+                      final uri = Uri.parse(uriString);
+                      
+                      try {
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        } else {
+                          // Fallback to web-based API if whatsapp scheme fails
+                          final fallbackUriString = emergencyNumber.isNotEmpty
+                              ? 'https://wa.me/$emergencyNumber?text=${Uri.encodeComponent(message)}'
+                              : 'https://api.whatsapp.com/send?text=${Uri.encodeComponent(message)}';
+                          
+                          final fallbackUri = Uri.parse(fallbackUriString);
+                          if (await canLaunchUrl(fallbackUri)) {
+                            await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
+                          } else {
+                            if (mounted) {
+                              CustomToast.show(
+                                context: context,
+                                message: 'WhatsApp is not installed on your device.',
+                                isError: true,
+                              );
+                            }
+                          }
+                        }
+                      } catch (e) {
                         if (mounted) {
                           CustomToast.show(
                             context: context,
-                            message: 'WhatsApp is not installed on your device.',
+                            message: 'Could not open WhatsApp.',
                             isError: true,
                           );
                         }

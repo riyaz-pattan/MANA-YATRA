@@ -11,6 +11,7 @@ import 'providers/driver_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/pending_screen.dart';
+import 'screens/rejected_screen.dart';
 import 'screens/account_deletion_pending_screen.dart';
 import 'screens/subscription_screen.dart';
 import 'screens/dashboard_screen.dart';
@@ -128,21 +129,19 @@ class AuthGate extends StatelessWidget {
         FirebaseMessaging.instance.subscribeToTopic('drivers');
         FirebaseMessaging.instance.subscribeToTopic('driver_${user.uid}');
 
-        // Set user in provider
+        // Set user in provider (this kicks off the profile listener in DriverProvider)
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          context.read<DriverProvider>().setUser(user);
+          final provider = context.read<DriverProvider>();
+          if (provider.user?.uid != user.uid) {
+            provider.setUser(user);
+          }
         });
 
-        // Listen to driver profile and deletion requests
-        return StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('account_deletion_requests')
-              .where('uid', isEqualTo: user.uid)
-              .where('role', isEqualTo: 'driver')
-              .where('status', isEqualTo: 'pending')
-              .snapshots(),
-          builder: (context, deletionSnap) {
-            if (deletionSnap.connectionState == ConnectionState.waiting) {
+        // Use Consumer to react to DriverProvider state changes
+        return Consumer<DriverProvider>(
+          builder: (context, provider, _) {
+            // Wait for initial profile load
+            if (provider.user == null || provider.authLoading) {
               return const Scaffold(
                 body: Center(
                   child: CircularProgressIndicator(color: AppTheme.primary),
@@ -150,74 +149,50 @@ class AuthGate extends StatelessWidget {
               );
             }
 
-            if (deletionSnap.hasData && deletionSnap.data!.docs.isNotEmpty) {
-              return const AccountDeletionPendingScreen();
-            }
-
-            return StreamBuilder<DocumentSnapshot>(
+            // Deletion logic can stay here as a separate check if needed, 
+            // or we could move it to the provider too. 
+            // For now, let's use a StreamBuilder for deletion requests as it's a niche case.
+            return StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
-                  .collection('drivers')
-                  .doc(user.uid)
+                  .collection('account_deletion_requests')
+                  .where('uid', isEqualTo: user.uid)
+                  .where('role', isEqualTo: 'driver')
+                  .where('status', isEqualTo: 'pending')
                   .snapshots(),
-          builder: (context, profileSnap) {
-            if (profileSnap.connectionState == ConnectionState.waiting) {
-              return const Scaffold(
-                body: Center(
-                  child: CircularProgressIndicator(color: AppTheme.primary),
-                ),
-              );
-            }
-
-            final profileData =
-                profileSnap.data?.data() as Map<String, dynamic>?;
-
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (profileData != null) {
-                // Convert Timestamp to DateTime for subscription
-                final processed = Map<String, dynamic>.from(profileData);
-                if (processed['subscriptionActiveUntil'] is Timestamp) {
-                  processed['subscriptionActiveUntil'] =
-                      (processed['subscriptionActiveUntil'] as Timestamp)
-                          .toDate();
+              builder: (context, deletionSnap) {
+                if (deletionSnap.hasData && deletionSnap.data!.docs.isNotEmpty) {
+                  return const AccountDeletionPendingScreen();
                 }
-                context.read<DriverProvider>().setProfile(processed);
-              }
-            });
 
-            // No profile = show onboarding
-            if (!profileSnap.data!.exists || profileData == null) {
-              return const OnboardingScreen();
-            }
+                // Handle Profile states from Provider
+                if (!provider.hasProfile) {
+                  return const OnboardingScreen();
+                }
 
-            // Blocked
-            final isBlocked = profileData['isBlocked'];
-            if (isBlocked == true || isBlocked == 'true') {
-              return _buildBlockedScreen();
-            }
+                if (provider.isBlocked) {
+                  return _buildBlockedScreen();
+                }
 
-            // Not approved = pending
-            final isApproved = profileData['isApproved'];
-            if (isApproved != true && isApproved != 'true') {
-              return const PendingScreen();
-            }
+                // Rejected — show reason and allow resubmission
+                final isRejected = provider.profile?['isRejected'];
+                if (isRejected == true || isRejected == 'true') {
+                  final reason = provider.profile?['rejectionReason'] as String? ??
+                      'Your documents did not meet our requirements.';
+                  return RejectedScreen(rejectionReason: reason);
+                }
 
-            // Check subscription
-            final subUntil = profileData['subscriptionActiveUntil'];
-            DateTime? subDate;
-            if (subUntil is Timestamp) {
-              subDate = subUntil.toDate();
-            } else if (subUntil is DateTime) {
-              subDate = subUntil;
-            }
+                if (!provider.isApproved) {
+                  return const PendingScreen();
+                }
 
-            if (subDate == null || subDate.isBefore(DateTime.now())) {
-              return const SubscriptionScreen();
-            }
+                if (!provider.isSubscriptionActive) {
+                  return const SubscriptionScreen();
+                }
 
-            // All clear — show dashboard
-            return const DashboardScreen();
-          },
-        );
+                // All clear — show dashboard
+                return const DashboardScreen();
+              },
+            );
           },
         );
       },

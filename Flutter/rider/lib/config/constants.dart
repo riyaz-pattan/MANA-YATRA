@@ -30,4 +30,6 @@ class AppConstants {
     final perKm = pricePerKm[vehicleType] ?? 12;
     return (base + perKm * distanceKm).roundToDouble();
   }
+
+  static const String supportNumber = '+918000000000';
 }
