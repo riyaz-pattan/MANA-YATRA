@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/smart_tracker.dart';
 
 /// Driver states for the state machine.
@@ -23,6 +25,10 @@ class DriverProvider extends ChangeNotifier {
   double? _lng;
   Map<String, dynamic>? _activeRide;
   StreamSubscription<DocumentSnapshot>? _profileSubscription;
+  StreamSubscription<DatabaseEvent>? _connectedSubscription;
+  String? _persistedRideId;
+
+  static const _kActiveRideKey = 'driver_active_ride_id';
 
   // Getters
   User? get user => _user;
@@ -34,6 +40,7 @@ class DriverProvider extends ChangeNotifier {
   double? get lng => _lng;
   Map<String, dynamic>? get activeRide => _activeRide;
   SmartTracker? get tracker => _tracker;
+  String? get persistedRideId => _persistedRideId;
 
   // Backward-compatible getters
   bool get isOnline => _driverState != DriverState.offline;
@@ -68,6 +75,8 @@ class DriverProvider extends ChangeNotifier {
         };
       }
       
+      _setupPresence();
+      
       // Start real-time profile listener
       _profileSubscription = FirebaseFirestore.instance
           .collection('drivers')
@@ -81,6 +90,7 @@ class DriverProvider extends ChangeNotifier {
     } else {
       _profile = null;
       _driverState = DriverState.offline;
+      _connectedSubscription?.cancel();
       _tracker?.destroy();
       _tracker = null;
     }
@@ -110,6 +120,7 @@ class DriverProvider extends ChangeNotifier {
       _tracker!.setMode(
           online ? TrackingMode.discovery : TrackingMode.offline);
     }
+    _setPresence(online);
     notifyListeners();
   }
 
@@ -120,11 +131,44 @@ class DriverProvider extends ChangeNotifier {
 
   void setActiveRide(Map<String, dynamic>? ride) {
     _activeRide = ride;
+    _persistRideId(ride?['id'] as String?);
     if (_tracker != null) {
       _tracker!.setMode(ride != null
           ? TrackingMode.activeRide
           : (isOnline ? TrackingMode.discovery : TrackingMode.offline));
     }
+    notifyListeners();
+  }
+
+  Future<void> _persistRideId(String? rideId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (rideId != null) {
+        await prefs.setString(_kActiveRideKey, rideId);
+      } else {
+        await prefs.remove(_kActiveRideKey);
+      }
+    } catch (e) {
+      debugPrint('[DriverProvider] Failed to persist rideId: $e');
+    }
+  }
+
+  Future<void> loadPersistedState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final id = prefs.getString(_kActiveRideKey);
+      if (id != null && id.isNotEmpty) {
+        _persistedRideId = id;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[DriverProvider] Failed to load persisted state: $e');
+    }
+  }
+
+  void clearPersistedRideId() {
+    _persistedRideId = null;
+    _persistRideId(null);
     notifyListeners();
   }
 
@@ -134,9 +178,42 @@ class DriverProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _setupPresence() {
+    _connectedSubscription?.cancel();
+    if (_user == null) return;
+    
+    _connectedSubscription = FirebaseDatabase.instance.ref('.info/connected').onValue.listen((event) {
+      final connected = event.snapshot.value as bool? ?? false;
+      if (connected && isOnline) {
+        _setPresence(true);
+      }
+    });
+  }
+
+  Future<void> _setPresence(bool online) async {
+    if (_user == null) return;
+    final presenceRef = FirebaseDatabase.instance.ref('presence/${_user!.uid}');
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (online) {
+          await presenceRef.onDisconnect().update({'isOnline': false, 'updatedAt': ServerValue.timestamp});
+          await presenceRef.set({'isOnline': true, 'updatedAt': ServerValue.timestamp});
+        } else {
+          await presenceRef.onDisconnect().cancel();
+          await presenceRef.update({'isOnline': false, 'updatedAt': ServerValue.timestamp});
+        }
+        return; // success
+      } catch (e) {
+        debugPrint('[Presence] Attempt ${attempt + 1} failed: $e');
+        if (attempt == 0) await Future.delayed(const Duration(seconds: 2));
+      }
+    }
+  }
+
   @override
   void dispose() {
     _profileSubscription?.cancel();
+    _connectedSubscription?.cancel();
     _tracker?.destroy();
     super.dispose();
   }

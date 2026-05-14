@@ -12,7 +12,10 @@ import '../config/theme.dart';
 import '../services/google_maps_service.dart';
 import '../utils/map_style.dart';
 import '../utils/map_utils.dart';
+import 'package:provider/provider.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../providers/driver_provider.dart';
+import '../services/smart_tracker.dart';
 import 'dashboard_screen.dart';
 import '../widgets/swipe_action.dart';
 
@@ -276,82 +279,80 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
       message: '✅ OTP Verified! Starting ride...',
     );
 
-    await FirebaseFirestore.instance
-        .collection('rides')
-        .doc(widget.rideId)
-        .update({
-          'status': 'started',
-          'startedAt': FieldValue.serverTimestamp(),
-        });
-    setState(() => _updating = false);
+    try {
+      await FirebaseFunctions.instance
+          .httpsCallable('startRide')
+          .call({'rideId': widget.rideId});
+    } catch (e) {
+      debugPrint('Error starting ride: $e');
+      if (mounted) {
+        CustomToast.show(
+          context: context,
+          message: '❌ Failed to start ride. Please try again.',
+          isError: true,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _updating = false);
+      }
+    }
   }
 
   Future<void> _completeRide() async {
     setState(() => _updating = true);
-    final uid = context.read<DriverProvider>().user?.uid;
 
     try {
-      final batch = FirebaseFirestore.instance.batch();
-      batch.update(
-        FirebaseFirestore.instance.collection('rides').doc(widget.rideId),
-        {
-          'status': 'completed',
-          'completedAt': FieldValue.serverTimestamp(),
-        },
-      );
+      await FirebaseFunctions.instance
+          .httpsCallable('completeRide')
+          .call({'rideId': widget.rideId});
 
-      if (uid != null) {
-        batch.update(
-          FirebaseFirestore.instance.collection('drivers').doc(uid),
-          {
-            'driverState': 'ONLINE_IDLE',
-            'activeRideId': null,
-            'activeBidCount': 0,
-          },
-        );
-      }
-      await batch.commit();
+      if (!mounted) return;
+
+      // Show end dialog directly — backend already handled driver state reset
+      _showEndDialog('completed');
     } catch (e) {
       debugPrint('Error completing ride: $e');
+      if (mounted) {
+        CustomToast.show(
+          context: context,
+          message: '❌ Failed to complete ride. Check connection.',
+          isError: true,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _updating = false);
+      }
     }
-
-    if (!mounted) return;
-    context.read<DriverProvider>().setActiveRide(null);
-    setState(() => _updating = false);
   }
 
   Future<void> _cancelRide() async {
+    if (_updating) return;
     setState(() => _updating = true);
-    final uid = context.read<DriverProvider>().user?.uid;
 
     try {
-      final batch = FirebaseFirestore.instance.batch();
-      batch.update(
-        FirebaseFirestore.instance.collection('rides').doc(widget.rideId),
-        {
-          'status': 'cancelled',
-          'cancelledAt': FieldValue.serverTimestamp(),
-        },
-      );
+      await FirebaseFunctions.instance
+          .httpsCallable('cancelRide')
+          .call({'rideId': widget.rideId});
 
-      if (uid != null) {
-        batch.update(
-          FirebaseFirestore.instance.collection('drivers').doc(uid),
-          {
-            'driverState': 'ONLINE_IDLE',
-            'activeRideId': null,
-            'activeBidCount': 0,
-          },
-        );
-      }
-      await batch.commit();
+      // ✅ Only reset local state on successful write
+      if (!mounted) return;
+      context.read<DriverProvider>().setActiveRide(null);
     } catch (e) {
       debugPrint('Error cancelling ride: $e');
+      if (mounted) {
+        CustomToast.show(
+          context: context,
+          message: '❌ Failed to cancel ride. Please try again.',
+          isError: true,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _updating = false);
+      }
     }
-
-    if (!mounted) return;
-    context.read<DriverProvider>().setActiveRide(null);
-    setState(() => _updating = false);
   }
 
   void _showEndDialog(String status) {

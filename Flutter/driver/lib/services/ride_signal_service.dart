@@ -4,11 +4,12 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:dart_geohash/dart_geohash.dart';
 import '../config/constants.dart';
 
-/// Listens to `ride_signals/` in RTDB and emits rides matching the driver's
-/// current geohash-5 zone and vehicle type.
+/// Listens to `ride_signals/{vehicleType}/{geohash5}/` in RTDB and emits
+/// rides matching the driver's current geohash-5 zone.
 ///
-/// This replaces the old 10-second Firestore polling with a bandwidth-based
-/// RTDB listener (near-zero cost at scale).
+/// Instead of listening to the global root (which broadcasts ALL rides to
+/// ALL drivers), this service subscribes ONLY to the driver's current
+/// zone — dramatically reducing bandwidth, battery drain, and rebuild storms.
 class RideSignalService {
   final String vehicleType;
 
@@ -21,14 +22,42 @@ class RideSignalService {
 
   RideSignalService({required this.vehicleType, this.onErrorCallback});
 
-  /// Stream of nearby ride signals, auto-filtered by geohash and vehicle type.
+  /// Stream of nearby ride signals, auto-scoped by zone and vehicle type.
   Stream<List<Map<String, dynamic>>> get ridesStream => _controller.stream;
 
-  /// Start listening. Call this once, then update the zone via [updateZone].
+  /// Start the service. Does NOT subscribe to RTDB yet — call [updateZone]
+  /// with the driver's location to begin listening.
   void start() {
     print('🚗 RideSignalService started for vehicleType: $vehicleType');
+    // Subscription is created dynamically in updateZone() when we know
+    // the driver's geohash. No global listener needed.
+  }
+
+  /// Update the driver's current geohash-5 zone.
+  /// When the zone changes, the old listener is cancelled and a new one
+  /// is created on the correct path: ride_signals/{vehicleType}/{newHash}/
+  void updateZone(double lat, double lng) {
+    final newHash = GeoHasher().encode(lng, lat, precision: 5);
+    if (newHash != _currentGeohash5) {
+      print('📍 RideSignalService zone updated: $_currentGeohash5 -> $newHash');
+      _currentGeohash5 = newHash;
+      _subscribeToZone(newHash);
+    }
+  }
+
+  /// Cancel the existing listener and subscribe to the new zone path.
+  void _subscribeToZone(String geohash5) {
+    // Cancel old subscription
+    _sub?.cancel();
+    _activeSignals.clear();
+
+    final path = 'ride_signals/$vehicleType/$geohash5';
+    print('📡 RideSignalService subscribing to: $path');
+
     _sub = FirebaseDatabase.instance
-        .ref('ride_signals')
+        .ref(path)
+        .orderByChild('createdAt')
+        .limitToLast(50)
         .onValue
         .listen(_handleSnapshot, onError: (error) {
       print('❌ RideSignalService RTDB Error: $error');
@@ -38,37 +67,34 @@ class RideSignalService {
     });
   }
 
-  /// Update the driver's current geohash-5 zone.
-  /// Called whenever the driver moves enough for the SmartTracker to recalculate.
-  void updateZone(double lat, double lng) {
-    final newHash = GeoHasher().encode(lng, lat, precision: 5);
-    if (newHash != _currentGeohash5) {
-      print('📍 RideSignalService zone updated: $_currentGeohash5 -> $newHash');
-      _currentGeohash5 = newHash;
-      // Re-filter cached signals with the new zone
-      _emitFiltered();
-    }
-  }
-
   void _handleSnapshot(DatabaseEvent event) {
     _activeSignals.clear();
 
     final data = event.snapshot.value;
     print('📡 RideSignalService received snapshot, data is null? ${data == null}');
-    
+
     if (data == null || data is! Map) {
       _controller.add([]);
       return;
     }
 
     final signals = Map<String, dynamic>.from(data);
-    print('📡 RideSignalService total global signals: ${signals.length}');
+    print('📡 RideSignalService zone signals: ${signals.length}');
+
+    final now = DateTime.now().millisecondsSinceEpoch;
 
     for (final entry in signals.entries) {
       final rideId = entry.key;
       if (entry.value is! Map) continue;
       final signal = Map<String, dynamic>.from(entry.value);
       signal['id'] = rideId;
+
+      // Filter out expired signals locally
+      final createdAtMs = (signal['createdAt'] as num?)?.toInt() ?? now;
+      if (now - createdAtMs >= AppConstants.rideExpiryMinutes * 60 * 1000) {
+        continue;
+      }
+
       _activeSignals[rideId] = signal;
     }
 
@@ -76,46 +102,11 @@ class RideSignalService {
   }
 
   void _emitFiltered() {
-    if (_currentGeohash5 == null) {
-      print('⚠️ RideSignalService _emitFiltered: _currentGeohash5 is null, returning empty.');
-      _controller.add([]);
-      return;
-    }
+    // No geohash/vehicleType filtering needed — the RTDB path already
+    // scopes to the correct vehicleType and zone.
+    final filtered = _activeSignals.values.toList();
 
-    // Compute the 9-cell neighborhood for the driver's current position
-    final neighbors = GeoHasher().neighbors(_currentGeohash5!);
-    final myZones = <String>{
-      _currentGeohash5!,
-      ...neighbors.values,
-    };
-
-    int typeFiltered = 0;
-    int zoneFiltered = 0;
-
-    final filtered = _activeSignals.values.where((signal) {
-      // 1. Must match vehicle type
-      if (signal['vehicleType'] != vehicleType) {
-        typeFiltered++;
-        return false;
-      }
-
-      // 2. Filter out expired signals locally
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final createdAtMs = (signal['createdAt'] as num?)?.toInt() ?? now;
-      if (now - createdAtMs >= AppConstants.rideExpiryMinutes * 60 * 1000) {
-        return false;
-      }
-
-      // 3. Must be in one of our 9 neighboring cells
-      final signalHash = signal['geohash5'] as String?;
-      if (signalHash == null || !myZones.contains(signalHash)) {
-        zoneFiltered++;
-        return false;
-      }
-      return true;
-    }).toList();
-
-    print('🔍 RideSignalService filtered: ${filtered.length} matched | $typeFiltered dropped by type | $zoneFiltered dropped by zone');
+    print('🔍 RideSignalService emitting ${filtered.length} signals from zone $_currentGeohash5');
 
     // Sort by createdAt descending (newest first)
     filtered.sort((a, b) {

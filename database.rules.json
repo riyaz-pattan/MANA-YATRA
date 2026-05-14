@@ -3,8 +3,18 @@
     ".read": "false",
     ".write": "false",
     "ride_signals": {
-      ".read": "auth != null",
-      ".write": "false"
+      "$vehicleType": {
+        "$geohash": {
+          ".read": "auth != null",
+          ".write": false
+        }
+      }
+    },
+    "ride_declines": {
+      "$rideId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
     },
     "liveLocations": {
       "$driverId": {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -153,41 +154,71 @@ class _MatchingScreenState extends State<MatchingScreen>
     }
   }
 
-  Future<void> _declineBid(String bidId) async {
+  Future<void> _declineBid(String bidId, String driverId) async {
     try {
       await FirebaseFirestore.instance.collection('bids').doc(bidId).update({
         'status': 'rejected',
       });
+      // Notify driver instantly via RTDB (separate decline node)
+      await FirebaseDatabase.instance
+          .ref('ride_declines/${widget.rideId}/$driverId')
+          .set(true);
     } catch (e) {
       debugPrint('Error declining bid: $e');
     }
   }
 
   Future<void> _cancelRide() async {
-    await FirebaseFirestore.instance
-        .collection('rides')
-        .doc(widget.rideId)
-        .update({'status': 'cancelled'});
-    if (mounted) {
-      context.read<RideProvider>().resetRide();
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const MainScreen()),
-        (_) => false,
-      );
+    try {
+      await FirebaseFunctions.instance
+          .httpsCallable('cancelRide')
+          .call({'rideId': widget.rideId});
+      if (mounted) {
+        context.read<RideProvider>().resetRide();
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const MainScreen()),
+          (_) => false,
+        );
+      }
+    } catch (e) {
+      debugPrint('Error cancelling ride: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to cancel. Check connection and try again.'),
+            backgroundColor: AppTheme.danger,
+          ),
+        );
+      }
     }
   }
 
   Future<void> _expireRide() async {
-    await FirebaseFirestore.instance
-        .collection('rides')
-        .doc(widget.rideId)
-        .update({'status': 'expired'});
-    if (mounted) {
-      context.read<RideProvider>().resetRide();
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const MainScreen()),
-        (_) => false,
-      );
+    // We now use a Cloud Function to handle expiry atomically.
+    // This ensures RTDB signals are cleaned up and state is consistent.
+    try {
+      await FirebaseFunctions.instance
+          .httpsCallable('expireRide')
+          .call({'rideId': widget.rideId});
+      
+      if (mounted) {
+        context.read<RideProvider>().resetRide();
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const MainScreen()),
+          (_) => false,
+        );
+      }
+    } catch (e) {
+      debugPrint('Error expiring ride: $e');
+      // If the function fails (e.g. ride already matched), the listener 
+      // will handle the navigation to the active ride screen.
+      if (mounted) {
+        context.read<RideProvider>().resetRide();
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const MainScreen()),
+          (_) => false,
+        );
+      }
     }
   }
 
@@ -653,7 +684,7 @@ class _MatchingScreenState extends State<MatchingScreen>
                           child: SizedBox(
                             height: 44,
                             child: OutlinedButton(
-                              onPressed: _accepting ? null : () => _declineBid(bid['id']),
+                              onPressed: _accepting ? null : () => _declineBid(bid['id'], bid['driverId']),
                               style: OutlinedButton.styleFrom(
                                 side: const BorderSide(color: AppTheme.danger),
                                 shape: RoundedRectangleBorder(

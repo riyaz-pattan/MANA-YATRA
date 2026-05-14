@@ -8,6 +8,8 @@ import 'config/firebase_config.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'config/theme.dart';
 import 'providers/driver_provider.dart';
+import 'providers/connectivity_provider.dart';
+import 'widgets/connectivity_banner.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/pending_screen.dart';
@@ -15,6 +17,7 @@ import 'screens/rejected_screen.dart';
 import 'screens/account_deletion_pending_screen.dart';
 import 'screens/subscription_screen.dart';
 import 'screens/dashboard_screen.dart';
+import 'screens/active_ride_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'utils/custom_toast.dart';
@@ -89,15 +92,18 @@ class ManaYatraDriverApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => DriverProvider(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => DriverProvider()),
+        ChangeNotifierProvider(create: (_) => ConnectivityProvider()),
+      ],
       child: MaterialApp(
         scaffoldMessengerKey: rootScaffoldMessengerKey,
         navigatorKey: navigatorKey,
         title: 'Mana Yatra - Driver',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
-        home: const AuthGate(),
+        home: const ConnectivityBanner(child: AuthGate()),
       ),
     );
   }
@@ -134,6 +140,7 @@ class AuthGate extends StatelessWidget {
           final provider = context.read<DriverProvider>();
           if (provider.user?.uid != user.uid) {
             provider.setUser(user);
+            provider.loadPersistedState();
           }
         });
 
@@ -149,8 +156,8 @@ class AuthGate extends StatelessWidget {
               );
             }
 
-            // Deletion logic can stay here as a separate check if needed, 
-            // or we could move it to the provider too. 
+            // Deletion logic can stay here as a separate check if needed,
+            // or we could move it to the provider too.
             // For now, let's use a StreamBuilder for deletion requests as it's a niche case.
             return StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -160,7 +167,8 @@ class AuthGate extends StatelessWidget {
                   .where('status', isEqualTo: 'pending')
                   .snapshots(),
               builder: (context, deletionSnap) {
-                if (deletionSnap.hasData && deletionSnap.data!.docs.isNotEmpty) {
+                if (deletionSnap.hasData &&
+                    deletionSnap.data!.docs.isNotEmpty) {
                   return const AccountDeletionPendingScreen();
                 }
 
@@ -176,7 +184,8 @@ class AuthGate extends StatelessWidget {
                 // Rejected — show reason and allow resubmission
                 final isRejected = provider.profile?['isRejected'];
                 if (isRejected == true || isRejected == 'true') {
-                  final reason = provider.profile?['rejectionReason'] as String? ??
+                  final reason =
+                      provider.profile?['rejectionReason'] as String? ??
                       'Your documents did not meet our requirements.';
                   return RejectedScreen(rejectionReason: reason);
                 }
@@ -189,8 +198,15 @@ class AuthGate extends StatelessWidget {
                   return const SubscriptionScreen();
                 }
 
-                // All clear — show dashboard
-                return const DashboardScreen();
+                // All clear — check for persisted active ride first
+                return Consumer<DriverProvider>(
+                  builder: (context, dp, _) {
+                    if (dp.persistedRideId != null) {
+                      return ActiveRideScreen(rideId: dp.persistedRideId!);
+                    }
+                    return const DashboardScreen();
+                  },
+                );
               },
             );
           },

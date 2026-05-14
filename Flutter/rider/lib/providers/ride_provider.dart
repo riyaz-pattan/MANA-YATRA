@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/google_maps_service.dart';
 
 class RideProvider extends ChangeNotifier {
@@ -21,6 +22,9 @@ class RideProvider extends ChangeNotifier {
   // Active ride
   Map<String, dynamic>? _activeRide;
   Map<String, dynamic>? _selectedBid;
+  String? _persistedRideId; // Loaded from SharedPreferences on startup
+
+  static const _kActiveRideKey = 'rider_active_ride_id';
 
   // Getters
   User? get user => _user;
@@ -33,6 +37,8 @@ class RideProvider extends ChangeNotifier {
   int get bidPrice => _bidPrice;
   Map<String, dynamic>? get activeRide => _activeRide;
   Map<String, dynamic>? get selectedBid => _selectedBid;
+  /// Non-null when we recovered a ride ID from local storage on cold start.
+  String? get persistedRideId => _persistedRideId;
 
   // Setters
   void setUser(User? user) {
@@ -74,6 +80,45 @@ class RideProvider extends ChangeNotifier {
 
   void setActiveRide(Map<String, dynamic>? ride) {
     _activeRide = ride;
+    _persistRideId(ride?['id'] as String?);
+    notifyListeners();
+  }
+
+  /// Persist the active ride ID to local storage so we can recover
+  /// after an unexpected app kill.
+  Future<void> _persistRideId(String? rideId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (rideId != null) {
+        await prefs.setString(_kActiveRideKey, rideId);
+      } else {
+        await prefs.remove(_kActiveRideKey);
+      }
+    } catch (e) {
+      debugPrint('[RideProvider] Failed to persist rideId: $e');
+    }
+  }
+
+  /// Called once at app startup (from AuthGate) to check if a ride was
+  /// in progress when the app was last killed.
+  Future<void> loadPersistedState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final id = prefs.getString(_kActiveRideKey);
+      if (id != null && id.isNotEmpty) {
+        _persistedRideId = id;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[RideProvider] Failed to load persisted state: $e');
+    }
+  }
+
+  /// Clears the local persisted ride id — call this once the live
+  /// Firestore listener confirms the ride is completed/cancelled.
+  void clearPersistedRideId() {
+    _persistedRideId = null;
+    _persistRideId(null);
     notifyListeners();
   }
 

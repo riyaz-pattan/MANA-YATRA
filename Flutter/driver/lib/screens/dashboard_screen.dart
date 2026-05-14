@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
@@ -40,6 +41,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   StreamSubscription? _signalSub;
   final Set<String> _declinedRides = {};
   final Map<String, int> _biddedRides = {}; // Maps rideId to bid amount
+  final Map<String, StreamSubscription> _declineSubs = {}; // Per-ride decline listeners
 
   bool _locating = false;
   bool _locationGranted = false;
@@ -167,6 +169,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _rideListener?.cancel();
     _signalSub?.cancel();
     _signalService?.dispose();
+    for (final sub in _declineSubs.values) {
+      sub.cancel();
+    }
+    _declineSubs.clear();
     super.dispose();
   }
 
@@ -189,23 +195,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final status = data['status'];
         final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
         
-        if (status == 'matched' && createdAt != null && DateTime.now().difference(createdAt).inMinutes >= 60) {
-          // Force expire locally if it's been stuck in matched for over 60 minutes
-          final batch = FirebaseFirestore.instance.batch();
-          batch.update(FirebaseFirestore.instance.collection('rides').doc(ride.id), {
-            'status': 'cancelled',
-            'cancelReason': 'local_stale_cleanup'
-          });
-          batch.update(FirebaseFirestore.instance.collection('drivers').doc(uid), {
-            'driverState': 'ONLINE_IDLE',
-            'activeRideId': null,
-            'activeBidCount': 0,
-          });
-          batch.commit();
-          context.read<DriverProvider>().setActiveRide(null);
-          return;
-        }
-
         context.read<DriverProvider>().setActiveRide(data);
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
@@ -322,6 +311,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // Compute distance from driver to each ride pickup
       final enriched = <Map<String, dynamic>>[];
       for (final signal in rides) {
+        // Skip rides that have been declined via the separate ride_declines node
+        if (_declinedRides.contains(signal['id'])) continue;
+
         final pickup = signal['pickup'];
         if (pickup == null || pickup['lat'] == null) continue;
 
@@ -344,7 +336,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       setState(() {
         _nearbyRides = enriched
-            .where((r) => !_declinedRides.contains(r['id']))
             .take(AppConstants.maxVisibleRides)
             .toList();
         _loadingRides = false;
@@ -365,10 +356,46 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       _biddedRides.clear();
       for (final doc in bidsSnap.docs) {
-        _biddedRides[doc['rideId'] as String] = doc['price'] as int;
+        final rideId = doc['rideId'] as String;
+        _biddedRides[rideId] = doc['price'] as int;
+        // Start decline listener for each existing bid
+        _listenForDecline(rideId);
       }
       if (mounted) setState(() {});
     } catch (_) {}
+  }
+
+  /// Listen for rider bid-decline on the separate `ride_declines/{rideId}/{driverUid}` node.
+  /// When the rider declines, this value is set to `true` and we remove the ride
+  /// from the driver's view with a toast notification.
+  void _listenForDecline(String rideId) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    // Don't double-subscribe
+    if (_declineSubs.containsKey(rideId)) return;
+
+    _declineSubs[rideId] = FirebaseDatabase.instance
+        .ref('ride_declines/$rideId/$uid')
+        .onValue
+        .listen((event) {
+      if (event.snapshot.value == true) {
+        if (mounted) {
+          setState(() {
+            _biddedRides.remove(rideId);
+            _declinedRides.add(rideId);
+            _nearbyRides.removeWhere((r) => r['id'] == rideId);
+          });
+          CustomToast.show(
+            context: context,
+            message: '⚠️ Rider declined your bid.',
+            isError: true,
+          );
+        }
+        // Clean up this listener — no longer needed
+        _declineSubs[rideId]?.cancel();
+        _declineSubs.remove(rideId);
+      }
+    });
   }
 
   Future<void> _placeBid(Map<String, dynamic> ride, int bidPrice) async {
@@ -429,6 +456,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       setState(() {
         _biddedRides[ride['id']] = bidPrice;
       });
+
+      // Start listening for rider decline on this ride
+      _listenForDecline(ride['id'] as String);
 
       if (mounted) {
         CustomToast.show(

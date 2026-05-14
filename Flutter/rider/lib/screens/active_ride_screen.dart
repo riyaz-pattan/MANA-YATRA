@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -41,6 +42,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   double _driverHeading = 0.0;
   String _driverProximity = '';
   bool _updating = false;
+  bool _isDriverSignalStale = false;
 
   @override
   void initState() {
@@ -197,9 +199,20 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
            }
         }
         
+        // Check stale signal (if updated > 30s ago)
+        bool isStale = false;
+        if (data['updatedAt'] != null) {
+          final updatedAt = data['updatedAt'] as int;
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (now - updatedAt > 30000) {
+            isStale = true;
+          }
+        }
+
         setState(() {
           _driverPos = newPos;
           _driverProximity = proximity;
+          _isDriverSignalStale = isStale;
         });
 
         if (_ride?['status'] == 'matched') {
@@ -287,36 +300,27 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     setState(() => _updating = true);
 
     try {
-      final batch = FirebaseFirestore.instance.batch();
-      batch.update(
-        FirebaseFirestore.instance.collection('rides').doc(widget.rideId),
-        {
-          'status': 'cancelled',
-          'cancelledBy': 'rider',
-          'cancelledAt': FieldValue.serverTimestamp(),
-        },
-      );
+      await FirebaseFunctions.instance
+          .httpsCallable('cancelRide')
+          .call({'rideId': widget.rideId});
 
-      // Reset driver state if a driver was matched
-      final driverId = _ride?['driverId'];
-      if (driverId != null) {
-        batch.update(
-          FirebaseFirestore.instance.collection('drivers').doc(driverId),
-          {
-            'driverState': 'ONLINE_IDLE',
-            'activeRideId': null,
-            'activeBidCount': 0,
-          },
-        );
-      }
-      await batch.commit();
+      // ✅ Only reset local state on successful write
+      if (!mounted) return;
+      context.read<RideProvider>().setActiveRide(null);
     } catch (e) {
       debugPrint('Error cancelling ride: $e');
+      if (mounted) {
+        CustomToast.show(
+          context: context,
+          message: '❌ Failed to cancel ride. Please try again.',
+          isError: true,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _updating = false);
+      }
     }
-
-    if (!mounted) return;
-    context.read<RideProvider>().setActiveRide(null);
-    setState(() => _updating = false);
   }
 
   @override
@@ -418,50 +422,88 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
 
           // Status bar at top
           SafeArea(
-            child: Container(
-              margin: const EdgeInsets.all(16),
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: status == 'started'
-                    ? AppTheme.success.withValues(alpha: 0.2)
-                    : AppTheme.primary.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: status == 'started'
-                      ? AppTheme.success
-                      : AppTheme.primary,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    status == 'started'
-                        ? Icons.navigation
-                        : Icons.check_circle,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  margin: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
                     color: status == 'started'
-                        ? AppTheme.success
-                        : AppTheme.primary,
-                    size: 18,
+                        ? AppTheme.success.withValues(alpha: 0.2)
+                        : AppTheme.primary.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: status == 'started'
+                          ? AppTheme.success
+                          : AppTheme.primary,
+                    ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      status == 'started'
-                          ? '🚀 Ride in Progress'
-                          : '✅ Driver Matched${_driverProximity.isNotEmpty ? " • $_driverProximity" : ""}',
-                      style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w700,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        status == 'started'
+                            ? Icons.navigation
+                            : Icons.check_circle,
                         color: status == 'started'
                             ? AppTheme.success
                             : AppTheme.primary,
+                        size: 18,
                       ),
-                      overflow: TextOverflow.ellipsis,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          status == 'started'
+                              ? '🚀 Ride in Progress'
+                              : '✅ Driver Matched${_driverProximity.isNotEmpty ? " • $_driverProximity" : ""}',
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w700,
+                            color: status == 'started'
+                                ? AppTheme.success
+                                : AppTheme.primary,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_isDriverSignalStale && (status == 'matched' || status == 'started'))
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AppTheme.warning,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.signal_wifi_bad, color: Colors.white, size: 16),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Driver signal lost. Updating...',
+                            style: GoogleFonts.inter(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ],
-              ),
+              ],
             ),
           ),
 

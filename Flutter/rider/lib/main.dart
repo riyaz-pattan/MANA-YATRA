@@ -8,10 +8,13 @@ import 'package:provider/provider.dart';
 import 'config/firebase_config.dart';
 import 'config/theme.dart';
 import 'providers/ride_provider.dart';
+import 'providers/connectivity_provider.dart';
+import 'widgets/connectivity_banner.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_screen.dart';
 import 'screens/profile_setup_screen.dart';
 import 'screens/account_deletion_pending_screen.dart';
+import 'screens/active_ride_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'utils/custom_toast.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
@@ -21,17 +24,18 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
 }
 
-final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
-  
+
   // Only await the bare essentials — dotenv + Firebase Auth need to be ready
   await dotenv.load(fileName: ".env");
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
-  
+
   // Remove splash immediately — UI is ready to render
   FlutterNativeSplash.remove();
   runApp(const ManaYatraRiderApp());
@@ -48,7 +52,7 @@ void _initFCM() {
   FirebaseMessaging.onMessage.listen((RemoteMessage message) {
     if (message.notification != null) {
       final type = message.data['type'];
-      
+
       if (type == 'ride_status') {
         return;
       }
@@ -57,7 +61,8 @@ void _initFCM() {
       if (ctx != null) {
         CustomToast.show(
           context: ctx,
-          message: '${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}',
+          message:
+              '${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}',
         );
       }
     }
@@ -69,15 +74,18 @@ class ManaYatraRiderApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => RideProvider(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => RideProvider()),
+        ChangeNotifierProvider(create: (_) => ConnectivityProvider()),
+      ],
       child: MaterialApp(
         scaffoldMessengerKey: rootScaffoldMessengerKey,
         navigatorKey: navigatorKey,
         title: 'Mana Yatra - Rider',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
-        home: const AuthGate(),
+        home: const ConnectivityBanner(child: AuthGate()),
       ),
     );
   }
@@ -100,10 +108,12 @@ class AuthGate extends StatelessWidget {
         }
         if (snapshot.hasData && snapshot.data != null) {
           final user = snapshot.data!;
-          // Set user in provider
+          // Set user in provider and load any persisted ride state
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (context.mounted) {
-              context.read<RideProvider>().setUser(user);
+              final provider = context.read<RideProvider>();
+              provider.setUser(user);
+              provider.loadPersistedState();
             }
           });
 
@@ -132,8 +142,16 @@ class AuthGate extends StatelessWidget {
                 return const AccountDeletionPendingScreen();
               }
 
-              // Check if user has set their name
-              return _NameCheckGate(user: user);
+              // Check for a persisted active ride (offline startup recovery)
+              return Consumer<RideProvider>(
+                builder: (context, rideProvider, _) {
+                  if (rideProvider.persistedRideId != null) {
+                    return ActiveRideScreen(
+                        rideId: rideProvider.persistedRideId!);
+                  }
+                  return _NameCheckGate(user: user);
+                },
+              );
             },
           );
         }
@@ -184,7 +202,8 @@ class _NameCheckGateState extends State<_NameCheckGate> {
         }
 
         final data = snap.data?.data() as Map<String, dynamic>?;
-        final hasName = data != null &&
+        final hasName =
+            data != null &&
             data.containsKey('name') &&
             (data['name']?.toString() ?? '').trim().isNotEmpty;
 
@@ -196,4 +215,3 @@ class _NameCheckGateState extends State<_NameCheckGate> {
     );
   }
 }
-

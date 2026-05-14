@@ -60,6 +60,15 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
 
       const ride = rideSnap.data();
       const bid = bidSnap.data();
+
+      // ── CHECK 0: Integrity ──
+      if (bid.rideId !== rideId) {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "This bid does not belong to the requested ride."
+        );
+      }
+
       const driverId = bid.driverId;
       const driverRef = db.collection("drivers").doc(driverId);
       const driverSnap = await txn.get(driverRef);
@@ -89,32 +98,19 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
       if (bid.status !== "pending") {
         throw new functions.https.HttpsError(
           "failed-precondition",
-          "This bid has been withdrawn."
+          "This bid is no longer active (withdrawn or rejected)."
         );
       }
 
       // ── CHECK 4: Driver state ──
+      // Must be ONLINE_IDLE or BIDDING. If ON_RIDE or OFFLINE, reject.
       const dState = driver.driverState || (driver.isOnline ? "ONLINE_IDLE" : "OFFLINE");
       if (dState !== "ONLINE_IDLE" && dState !== "BIDDING") {
         throw new functions.https.HttpsError(
           "failed-precondition",
-          "Driver is no longer available."
+          "Driver is no longer available (busy or offline)."
         );
       }
-
-      // ── CHECK 5: Heartbeat ──
-      const heartbeat = driver.lastHeartbeat || driver.lastLocationUpdate;
-      if (heartbeat) {
-        const hbDate = heartbeat.toDate ? heartbeat.toDate() : new Date(heartbeat);
-        const ageSec = (Date.now() - hbDate.getTime()) / 1000;
-        if (ageSec > HEARTBEAT_MAX_AGE_SEC) {
-          throw new functions.https.HttpsError(
-            "failed-precondition",
-            "Driver appears to be unreachable."
-          );
-        }
-      }
-      // If no heartbeat at all, we still allow (new driver, first ride)
 
       // ── CHECK 6: Ride not expired ──
       if (ride.createdAt) {
@@ -128,9 +124,10 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
         }
       }
 
-      // ── ALL CHECKS PASSED — ATOMIC UPDATES ──
+      // ── ATOMIC UPDATES ──
       const otp = String(1000 + Math.floor(Math.random() * 9000));
 
+      // 1. Update Ride
       txn.update(rideRef, {
         locked: true,
         status: "matched",
@@ -143,12 +140,44 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
         matchedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
+      // 2. Update Accepted Bid
       txn.update(bidRef, { status: "accepted" });
 
+      // 3. Reject other bids for this ride
+      const otherBidsQuery = db.collection("bids")
+        .where("rideId", "==", rideId)
+        .where("status", "==", "pending");
+      const otherBidsSnap = await txn.get(otherBidsQuery);
+      otherBidsSnap.forEach((doc) => {
+        if (doc.id !== bidId) {
+          txn.update(doc.ref, { status: "rejected_by_system" });
+        }
+      });
+
+      // 4. Update Driver State
       txn.update(driverRef, {
         driverState: "ON_RIDE",
         activeRideId: rideId,
         activeBidCount: 0,
+      });
+
+      // 5. Cleanup RTDB Signals Task
+      if (ride.activeSignalPaths && Array.isArray(ride.activeSignalPaths)) {
+        txn.set(db.collection("tasks").doc(`cleanup_${rideId}`), {
+          type: "CLEANUP_SIGNALS",
+          paths: ride.activeSignalPaths,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      // 6. Send Notification Task
+      txn.set(db.collection("tasks").doc(`notify_match_${rideId}`), {
+        type: "NOTIFY_DRIVER_MATCH",
+        driverId: driverId,
+        rideId: rideId,
+        title: "Ride Matched! 🚀",
+        body: `You are matched for a ride to ${ride.drop?.short_name || "destination"}.`,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
 
@@ -160,6 +189,182 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
     }
     console.error("acceptBid error:", error);
     throw new functions.https.HttpsError("internal", error.message || "Unknown error.");
+  }
+});
+
+/**
+ * startRide
+ * Driver callable to mark a ride as started.
+ */
+exports.startRide = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Please log in.");
+  }
+
+  const rideId = data.rideId;
+  const driverId = context.auth.uid;
+
+  if (!rideId) {
+    throw new functions.https.HttpsError("invalid-argument", "Missing rideId.");
+  }
+
+  const db = admin.firestore();
+  const rideRef = db.collection("rides").doc(rideId);
+
+  try {
+    await db.runTransaction(async (txn) => {
+      const rideSnap = await txn.get(rideRef);
+
+      if (!rideSnap.exists) {
+        throw new functions.https.HttpsError("not-found", "Ride not found.");
+      }
+
+      const ride = rideSnap.data();
+
+      if (ride.driverId !== driverId) {
+        throw new functions.https.HttpsError("permission-denied", "Not assigned to this ride.");
+      }
+
+      if (ride.status !== "matched") {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          `Cannot start ride from status: ${ride.status}`
+        );
+      }
+
+      txn.update(rideRef, {
+        status: "started",
+        startedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    return { success: true };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error("startRide error:", error);
+    throw new functions.https.HttpsError("internal", "Failed to start ride.");
+  }
+});
+
+/**
+ * completeRide
+ * Driver callable to mark a ride as completed.
+ */
+exports.completeRide = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Please log in.");
+  }
+
+  const rideId = data.rideId;
+  const driverId = context.auth.uid;
+
+  if (!rideId) {
+    throw new functions.https.HttpsError("invalid-argument", "Missing rideId.");
+  }
+
+  const db = admin.firestore();
+  const rideRef = db.collection("rides").doc(rideId);
+  const driverRef = db.collection("drivers").doc(driverId);
+
+  try {
+    await db.runTransaction(async (txn) => {
+      const rideSnap = await txn.get(rideRef);
+
+      if (!rideSnap.exists) {
+        throw new functions.https.HttpsError("not-found", "Ride not found.");
+      }
+
+      const ride = rideSnap.data();
+
+      if (ride.driverId !== driverId) {
+        throw new functions.https.HttpsError("permission-denied", "Not assigned to this ride.");
+      }
+
+      if (ride.status !== "started") {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          `Cannot complete ride from status: ${ride.status}`
+        );
+      }
+
+      txn.update(rideRef, {
+        status: "completed",
+        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      txn.update(driverRef, {
+        driverState: "ONLINE_IDLE",
+        activeRideId: null,
+        activeBidCount: 0,
+      });
+    });
+
+    return { success: true };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error("completeRide error:", error);
+    throw new functions.https.HttpsError("internal", "Failed to complete ride.");
+  }
+});
+
+/**
+ * cancelRide
+ * Rider or Driver callable to cancel a ride.
+ */
+exports.cancelRide = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Please log in.");
+  }
+
+  const rideId = data.rideId;
+  const userId = context.auth.uid;
+
+  if (!rideId) {
+    throw new functions.https.HttpsError("invalid-argument", "Missing rideId.");
+  }
+
+  const db = admin.firestore();
+  const rideRef = db.collection("rides").doc(rideId);
+
+  try {
+    await db.runTransaction(async (txn) => {
+      const rideSnap = await txn.get(rideRef);
+
+      if (!rideSnap.exists) {
+        throw new functions.https.HttpsError("not-found", "Ride not found.");
+      }
+
+      const ride = rideSnap.data();
+
+      if (ride.riderId !== userId && ride.driverId !== userId) {
+        throw new functions.https.HttpsError("permission-denied", "Not authorized to cancel this ride.");
+      }
+
+      const canceller = ride.riderId === userId ? "rider" : "driver";
+
+      if (ride.status === "completed" || ride.status === "cancelled" || ride.status === "expired") {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          `Cannot cancel ride with status: ${ride.status}`
+        );
+      }
+
+      txn.update(rideRef, {
+        status: "cancelled",
+        cancelledBy: canceller,
+        cancelReason: data.reason || "user_cancelled",
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Let onRideStatusChanged handle the driver state reset and signal cleanup
+      // This keeps the transaction small and fast
+    });
+
+    return { success: true };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error("cancelRide error:", error);
+    throw new functions.https.HttpsError("internal", "Failed to cancel ride.");
   }
 });
 
@@ -458,9 +663,18 @@ exports.onRideStatusChanged = functions.firestore
         }
       }
 
-      // Cleanup RTDB signal
-      await admin.database().ref(`ride_signals/${rideId}`).remove();
-      console.log(`Cleaned up RTDB signal for matched ride ${rideId}`);
+      // Cleanup RTDB signals from all zone paths
+      const signalPaths = after.activeSignalPaths || [];
+      if (signalPaths.length > 0) {
+        const removeUpdate = {};
+        for (const p of signalPaths) {
+          removeUpdate[p] = null;
+        }
+        await admin.database().ref().update(removeUpdate);
+      }
+      // Also cleanup declinedDrivers for this ride
+      await admin.database().ref(`ride_declines/${rideId}`).remove();
+      console.log(`Cleaned up RTDB signals (${signalPaths.length} paths) for matched ride ${rideId}`);
     }
 
     // 2. Cancellation and Expiration tracking
@@ -474,8 +688,16 @@ exports.onRideStatusChanged = functions.firestore
           activeBidCount: 0,
         });
       }
-      // Cleanup RTDB signal just in case
-      await admin.database().ref(`ride_signals/${rideId}`).remove();
+      // Cleanup RTDB signals from all zone paths
+      const cancelPaths = after.activeSignalPaths || [];
+      if (cancelPaths.length > 0) {
+        const cancelRemove = {};
+        for (const p of cancelPaths) {
+          cancelRemove[p] = null;
+        }
+        await admin.database().ref().update(cancelRemove);
+      }
+      await admin.database().ref(`ride_declines/${rideId}`).remove();
     } else if (before.status !== "expired" && after.status === "expired") {
       // Decrement activeBidCount for all drivers who had pending bids on this ride
       const pendingBids = await admin.firestore().collection("bids")
@@ -508,8 +730,16 @@ exports.onRideStatusChanged = functions.firestore
         }
       }
 
-      // Cleanup RTDB signal
-      await admin.database().ref(`ride_signals/${rideId}`).remove();
+      // Cleanup RTDB signals from all zone paths
+      const expPaths = after.activeSignalPaths || [];
+      if (expPaths.length > 0) {
+        const expRemove = {};
+        for (const p of expPaths) {
+          expRemove[p] = null;
+        }
+        await admin.database().ref().update(expRemove);
+      }
+      await admin.database().ref(`ride_declines/${rideId}`).remove();
     }
 
     // 3. Status change notifications
@@ -565,7 +795,7 @@ exports.onRideCreated = functions.firestore
 
     console.log(`Dispatching ride ${rideId} to hashes: ${targetHashes.join(", ")}`);
 
-    // 1. Write the signal to RTDB so active drivers can see it immediately
+    // 1. Write the signal to RTDB partitioned by vehicleType/geohash
     const signalData = {
       rideId,
       riderId: data.riderId,
@@ -575,14 +805,26 @@ exports.onRideCreated = functions.firestore
       createdAt: admin.database.ServerValue.TIMESTAMP,
       status: "searching",
       geohash5: centerHash,
-      targetHashes: targetHashes, // useful for multi-cell filtering
       distanceKm: data.distanceKm || 0,
       durationMin: data.durationMin || 0,
       riderBid: data.riderBid || 0,
     };
 
+    // Multi-path update: write signal to all 9 geohash zone paths
+    const multiPathUpdate = {};
+    const activeSignalPaths = [];
+    for (const hash of targetHashes) {
+      const path = `ride_signals/${vehicleType}/${hash}/${rideId}`;
+      multiPathUpdate[path] = signalData;
+      activeSignalPaths.push(path);
+    }
+    await admin.database().ref().update(multiPathUpdate);
 
-    await admin.database().ref(`ride_signals/${rideId}`).set(signalData);
+    // Save the signal paths to Firestore so cleanup functions know where to delete
+    await snap.ref.update({
+      activeSignalPaths,
+      geohash5: centerHash,
+    });
 
     // 2. Send FCM wakeup to drivers in these 9 zones
     // Drivers subscribe to: zone_{geohash5}_{vehicleType}
@@ -676,17 +918,41 @@ exports.expandRideSearch = functions.pubsub
       const neighbors4 = ngeohash.neighbors(centerHash4);
       const expandedHashes = [centerHash4, ...neighbors4];
 
-      // Update RTDB signal with expanded target hashes
+      // Write signal to expanded geohash-4 zone paths in RTDB
       try {
-        const signalRef = admin.database().ref(`ride_signals/${rideId}`);
-        const signalSnap = await signalRef.once("value");
-        if (signalSnap.exists()) {
-          const existing = signalSnap.val();
-          const allHashes = [...new Set([...(existing.targetHashes || []), ...expandedHashes])];
-          await signalRef.update({ targetHashes: allHashes, expanded: true });
+        // Read existing signal data from one of the original paths
+        const existingPaths = data.activeSignalPaths || [];
+        let signalData = null;
+        if (existingPaths.length > 0) {
+          const existingSnap = await admin.database().ref(existingPaths[0]).once("value");
+          if (existingSnap.exists()) {
+            signalData = existingSnap.val();
+          }
+        }
+        if (signalData) {
+          signalData.expanded = true;
+          const expandMultiPath = {};
+          const newPaths = [];
+          for (const hash of expandedHashes) {
+            const path = `ride_signals/${vehicleType}/${hash}/${rideId}`;
+            // Only add if not already covered by existing paths
+            if (!existingPaths.includes(path)) {
+              expandMultiPath[path] = signalData;
+              newPaths.push(path);
+            }
+          }
+          if (Object.keys(expandMultiPath).length > 0) {
+            await admin.database().ref().update(expandMultiPath);
+          }
+          // Append new paths to Firestore
+          if (newPaths.length > 0) {
+            await doc.ref.update({
+              activeSignalPaths: admin.firestore.FieldValue.arrayUnion(...newPaths),
+            });
+          }
         }
       } catch (e) {
-        console.error(`Failed to update RTDB signal for ride ${rideId}:`, e);
+        console.error(`Failed to expand RTDB signals for ride ${rideId}:`, e);
       }
 
       // Send FCM wakeup to wider geohash-4 zones
@@ -760,12 +1026,22 @@ exports.cleanupExpiredRides = functions.pubsub
     const promises = [];
 
     expiredSnapshot.docs.forEach((doc) => {
+      const rideData = doc.data();
       const rideId = doc.id;
       // Update firestore status
       batch.update(doc.ref, { status: "expired" });
       
-      // Delete from RTDB
-      promises.push(admin.database().ref(`ride_signals/${rideId}`).remove());
+      // Delete from RTDB using stored zone paths
+      const paths = rideData.activeSignalPaths || [];
+      if (paths.length > 0) {
+        const removeUpdate = {};
+        for (const p of paths) {
+          removeUpdate[p] = null;
+        }
+        promises.push(admin.database().ref().update(removeUpdate));
+      }
+      // Also cleanup declinedDrivers
+      promises.push(admin.database().ref(`ride_declines/${rideId}`).remove());
     });
 
     promises.push(batch.commit());
@@ -814,8 +1090,16 @@ exports.cleanupStaleAcceptedRides = functions.pubsub
         });
       }
       
-      // Delete from RTDB just in case
-      promises.push(admin.database().ref(`ride_signals/${rideId}`).remove());
+      // Delete from RTDB using stored zone paths
+      const paths = data.activeSignalPaths || [];
+      if (paths.length > 0) {
+        const removeUpdate = {};
+        for (const p of paths) {
+          removeUpdate[p] = null;
+        }
+        promises.push(admin.database().ref().update(removeUpdate));
+      }
+      promises.push(admin.database().ref(`ride_declines/${rideId}`).remove());
     });
 
     promises.push(batch.commit());
@@ -842,3 +1126,214 @@ exports.dailyEarningsSummary = functions.pubsub
       data: { type: "daily_earnings" },
     });
   });
+
+/**
+ * onDriverPresenceChanged
+ * Triggers when a driver's RTDB presence changes. If they disconnect,
+ * mirror this state to Firestore by setting them offline.
+ */
+exports.onDriverPresenceChanged = functions.database
+  .ref("/presence/{driverId}")
+  .onUpdate(async (change, context) => {
+    const isOnline = change.after.val().isOnline;
+    const driverId = context.params.driverId;
+
+    if (isOnline === false) {
+      // Driver disconnected or intentionally went offline
+      try {
+        await admin.firestore().collection("drivers").doc(driverId).update({
+          driverState: "OFFLINE",
+          isOnline: false,
+          activeBidCount: 0,
+          activeRideId: null,
+        });
+        console.log(`Driver ${driverId} marked OFFLINE via Presence disconnect.`);
+      } catch (e) {
+        console.error(`Failed to update offline status for driver ${driverId}:`, e);
+      }
+    }
+  });
+
+/**
+ * onBidStatusChanged
+ * Triggers when a bid document is updated.
+ * Used to decrement the driver's activeBidCount if a rider rejects the bid.
+ */
+exports.onBidStatusChanged = functions.firestore
+  .document("bids/{bidId}")
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+
+    if (before.status === "pending" && after.status === "rejected") {
+      const driverRef = admin.firestore().collection("drivers").doc(after.driverId);
+      try {
+        await admin.firestore().runTransaction(async (t) => {
+          const dSnap = await t.get(driverRef);
+          if (dSnap.exists) {
+            const dData = dSnap.data();
+            const newCount = Math.max(0, (dData.activeBidCount || 1) - 1);
+            const upd = { activeBidCount: newCount };
+            if (newCount === 0 && dData.driverState === "BIDDING") {
+              upd.driverState = "ONLINE_IDLE";
+            }
+            t.update(driverRef, upd);
+            console.log(`Decremented activeBidCount for driver ${after.driverId} due to rejected bid. New count: ${newCount}`);
+          }
+        });
+      } catch (e) {
+        console.error(`Failed to update activeBidCount for rejected bid ${context.params.bidId}:`, e);
+      }
+    }
+  });
+
+/**
+ * cleanupDeadSessions
+ * Scheduled Cron Job (Runs every 30 minutes)
+ * Finds rides stuck in 'started' state for > 4 hours and automatically cancels them.
+ */
+exports.cleanupDeadSessions = functions.pubsub
+  .schedule("every 30 minutes")
+  .onRun(async (context) => {
+    const db = admin.firestore();
+    const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
+    
+    try {
+      const deadRidesSnap = await db.collection("rides")
+        .where("status", "==", "started")
+        .where("startedAt", "<", admin.firestore.Timestamp.fromDate(fourHoursAgo))
+        .get();
+
+      if (deadRidesSnap.empty) {
+        console.log("No dead ride sessions found for cleanup.");
+        return null;
+      }
+
+      console.log(`Found ${deadRidesSnap.size} dead ride sessions. Cleaning up...`);
+
+      const batch = db.batch();
+      
+      deadRidesSnap.forEach((doc) => {
+        const rideData = doc.data();
+        const rideRef = doc.ref;
+        
+        batch.update(rideRef, {
+          status: "cancelled",
+          cancelReason: "system_timeout_dead_session",
+          completedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        if (rideData.driverId) {
+          const driverRef = db.collection("drivers").doc(rideData.driverId);
+          batch.update(driverRef, {
+            driverState: "ONLINE_IDLE",
+            activeRideId: null,
+          });
+        }
+      });
+
+      await batch.commit();
+      console.log(`Successfully cleaned up ${deadRidesSnap.size} dead ride sessions.`);
+      return null;
+    } catch (e) {
+      console.error("Error cleaning up dead sessions:", e);
+      return null;
+    }
+  });
+
+/**
+ * expireRide
+ * Allows a rider to manually expire a ride if no bids are received.
+ */
+exports.expireRide = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Auth required.");
+  }
+
+  const { rideId } = data;
+  if (!rideId) {
+    throw new functions.https.HttpsError("invalid-argument", "Missing rideId.");
+  }
+
+  const db = admin.firestore();
+  const rideRef = db.collection("rides").doc(rideId);
+
+  await db.runTransaction(async (txn) => {
+    const snap = await txn.get(rideRef);
+    if (!snap.exists) return;
+    const ride = snap.data();
+
+    // Safety: Only owner can expire
+    if (ride.riderId !== context.auth.uid) {
+      throw new functions.https.HttpsError("permission-denied", "Not your ride.");
+    }
+
+    // Only if searching/bidding
+    if (ride.status !== "searching" && ride.status !== "bidding") {
+      throw new functions.https.HttpsError("failed-precondition", "Ride is already matched or cancelled.");
+    }
+
+    txn.update(rideRef, { status: "expired" });
+
+    // Cleanup signals
+    if (ride.activeSignalPaths) {
+      txn.set(db.collection("tasks").doc(`cleanup_expire_${rideId}`), {
+        type: "CLEANUP_SIGNALS",
+        paths: ride.activeSignalPaths,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  });
+
+  return { success: true };
+});
+
+/**
+ * processTasks
+ * Listens to the 'tasks' collection and executes background work like
+ * RTDB cleanup and FCM notifications. This keeps the main transaction fast.
+ */
+exports.processTasks = functions.firestore
+  .document("tasks/{taskId}")
+  .onCreate(async (snap, context) => {
+    const task = snap.data();
+    const taskId = context.params.taskId;
+
+    try {
+      if (task.type === "CLEANUP_SIGNALS") {
+        const updates = {};
+        task.paths.forEach(p => { updates[p] = null; });
+        await admin.database().ref().update(updates);
+      } else if (task.type === "NOTIFY_DRIVER_MATCH") {
+        const driverSnap = await admin.firestore().collection("drivers").doc(task.driverId).get();
+        const fcmToken = driverSnap.data()?.fcmToken;
+        if (fcmToken) {
+          await admin.messaging().send({
+            token: fcmToken,
+            notification: {
+              title: task.title,
+              body: task.body,
+            },
+            data: {
+              type: "ride_matched",
+              rideId: task.rideId,
+            },
+            android: {
+              priority: "high",
+              notification: {
+                channelId: "ride_alerts",
+                sound: "default",
+                clickAction: "FLUTTER_NOTIFICATION_CLICK",
+              },
+            },
+          });
+        }
+      }
+
+      // Delete task after completion
+      await snap.ref.delete();
+    } catch (e) {
+      console.error(`Task ${taskId} failed:`, e);
+    }
+  });
+

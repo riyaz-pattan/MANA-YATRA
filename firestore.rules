@@ -38,10 +38,12 @@ service cloud.firestore {
       allow read: if request.auth != null;
       // Only the rider can create their own ride
       allow create: if request.auth.uid == request.resource.data.riderId;
-      // Rider or assigned driver can update. 
-      // Cloud Functions (admin SDK) bypass rules for status transitions.
-      allow update: if request.auth.uid == resource.data.riderId ||
-                       request.auth.uid == resource.data.driverId;
+      // Rider or assigned driver can update, EXCEPT the status field.
+      // Status transitions (matched, started, completed, cancelled) MUST use Cloud Functions.
+      // We allow updates only if the status field is not being changed.
+      allow update: if (request.auth.uid == resource.data.riderId ||
+                        request.auth.uid == resource.data.driverId)
+                    && request.resource.data.status == resource.data.status;
     }
 
     // Bids — hardened with price cap validation
@@ -65,9 +67,9 @@ service cloud.firestore {
         // Driver can only set status to 'withdrawn'
         (request.auth.uid == resource.data.driverId &&
          request.resource.data.status == 'withdrawn') ||
-        // Rider can update bid status (accept/reject)
+        // Rider can only REJECT bids (Accepting MUST go through Cloud Functions)
         (request.auth.uid == resource.data.riderId &&
-         request.resource.data.status in ['accepted', 'rejected']);
+         request.resource.data.status == 'rejected');
     }
 
     // Payments
