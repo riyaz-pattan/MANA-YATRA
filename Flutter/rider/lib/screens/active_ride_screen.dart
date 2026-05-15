@@ -18,6 +18,9 @@ import '../utils/map_style.dart';
 import '../utils/map_utils.dart';
 import 'main_screen.dart';
 import '../utils/custom_toast.dart';
+import '../services/sync_engine.dart';
+import '../models/queue_item.dart';
+import 'package:uuid/uuid.dart';
 import '../widgets/swipe_action.dart';
 
 class ActiveRideScreen extends StatefulWidget {
@@ -300,9 +303,13 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     setState(() => _updating = true);
 
     try {
-      await FirebaseFunctions.instance
-          .httpsCallable('cancelRide')
-          .call({'rideId': widget.rideId});
+      final operationId = const Uuid().v4();
+      final item = QueueItem(
+        id: operationId,
+        type: 'CANCEL_RIDE',
+        payload: {'rideId': widget.rideId},
+      );
+      await context.read<SyncEngine>().enqueue(item);
 
       // ✅ Only reset local state on successful write
       if (!mounted) return;

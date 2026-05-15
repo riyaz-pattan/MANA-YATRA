@@ -4,6 +4,8 @@ import 'package:http/http.dart' as http;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:uuid/uuid.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
 
 class LocationResult {
   final String placeId;
@@ -21,11 +23,22 @@ class LocationResult {
   });
 
   Map<String, dynamic> toMap() => {
+        'place_id': placeId,
         'display_name': displayName,
         'short_name': shortName,
         'lat': lat,
         'lng': lng,
       };
+
+  factory LocationResult.fromMap(Map<String, dynamic> map) {
+    return LocationResult(
+      placeId: map['place_id'] ?? '',
+      displayName: map['display_name'] ?? '',
+      shortName: map['short_name'] ?? '',
+      lat: (map['lat'] as num?)?.toDouble() ?? 0.0,
+      lng: (map['lng'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
 }
 
 class PlacePrediction {
@@ -178,6 +191,25 @@ class GoogleMapsService {
     }
 
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final cachedGeocodeStr = prefs.getString('cached_reverse_geocode');
+      if (cachedGeocodeStr != null) {
+        final cachedData = jsonDecode(cachedGeocodeStr);
+        final cachedLat = (cachedData['lat'] as num).toDouble();
+        final cachedLng = (cachedData['lng'] as num).toDouble();
+        
+        // Calculate distance between requested and cached location
+        final distance = Geolocator.distanceBetween(lat, lng, cachedLat, cachedLng);
+        if (distance < 100) {
+          debugPrint('[GoogleMapsService] Returning cached reverse geocode (moved ${distance.round()}m)');
+          return LocationResult.fromMap(cachedData);
+        }
+      }
+    } catch (e) {
+      debugPrint('[GoogleMapsService] Cache read error: $e');
+    }
+
+    try {
       final uri = Uri.parse(
         'https://maps.googleapis.com/maps/api/geocode/json?latlng=$lat,$lng&key=$_apiKey',
       );
@@ -233,13 +265,23 @@ class GoogleMapsService {
         if (shortName.isEmpty) shortName = 'Unknown location';
       }
 
-      return LocationResult(
+      final result = LocationResult(
         placeId: r['place_id']?.toString() ?? '',
         displayName: r['formatted_address'] ?? '',
         shortName: shortName,
         lat: geometry['lat']?.toDouble() ?? lat,
         lng: geometry['lng']?.toDouble() ?? lng,
       );
+
+      // Cache the result
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('cached_reverse_geocode', jsonEncode(result.toMap()));
+      } catch (e) {
+        debugPrint('[GoogleMapsService] Cache write error: $e');
+      }
+
+      return result;
     } catch (e) {
       debugPrint('Error reverse geocoding: $e');
       return null;

@@ -14,6 +14,9 @@ import 'active_ride_screen.dart';
 import '../screens/main_screen.dart';
 import 'package:provider/provider.dart';
 import '../providers/ride_provider.dart';
+import '../services/sync_engine.dart';
+import '../models/queue_item.dart';
+import 'package:uuid/uuid.dart';
 
 class MatchingScreen extends StatefulWidget {
   final String rideId;
@@ -124,11 +127,16 @@ class _MatchingScreenState extends State<MatchingScreen>
   Future<void> _acceptBid(Map<String, dynamic> bid) async {
     setState(() => _accepting = true);
     try {
-      final callable = FirebaseFunctions.instance.httpsCallable('acceptBid');
-      await callable.call<dynamic>({
-        'rideId': widget.rideId,
-        'bidId': bid['id'],
-      });
+      final operationId = const Uuid().v4();
+      final item = QueueItem(
+        id: operationId,
+        type: 'ACCEPT_BID',
+        payload: {
+          'rideId': widget.rideId,
+          'bidId': bid['id'],
+        },
+      );
+      await context.read<SyncEngine>().enqueue(item);
       // Success! The _listenRide() listener will detect status='matched'
       // and navigate to ActiveRideScreen automatically.
     } on FirebaseFunctionsException catch (e) {
@@ -170,9 +178,13 @@ class _MatchingScreenState extends State<MatchingScreen>
 
   Future<void> _cancelRide() async {
     try {
-      await FirebaseFunctions.instance
-          .httpsCallable('cancelRide')
-          .call({'rideId': widget.rideId});
+      final operationId = const Uuid().v4();
+      final item = QueueItem(
+        id: operationId,
+        type: 'CANCEL_RIDE',
+        payload: {'rideId': widget.rideId},
+      );
+      await context.read<SyncEngine>().enqueue(item);
       if (mounted) {
         context.read<RideProvider>().resetRide();
         Navigator.of(context).pushAndRemoveUntil(

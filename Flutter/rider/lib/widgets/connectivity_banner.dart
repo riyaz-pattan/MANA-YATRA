@@ -2,9 +2,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/connectivity_provider.dart';
+import '../services/sync_engine.dart';
 
 /// Wraps any child widget with a slim, animated offline/online banner.
-/// Drop this at the top level in main.dart around your MaterialApp's home.
+/// Also shows a pending sync indicator when there are queued actions.
 class ConnectivityBanner extends StatefulWidget {
   final Widget child;
   const ConnectivityBanner({super.key, required this.child});
@@ -18,7 +19,6 @@ class _ConnectivityBannerState extends State<ConnectivityBanner>
   late AnimationController _controller;
   late Animation<double> _heightAnim;
 
-  // Track previous offline state to show the "Back Online" flash
   bool _wasOffline = false;
   bool _showBackOnline = false;
 
@@ -45,7 +45,6 @@ class _ConnectivityBannerState extends State<ConnectivityBanner>
       _controller.forward();
     } else {
       if (_wasOffline) {
-        // Briefly show "Back Online" then slide up
         setState(() => _showBackOnline = true);
         Future.delayed(const Duration(seconds: 2), () {
           if (mounted) {
@@ -64,22 +63,24 @@ class _ConnectivityBannerState extends State<ConnectivityBanner>
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<ConnectivityProvider>(
-      builder: (context, connectivity, _) {
-        // Trigger animation whenever status changes
+    return Consumer2<ConnectivityProvider, SyncEngine>(
+      builder: (context, connectivity, syncEngine, _) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _handleConnectivityChange(connectivity.isOffline);
         });
+
+        final pending = syncEngine.pendingCount;
 
         return Column(
           children: [
             SizeTransition(
               sizeFactor: _heightAnim,
               axisAlignment: -1,
-              child: _showBackOnline
-                  ? _OnlineBanner()
-                  : _OfflineBanner(),
+              child: _showBackOnline ? _OnlineBanner() : _OfflineBanner(),
             ),
+            // Show pending sync banner when online but items are queued
+            if (!connectivity.isOffline && pending > 0)
+              _SyncingBanner(count: pending),
             Expanded(child: widget.child),
           ],
         );
@@ -137,6 +138,46 @@ class _OnlineBanner extends StatelessWidget {
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 12,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SyncingBanner extends StatelessWidget {
+  final int count;
+  const _SyncingBanner({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFFF59E0B),
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
+      child: SafeArea(
+        bottom: false,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Syncing $count pending action${count > 1 ? 's' : ''}...',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.3,
               ),

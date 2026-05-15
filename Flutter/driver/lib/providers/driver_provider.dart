@@ -153,16 +153,42 @@ class DriverProvider extends ChangeNotifier {
     }
   }
 
+  /// Called once at app startup to check if a ride was in progress
+  /// when the app was last killed.
+  /// Validates against Firestore to prevent recovering into a finished ride.
   Future<void> loadPersistedState() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final id = prefs.getString(_kActiveRideKey);
+      if (id != null && id.isNotEmpty) {
+        // Validate the ride is still active in Firestore
+        final rideDoc = await FirebaseFirestore.instance
+            .collection('rides')
+            .doc(id)
+            .get();
+        
+        if (rideDoc.exists) {
+          final status = rideDoc.data()?['status'] as String?;
+          if (status == 'matched' || status == 'started') {
+            _persistedRideId = id;
+            notifyListeners();
+            return;
+          }
+        }
+        
+        // Ride is finished or doesn't exist — clear stale persistence
+        await prefs.remove(_kActiveRideKey);
+        _persistedRideId = null;
+      }
+    } catch (e) {
+      // On network error, still recover from local state (offline-first)
+      debugPrint('[DriverProvider] Firestore validation failed, falling back to local: $e');
       final prefs = await SharedPreferences.getInstance();
       final id = prefs.getString(_kActiveRideKey);
       if (id != null && id.isNotEmpty) {
         _persistedRideId = id;
         notifyListeners();
       }
-    } catch (e) {
-      debugPrint('[DriverProvider] Failed to load persisted state: $e');
     }
   }
 

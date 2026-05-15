@@ -7,22 +7,33 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.token.admin == true;
     }
 
-    // Users
+    // Users — schema-validated
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow create: if request.auth.uid == userId;
-      allow update: if request.auth.uid == userId;
+      allow create: if request.auth.uid == userId
+        && request.resource.data.keys().hasAll(['name', 'phone'])
+        && request.resource.data.name is string
+        && request.resource.data.phone is string;
+      allow update: if request.auth.uid == userId
+        // Prevent users from modifying their own UID or role fields
+        && (!request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['uid', 'role', 'createdAt']));
     }
 
-    // Drivers
+    // Drivers — schema-validated
     match /drivers/{driverId} {
       allow read: if request.auth != null;
-      allow create: if request.auth.uid == driverId;
+      allow create: if request.auth.uid == driverId
+        && request.resource.data.keys().hasAll(['name', 'phone', 'vehicleType'])
+        && request.resource.data.vehicleType in ['auto', 'bike'];
       // Drivers can update their own doc. For going online:
       // must be approved, not blocked, and have active subscription.
       // Going offline (isOnline == false) is always allowed.
       // Location updates (lat, lng, geohash) are always allowed.
+      // Drivers can NEVER modify their own isApproved, isBlocked, or subscriptionActiveUntil.
       allow update: if request.auth.uid == driverId &&
+        (!request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['isApproved', 'isBlocked', 'subscriptionActiveUntil', 'createdAt'])) &&
         (
           // Always allow going offline or location updates
           request.resource.data.isOnline == false ||
@@ -33,11 +44,18 @@ service cloud.firestore {
         );
     }
 
-    // Rides
+    // Rides — schema-validated creation
     match /rides/{rideId} {
       allow read: if request.auth != null;
-      // Only the rider can create their own ride
-      allow create: if request.auth.uid == request.resource.data.riderId;
+      // Only the rider can create their own ride, with required fields
+      allow create: if request.auth.uid == request.resource.data.riderId
+        && request.resource.data.keys().hasAll(['riderId', 'status', 'vehicleType', 'pickupLat', 'pickupLng', 'dropLat', 'dropLng'])
+        && request.resource.data.status == 'searching'
+        && request.resource.data.vehicleType in ['auto', 'bike']
+        && request.resource.data.pickupLat is number
+        && request.resource.data.pickupLng is number
+        && request.resource.data.dropLat is number
+        && request.resource.data.dropLng is number;
       // Rider or assigned driver can update, EXCEPT the status field.
       // Status transitions (matched, started, completed, cancelled) MUST use Cloud Functions.
       // We allow updates only if the status field is not being changed.
@@ -56,9 +74,10 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll(['rideId', 'riderId', 'driverId', 'price', 'status'])
         // Status must start as 'pending'
         && request.resource.data.status == 'pending'
-        // Price must be a positive number
+        // Price must be a positive number and capped (prevent abuse)
         && request.resource.data.price is int
-        && request.resource.data.price > 0;
+        && request.resource.data.price > 0
+        && request.resource.data.price <= 50000;
 
       // Update rules:
       // - Drivers can only withdraw their own bids
@@ -72,11 +91,14 @@ service cloud.firestore {
          request.resource.data.status == 'rejected');
     }
 
-    // Payments
+    // Payments — scoped reads, driver-only creation with validation
     match /payments/{paymentId} {
       allow read: if request.auth.uid == resource.data.driverId ||
                      request.auth.uid == resource.data.riderId;
-      allow create: if request.auth.uid == request.resource.data.driverId;
+      allow create: if request.auth.uid == request.resource.data.driverId
+        && request.resource.data.keys().hasAll(['rideId', 'driverId', 'riderId', 'amount'])
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0;
     }
 
     // Notifications log — read only for authenticated users
@@ -85,11 +107,27 @@ service cloud.firestore {
       // Only Cloud Functions (admin SDK) can write
     }
 
-    // Account deletion requests
+    // Account deletion requests — scoped to own requests
     match /account_deletion_requests/{requestId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasAll(['uid', 'role', 'status'])
+        && request.resource.data.status == 'pending'
+        && request.resource.data.role in ['rider', 'driver'];
       // Only admin (Cloud Functions) can update
+    }
+
+    // Operations (idempotency records) — admin-only
+    match /operations/{opId} {
+      allow read, write: if false;
+      // Only Cloud Functions (admin SDK) can read/write
+    }
+
+    // Rate limits — admin-only
+    match /rate_limits/{docId} {
+      allow read, write: if false;
+      // Only Cloud Functions (admin SDK) can read/write
     }
 
     // Admin-only: admin collection

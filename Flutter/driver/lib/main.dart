@@ -4,12 +4,13 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'config/firebase_config.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'config/theme.dart';
 import 'providers/driver_provider.dart';
 import 'providers/connectivity_provider.dart';
-import 'widgets/connectivity_banner.dart';
+
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/pending_screen.dart';
@@ -22,6 +23,11 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'utils/custom_toast.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'services/action_queue_service.dart';
+import 'services/sync_engine.dart';
+import 'services/error_handler.dart';
+import 'repositories/ride_repository.dart';
+import 'repositories/auth_repository.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -39,6 +45,12 @@ final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
+// Global SyncEngine instance — accessible to all screens via Provider
+late final ActionQueueService actionQueueService;
+late final SyncEngine syncEngine;
+late final FirestoreRideRepository rideRepository;
+late final FirebaseAuthRepository authRepository;
+
 void main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
@@ -46,6 +58,19 @@ void main() async {
   // Only await the bare essentials — dotenv + Firebase Auth need to be ready
   await dotenv.load(fileName: ".env");
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
+
+  // Initialize Crashlytics and Global Error Handling
+  await ErrorHandler.initialize();
+
+  // Initialize Hive for persistent action queue
+  await Hive.initFlutter();
+  actionQueueService = ActionQueueService();
+  await actionQueueService.init();
+  syncEngine = SyncEngine(actionQueueService);
+  syncEngine.start();
+  
+  rideRepository = FirestoreRideRepository(syncEngine: syncEngine);
+  authRepository = FirebaseAuthRepository();
 
   // Remove splash immediately — UI is ready to render
   FlutterNativeSplash.remove();
@@ -96,6 +121,9 @@ class ManaYatraDriverApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => DriverProvider()),
         ChangeNotifierProvider(create: (_) => ConnectivityProvider()),
+        ChangeNotifierProvider.value(value: syncEngine),
+        Provider<RideRepository>.value(value: rideRepository),
+        Provider<AuthRepository>.value(value: authRepository),
       ],
       child: MaterialApp(
         scaffoldMessengerKey: rootScaffoldMessengerKey,
@@ -103,7 +131,7 @@ class ManaYatraDriverApp extends StatelessWidget {
         title: 'Mana Yatra - Driver',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
-        home: const ConnectivityBanner(child: AuthGate()),
+        home: const AuthGate(),
       ),
     );
   }

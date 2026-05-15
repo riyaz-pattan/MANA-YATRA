@@ -14,6 +14,7 @@ import '../providers/ride_provider.dart';
 import '../services/google_maps_service.dart';
 import '../utils/map_style.dart';
 import '../utils/custom_toast.dart';
+import 'package:uuid/uuid.dart';
 import '../utils/marker_utils.dart';
 import 'location_search_screen.dart';
 import 'matching_screen.dart';
@@ -370,7 +371,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final uid = FirebaseAuth.instance.currentUser!.uid;
     final phone = FirebaseAuth.instance.currentUser!.phoneNumber;
 
-    final rideDoc = await FirebaseFirestore.instance.collection('rides').add({
+    // Client-generated doc ID — allows immediate navigation while
+    // Firestore's offline persistence + Cloud Function handles delivery.
+    final rideId = const Uuid().v4();
+
+    await FirebaseFirestore.instance.collection('rides').doc(rideId).set({
       'riderId': uid,
       'riderPhone': phone,
       'pickup': provider.pickup!.toMap(),
@@ -389,7 +394,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => MatchingScreen(rideId: rideDoc.id),
+          builder: (_) => MatchingScreen(rideId: rideId),
         ),
       );
     }

@@ -10,6 +10,75 @@ admin.initializeApp();
 // ============================================================
 const HEARTBEAT_MAX_AGE_SEC = 300; // 5 minutes (App sends heartbeat every 2m, needs buffer)
 const RIDE_EXPIRY_MINUTES = 5;
+const OPERATION_TTL_DAYS = 30; // How long to keep operationIds for dedup
+
+// ============================================================
+// IDEMPOTENCY HELPER
+// ============================================================
+/**
+ * checkAndRecordOperation(db, operationId, resultData)
+ *
+ * Checks if an operationId has already been processed.
+ * - If YES: throws HttpsError("already-exists") — client SyncEngine treats this as success.
+ * - If NO: records the operationId in the `operations` collection for future dedup.
+ *
+ * Call this AFTER successful transaction commit to avoid recording failed ops.
+ */
+async function checkIdempotency(db, operationId) {
+  if (!operationId) return; // Backwards compat — old clients without operationId
+  const opRef = db.collection("operations").doc(operationId);
+  const opSnap = await opRef.get();
+  if (opSnap.exists) {
+    throw new functions.https.HttpsError(
+      "already-exists",
+      "Operation already processed."
+    );
+  }
+}
+
+async function recordOperation(db, operationId, type) {
+  if (!operationId) return;
+  await db.collection("operations").doc(operationId).set({
+    type,
+    processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    expiresAt: new Date(Date.now() + OPERATION_TTL_DAYS * 86400000),
+  });
+}
+
+// ============================================================
+// RATE LIMITING HELPER
+// ============================================================
+/**
+ * checkRateLimit
+ * Prevents API abuse by limiting calls per UID per action.
+ */
+async function checkRateLimit(db, uid, action, limitCount = 10, windowMs = 60000) {
+  const rateLimitRef = db.collection('rate_limits').doc(`${uid}_${action}`);
+  const now = Date.now();
+  
+  await db.runTransaction(async (txn) => {
+    const snap = await txn.get(rateLimitRef);
+    let data = snap.data();
+    
+    if (!snap.exists || !data || (now - data.windowStart) > windowMs) {
+      // Reset or start new window
+      txn.set(rateLimitRef, {
+        windowStart: now,
+        count: 1
+      });
+    } else {
+      if (data.count >= limitCount) {
+        throw new functions.https.HttpsError(
+          'resource-exhausted',
+          `Rate limit exceeded for action: ${action}`
+        );
+      }
+      txn.update(rateLimitRef, {
+        count: admin.firestore.FieldValue.increment(1)
+      });
+    }
+  });
+}
 
 /**
  * acceptBid (Callable)
@@ -34,7 +103,7 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
     );
   }
 
-  const { rideId, bidId } = data;
+  const { rideId, bidId, operationId } = data;
   if (!rideId || !bidId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
@@ -43,6 +112,12 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
   }
 
   const db = admin.firestore();
+
+  // Rate Limiting (e.g. max 10 acceptBid calls per minute per user)
+  await checkRateLimit(db, context.auth.uid, 'acceptBid', 10, 60000);
+
+  // Idempotency: if this operationId was already processed, return success
+  await checkIdempotency(db, operationId);
   const rideRef = db.collection("rides").doc(rideId);
   const bidRef = db.collection("bids").doc(bidId);
 
@@ -181,6 +256,9 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
       });
     });
 
+    // Record idempotency key after successful commit
+    await recordOperation(db, operationId, "acceptBid");
+
     return { success: true };
   } catch (error) {
     // Re-throw HttpsErrors as-is, wrap others
@@ -202,6 +280,7 @@ exports.startRide = functions.https.onCall(async (data, context) => {
   }
 
   const rideId = data.rideId;
+  const operationId = data.operationId;
   const driverId = context.auth.uid;
 
   if (!rideId) {
@@ -209,6 +288,11 @@ exports.startRide = functions.https.onCall(async (data, context) => {
   }
 
   const db = admin.firestore();
+
+  // Rate Limiting
+  await checkRateLimit(db, driverId, 'startRide', 10, 60000);
+
+  await checkIdempotency(db, operationId);
   const rideRef = db.collection("rides").doc(rideId);
 
   try {
@@ -238,6 +322,7 @@ exports.startRide = functions.https.onCall(async (data, context) => {
       });
     });
 
+    await recordOperation(db, operationId, "startRide");
     return { success: true };
   } catch (error) {
     if (error instanceof functions.https.HttpsError) throw error;
@@ -256,6 +341,7 @@ exports.completeRide = functions.https.onCall(async (data, context) => {
   }
 
   const rideId = data.rideId;
+  const operationId = data.operationId;
   const driverId = context.auth.uid;
 
   if (!rideId) {
@@ -263,6 +349,11 @@ exports.completeRide = functions.https.onCall(async (data, context) => {
   }
 
   const db = admin.firestore();
+
+  // Rate Limiting
+  await checkRateLimit(db, driverId, 'completeRide', 10, 60000);
+
+  await checkIdempotency(db, operationId);
   const rideRef = db.collection("rides").doc(rideId);
   const driverRef = db.collection("drivers").doc(driverId);
 
@@ -299,6 +390,7 @@ exports.completeRide = functions.https.onCall(async (data, context) => {
       });
     });
 
+    await recordOperation(db, operationId, "completeRide");
     return { success: true };
   } catch (error) {
     if (error instanceof functions.https.HttpsError) throw error;
@@ -317,6 +409,7 @@ exports.cancelRide = functions.https.onCall(async (data, context) => {
   }
 
   const rideId = data.rideId;
+  const operationId = data.operationId;
   const userId = context.auth.uid;
 
   if (!rideId) {
@@ -324,6 +417,11 @@ exports.cancelRide = functions.https.onCall(async (data, context) => {
   }
 
   const db = admin.firestore();
+
+  // Rate Limiting
+  await checkRateLimit(db, userId, 'cancelRide', 10, 60000);
+
+  await checkIdempotency(db, operationId);
   const rideRef = db.collection("rides").doc(rideId);
 
   try {
@@ -355,16 +453,97 @@ exports.cancelRide = functions.https.onCall(async (data, context) => {
         cancelReason: data.reason || "user_cancelled",
         cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
       });
-
-      // Let onRideStatusChanged handle the driver state reset and signal cleanup
-      // This keeps the transaction small and fast
     });
 
+    await recordOperation(db, operationId, "cancelRide");
     return { success: true };
   } catch (error) {
     if (error instanceof functions.https.HttpsError) throw error;
     console.error("cancelRide error:", error);
     throw new functions.https.HttpsError("internal", "Failed to cancel ride.");
+  }
+});
+
+/**
+ * placeBid (Callable)
+ *
+ * Server-authoritative bid placement. Replaces the driver app's direct
+ * Firestore write to `bids` collection. Validates ride status and driver
+ * state before creating the bid document.
+ *
+ * Idempotent via operationId — safe to retry.
+ */
+exports.placeBid = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Please log in.");
+  }
+
+  const {
+    rideId, riderId, price, driverName, driverPhone,
+    vehicleType, vehicleNumber, driverLat, driverLng, operationId,
+  } = data;
+  const driverId = context.auth.uid;
+
+  if (!rideId || !price) {
+    throw new functions.https.HttpsError("invalid-argument", "Missing rideId or price.");
+  }
+
+  const db = admin.firestore();
+
+  // Rate Limiting — drivers bid frequently, allow 20/min
+  await checkRateLimit(db, driverId, 'placeBid', 20, 60000);
+
+  await checkIdempotency(db, operationId);
+
+  // Validate ride is still accepting bids
+  const rideSnap = await db.collection("rides").doc(rideId).get();
+  if (!rideSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "Ride not found.");
+  }
+  const ride = rideSnap.data();
+  if (ride.status !== "searching" && ride.status !== "bidding") {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Ride is no longer accepting bids."
+    );
+  }
+
+  try {
+    // Create bid document
+    const bidRef = await db.collection("bids").add({
+      rideId,
+      riderId: riderId || ride.riderId,
+      driverId,
+      driverName: driverName || "Driver",
+      driverPhone: driverPhone || "",
+      vehicleType: vehicleType || "auto",
+      vehicleNumber: vehicleNumber || "",
+      price,
+      driverLat: driverLat || null,
+      driverLng: driverLng || null,
+      status: "pending",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Update driver state
+    const driverUpdates = {
+      activeBidCount: admin.firestore.FieldValue.increment(1),
+    };
+    const driverSnap = await db.collection("drivers").doc(driverId).get();
+    if (driverSnap.exists) {
+      const dState = driverSnap.data().driverState;
+      if (dState === "ONLINE_IDLE") {
+        driverUpdates.driverState = "BIDDING";
+      }
+    }
+    await db.collection("drivers").doc(driverId).update(driverUpdates);
+
+    await recordOperation(db, operationId, "placeBid");
+    return { success: true, bidId: bidRef.id };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error("placeBid error:", error);
+    throw new functions.https.HttpsError("internal", "Failed to place bid.");
   }
 });
 

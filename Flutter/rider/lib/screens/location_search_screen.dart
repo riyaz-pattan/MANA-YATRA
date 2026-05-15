@@ -144,7 +144,7 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
       });
       return;
     }
-    _debounce = Timer(const Duration(milliseconds: 400), () async {
+    _debounce = Timer(const Duration(milliseconds: 1000), () async {
       setState(() => _searching = true);
       final results = await GoogleMapsService.getPlacePredictions(query);
       if (mounted) {

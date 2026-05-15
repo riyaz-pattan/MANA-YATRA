@@ -16,6 +16,9 @@ import 'package:provider/provider.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../providers/driver_provider.dart';
 import '../services/smart_tracker.dart';
+import '../services/sync_engine.dart';
+import '../models/queue_item.dart';
+import 'package:uuid/uuid.dart';
 import 'dashboard_screen.dart';
 import '../widgets/swipe_action.dart';
 
@@ -280,9 +283,13 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     );
 
     try {
-      await FirebaseFunctions.instance
-          .httpsCallable('startRide')
-          .call({'rideId': widget.rideId});
+      final operationId = const Uuid().v4();
+      final item = QueueItem(
+        id: operationId,
+        type: 'START_RIDE',
+        payload: {'rideId': widget.rideId},
+      );
+      await context.read<SyncEngine>().enqueue(item);
     } catch (e) {
       debugPrint('Error starting ride: $e');
       if (mounted) {
@@ -303,9 +310,13 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     setState(() => _updating = true);
 
     try {
-      await FirebaseFunctions.instance
-          .httpsCallable('completeRide')
-          .call({'rideId': widget.rideId});
+      final operationId = const Uuid().v4();
+      final item = QueueItem(
+        id: operationId,
+        type: 'COMPLETE_RIDE',
+        payload: {'rideId': widget.rideId},
+      );
+      await context.read<SyncEngine>().enqueue(item);
 
       if (!mounted) return;
 
@@ -332,9 +343,13 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     setState(() => _updating = true);
 
     try {
-      await FirebaseFunctions.instance
-          .httpsCallable('cancelRide')
-          .call({'rideId': widget.rideId});
+      final operationId = const Uuid().v4();
+      final item = QueueItem(
+        id: operationId,
+        type: 'CANCEL_RIDE',
+        payload: {'rideId': widget.rideId},
+      );
+      await context.read<SyncEngine>().enqueue(item);
 
       // ✅ Only reset local state on successful write
       if (!mounted) return;

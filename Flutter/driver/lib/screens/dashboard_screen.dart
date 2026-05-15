@@ -21,6 +21,9 @@ import 'profile_screen.dart';
 import 'support_screen.dart';
 import 'settings_screen.dart';
 import '../utils/custom_toast.dart';
+import '../services/sync_engine.dart';
+import '../models/queue_item.dart';
+import 'package:uuid/uuid.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -424,34 +427,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() => _bidding = true);
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
+      final operationId = const Uuid().v4();
 
-      await FirebaseFirestore.instance.collection('bids').add({
-        'rideId': ride['id'],
-        'riderId': ride['riderId'],
-        'driverId': uid,
-        'driverName': provider.profile?['name'] ?? 'Driver',
-        'driverPhone': provider.profile?['phone'] ?? '',
-        'vehicleType': provider.profile?['vehicleType'] ?? 'auto',
-        'vehicleNumber': provider.profile?['vehicleNumber'] ?? '',
-        'price': bidPrice,
-        'driverLat': provider.lat,
-        'driverLng': provider.lng,
-        'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      // Enqueue to durable queue — SyncEngine will deliver via placeBid Cloud Function
+      final item = QueueItem(
+        id: operationId,
+        type: 'PLACE_BID',
+        payload: {
+          'rideId': ride['id'],
+          'riderId': ride['riderId'],
+          'price': bidPrice,
+          'driverName': provider.profile?['name'] ?? 'Driver',
+          'driverPhone': provider.profile?['phone'] ?? '',
+          'vehicleType': provider.profile?['vehicleType'] ?? 'auto',
+          'vehicleNumber': provider.profile?['vehicleNumber'] ?? '',
+          'driverLat': provider.lat,
+          'driverLng': provider.lng,
+        },
+      );
+      await context.read<SyncEngine>().enqueue(item);
 
-      // Update driver state: ONLINE_IDLE → BIDDING, and increment activeBidCount
-      final driverUpdates = <String, dynamic>{
-        'activeBidCount': FieldValue.increment(1),
-      };
+      // Optimistic local state update
       if (provider.driverState == 'ONLINE_IDLE') {
-        driverUpdates['driverState'] = 'BIDDING';
         provider.setDriverState('BIDDING');
       }
-      await FirebaseFirestore.instance
-          .collection('drivers')
-          .doc(uid)
-          .update(driverUpdates);
 
       setState(() {
         _biddedRides[ride['id']] = bidPrice;

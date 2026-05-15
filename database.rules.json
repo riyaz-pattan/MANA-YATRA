@@ -2,25 +2,45 @@
   "rules": {
     ".read": "false",
     ".write": "false",
+
     "ride_signals": {
       "$vehicleType": {
+        ".validate": "$vehicleType === 'auto' || $vehicleType === 'bike'",
         "$geohash": {
           ".read": "auth != null",
-          ".write": false
+          ".write": false,
+          ".validate": "newData.hasChildren(['rideId', 'riderId', 'createdAt'])"
         }
       }
     },
+
     "ride_declines": {
       "$rideId": {
         ".read": "auth != null",
-        ".write": "auth != null"
+        "$driverId": {
+          ".write": "auth != null && auth.uid === $driverId",
+          ".validate": "newData.isBoolean()"
+        }
       }
     },
+
     "liveLocations": {
       "$driverId": {
         ".read": "auth != null",
-        ".write": "auth != null && auth.uid === $driverId"
+        ".write": "auth != null && auth.uid === $driverId",
+        ".validate": "newData.hasChildren(['lat', 'lng', 'timestamp']) && newData.child('lat').isNumber() && newData.child('lng').isNumber() && newData.child('timestamp').isNumber()"
       }
+    },
+
+    "presence": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+
+    ".info": {
+      ".read": true
     }
   }
 }
