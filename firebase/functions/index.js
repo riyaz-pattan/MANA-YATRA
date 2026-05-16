@@ -153,6 +153,13 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
       }
       const driver = driverSnap.data();
 
+      // PRE-FETCH READS
+      // Fetch other bids to reject (Firestore transactions require all reads before writes)
+      const otherBidsQuery = db.collection("bids")
+        .where("rideId", "==", rideId)
+        .where("status", "==", "pending");
+      const otherBidsSnap = await txn.get(otherBidsQuery);
+
       // ── CHECK 1: Ride status ──
       if (ride.status !== "searching" && ride.status !== "bidding") {
         throw new functions.https.HttpsError(
@@ -210,6 +217,8 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
         driverName: bid.driverName || "Driver",
         driverPhone: bid.driverPhone || "",
         vehicleNumber: bid.vehicleNumber || "",
+        driverImageUrl: bid.driverImageUrl || "",
+        vehicleImageUrl: bid.vehicleImageUrl || "",
         finalPrice: bid.price,
         rideOtp: otp,
         matchedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -219,10 +228,6 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
       txn.update(bidRef, { status: "accepted" });
 
       // 3. Reject other bids for this ride
-      const otherBidsQuery = db.collection("bids")
-        .where("rideId", "==", rideId)
-        .where("status", "==", "pending");
-      const otherBidsSnap = await txn.get(otherBidsQuery);
       otherBidsSnap.forEach((doc) => {
         if (doc.id !== bidId) {
           txn.update(doc.ref, { status: "rejected_by_system" });
@@ -480,7 +485,7 @@ exports.placeBid = functions.https.onCall(async (data, context) => {
 
   const {
     rideId, riderId, price, driverName, driverPhone,
-    vehicleType, vehicleNumber, driverLat, driverLng, operationId,
+    vehicleType, vehicleNumber, driverImageUrl, vehicleImageUrl, driverLat, driverLng, operationId,
   } = data;
   const driverId = context.auth.uid;
 
@@ -518,6 +523,8 @@ exports.placeBid = functions.https.onCall(async (data, context) => {
       driverPhone: driverPhone || "",
       vehicleType: vehicleType || "auto",
       vehicleNumber: vehicleNumber || "",
+      driverImageUrl: driverImageUrl || "",
+      vehicleImageUrl: vehicleImageUrl || "",
       price,
       driverLat: driverLat || null,
       driverLng: driverLng || null,

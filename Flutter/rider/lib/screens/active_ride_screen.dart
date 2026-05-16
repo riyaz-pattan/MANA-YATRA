@@ -1,5 +1,6 @@
 // lib/screens/active_ride_screen.dart
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -10,17 +11,16 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
+import 'package:confetti/confetti.dart';
 import '../config/theme.dart';
 import '../config/constants.dart';
 import '../providers/ride_provider.dart';
 import '../services/google_maps_service.dart';
 import '../utils/map_style.dart';
 import '../utils/map_utils.dart';
+import '../utils/marker_utils.dart';
 import 'main_screen.dart';
 import '../utils/custom_toast.dart';
-import '../services/sync_engine.dart';
-import '../models/queue_item.dart';
-import 'package:uuid/uuid.dart';
 import '../widgets/swipe_action.dart';
 
 class ActiveRideScreen extends StatefulWidget {
@@ -40,12 +40,14 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   bool _cameraFitted = false;
   BitmapDescriptor? _vehicleIcon;
   BitmapDescriptor? _driverLabelIcon;
+  BitmapDescriptor? _dropDot;
   List<LatLng> _approachRouteCoords = [];
   bool _isFetchingApproach = false;
   double _driverHeading = 0.0;
   String _driverProximity = '';
   bool _updating = false;
   bool _isDriverSignalStale = false;
+  ConfettiController? _confettiController;
 
   @override
   void initState() {
@@ -67,33 +69,40 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         .snapshots()
         .listen((snap) {
       if (!snap.exists) return;
-      final data = snap.data()!;
-      data['id'] = snap.id;
-      setState(() => _ride = data);
+      try {
+        final data = Map<String, dynamic>.from(snap.data() as Map);
+        data['id'] = snap.id;
+        if (!mounted) return;
+        setState(() => _ride = data);
 
-      // Fit camera to route once
-      if (!_cameraFitted && _mapController != null) {
-        _fitCameraToCurrentRoute();
-      }
+        // Fit camera to route once
+        if (!_cameraFitted && _mapController != null) {
+          _fitCameraToCurrentRoute();
+        }
 
-      // Load custom vehicle icon
-      if (_vehicleIcon == null) {
-        _loadIcon(data['vehicleType'] ?? 'auto');
-      }
+        // Load custom vehicle icon
+        if (_vehicleIcon == null) {
+          _loadIcon(data['vehicleType'] ?? 'auto');
+        }
 
-      // Start listening to driver location when ride has a driver
-      if (data['driverId'] != null && _locationListener == null) {
-        _listenDriverLocation(data['driverId']);
-      }
-      
-      // Fetch approach route if matched
-      if (data['status'] == 'matched' && _driverPos != null) {
-        _fetchApproachRoute();
-      }
+        // Start listening to driver location when ride has a driver
+        if (data['driverId'] != null && _locationListener == null) {
+          _listenDriverLocation(data['driverId']);
+        }
+        
+        // Fetch approach route if matched
+        if (data['status'] == 'matched' && _driverPos != null) {
+          _fetchApproachRoute();
+        }
 
-      if (data['status'] == 'completed' || data['status'] == 'cancelled') {
-        _showRideEndDialog(data['status']);
+        if (data['status'] == 'completed' || data['status'] == 'cancelled') {
+          // The build method now handles returning the full screen End UI
+        }
+      } catch (e) {
+        debugPrint('Error in _listenRide: $e');
       }
+    }, onError: (error) {
+      debugPrint('Firestore stream error: $error');
     });
   }
 
@@ -102,6 +111,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     try {
       _vehicleIcon = await MapUtils.getBytesFromAsset(path, 100);
       _driverLabelIcon = await MapUtils.createLabelMarker('Driver is here');
+      _dropDot = await MarkerGenerator.createDotMarker(color: AppTheme.danger);
       if (mounted) setState(() {});
     } catch (_) {}
   }
@@ -174,128 +184,309 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         FirebaseDatabase.instance.ref('liveLocations/$driverId');
     _locationListener = ref.onValue.listen((event) {
       if (event.snapshot.value != null) {
-        final data = Map<String, dynamic>.from(
-            event.snapshot.value as Map);
-        final lat = (data['lat'] as num).toDouble();
-        final lng = (data['lng'] as num).toDouble();
-        final newPos = LatLng(lat, lng);
-        
-        if (_driverPos != null && (newPos.latitude != _driverPos!.latitude || newPos.longitude != _driverPos!.longitude)) {
-           _driverHeading = Geolocator.bearingBetween(
-              _driverPos!.latitude, _driverPos!.longitude,
-              newPos.latitude, newPos.longitude,
-           );
-        }
-        
-        // Calculate proximity
-        String proximity = '';
-        if (_ride != null && _ride!['pickup'] != null) {
-           final pLat = (_ride!['pickup']['lat'] as num).toDouble();
-           final pLng = (_ride!['pickup']['lng'] as num).toDouble();
-           final dist = Geolocator.distanceBetween(lat, lng, pLat, pLng);
-           if (dist < 100) {
-             proximity = 'Arriving soon';
-           } else if (dist < 1000) {
-             proximity = '${dist.round()}m away';
-           } else {
-             proximity = '${(dist/1000).toStringAsFixed(1)}km away';
-           }
-        }
-        
-        // Check stale signal (if updated > 30s ago)
-        bool isStale = false;
-        if (data['updatedAt'] != null) {
-          final updatedAt = data['updatedAt'] as int;
-          final now = DateTime.now().millisecondsSinceEpoch;
-          if (now - updatedAt > 30000) {
-            isStale = true;
+        try {
+          final data = Map<String, dynamic>.from(
+              event.snapshot.value as Map);
+          final lat = (data['lat'] as num).toDouble();
+          final lng = (data['lng'] as num).toDouble();
+          final newPos = LatLng(lat, lng);
+          
+          if (_driverPos != null && (newPos.latitude != _driverPos!.latitude || newPos.longitude != _driverPos!.longitude)) {
+             _driverHeading = Geolocator.bearingBetween(
+                _driverPos!.latitude, _driverPos!.longitude,
+                newPos.latitude, newPos.longitude,
+             );
           }
-        }
+          
+          // Calculate proximity
+          String proximity = '';
+          if (_ride != null && _ride!['pickup'] != null) {
+             final pLat = (_ride!['pickup']['lat'] as num).toDouble();
+             final pLng = (_ride!['pickup']['lng'] as num).toDouble();
+             final dist = Geolocator.distanceBetween(lat, lng, pLat, pLng);
+             if (dist < 100) {
+               proximity = 'Arriving soon';
+             } else if (dist < 1000) {
+               proximity = '${dist.round()}m away';
+             } else {
+               proximity = '${(dist/1000).toStringAsFixed(1)}km away';
+             }
+          }
+          
+          // Check stale signal (if updated > 30s ago)
+          bool isStale = false;
+          if (data['updatedAt'] != null) {
+            final updatedAt = data['updatedAt'] as int;
+            final now = DateTime.now().millisecondsSinceEpoch;
+            if (now - updatedAt > 30000) {
+              isStale = true;
+            }
+          }
 
-        setState(() {
-          _driverPos = newPos;
-          _driverProximity = proximity;
-          _isDriverSignalStale = isStale;
-        });
+          if (mounted) {
+            setState(() {
+              _driverPos = newPos;
+              _driverProximity = proximity;
+              _isDriverSignalStale = isStale;
+            });
+          }
 
-        if (_ride?['status'] == 'matched') {
-           _fetchApproachRoute();
-           if (_cameraFitted) {
-              // we keep camera stable, user can manually move
-           } else {
-              _mapController?.animateCamera(CameraUpdate.newLatLng(newPos));
-           }
+          if (_ride?['status'] == 'matched') {
+             _fetchApproachRoute();
+             if (_cameraFitted) {
+                // we keep camera stable, user can manually move
+             } else {
+                _mapController?.animateCamera(CameraUpdate.newLatLng(newPos));
+             }
+          }
+        } catch (e) {
+          debugPrint('Error parsing driver location: $e');
         }
       }
+    }, onError: (error) {
+      debugPrint('RTDB driver location error: $error');
     });
   }
 
-  void _showRideEndDialog(String status) {
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => AlertDialog(
-          backgroundColor: AppTheme.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                status == 'completed' ? '✅' : '❌',
-                style: const TextStyle(fontSize: 52),
+  Widget _buildEndScreen(String status) {
+    final isCompleted = status == 'completed';
+
+    _confettiController ??= ConfettiController(duration: const Duration(seconds: 4));
+    if (isCompleted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _confettiController?.play();
+      });
+    }
+
+    final finalPrice = _ride?['finalPrice'] ?? _ride?['riderBid'] ?? 0;
+    final distanceKm = _ride?['distanceKm'];
+    final durationMin = _ride?['durationMin'];
+
+    return Container(
+      color: Colors.black.withValues(alpha: 0.6), // Semi-transparent overlay
+      child: Stack(
+        alignment: Alignment.topCenter,
+        children: [
+          if (isCompleted)
+            Align(
+              alignment: Alignment.topCenter,
+              child: ConfettiWidget(
+                confettiController: _confettiController!,
+                blastDirection: pi / 2,
+                blastDirectionality: BlastDirectionality.explosive,
+                emissionFrequency: 0.06,
+                numberOfParticles: 20,
+                maxBlastForce: 30,
+                minBlastForce: 10,
+                gravity: 0.3,
+                shouldLoop: false,
+                colors: const [
+                  Color(0xFF10B981),
+                  Color(0xFFF59E0B),
+                  Color(0xFF3B82F6),
+                  Color(0xFFEF4444),
+                  Color(0xFF8B5CF6),
+                  Color(0xFFF97316),
+                ],
               ),
-              const SizedBox(height: 16),
-              Text(
-                status == 'completed'
-                    ? 'Ride Completed!'
-                    : 'Ride Cancelled',
-                style: GoogleFonts.inter(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              if (status == 'completed' && _ride != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  '₹${_ride!['finalPrice'] ?? ''}',
-                  style: GoogleFonts.inter(
-                    fontSize: 36,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.success,
+            ),
+          Center(
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 24),
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: AppTheme.bg,
+                borderRadius: BorderRadius.circular(32),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    blurRadius: 30,
+                    offset: const Offset(0, 10),
                   ),
-                ),
-                Text(
-                  'Cash Payment',
-                  style: GoogleFonts.inter(
-                    color: AppTheme.text3,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    context.read<RideProvider>().resetRide();
-                    Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(
-                          builder: (_) => const MainScreen()),
-                      (_) => false,
-                    );
-                  },
-                  child: const Text('Back to Home'),
+                ],
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Icon
+                    Container(
+                      width: 90,
+                      height: 90,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: (isCompleted ? AppTheme.success : AppTheme.danger)
+                            .withValues(alpha: 0.12),
+                      ),
+                      child: Icon(
+                        isCompleted ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                        color: isCompleted ? AppTheme.success : AppTheme.danger,
+                        size: 60,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      isCompleted ? 'Ride Completed! 🎉' : 'Ride Cancelled',
+                      style: GoogleFonts.inter(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.text,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      isCompleted
+                          ? 'Thank you for riding with Ashwa!'
+                          : 'The ride was cancelled.',
+                      style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2),
+                      textAlign: TextAlign.center,
+                    ),
+
+                    if (isCompleted) ...[
+                      const SizedBox(height: 24),
+                      // Fare card
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: AppTheme.bg2,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: AppTheme.border),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              '₹$finalPrice',
+                              style: GoogleFonts.inter(
+                                fontSize: 42,
+                                fontWeight: FontWeight.w900,
+                                color: AppTheme.success,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Total Fare — Paid via Cash',
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                color: AppTheme.text2,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            const Divider(),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                                _statChip(
+                                  Icons.route_rounded,
+                                  distanceKm != null
+                                      ? '${(distanceKm as num).toStringAsFixed(1)} km'
+                                      : '—',
+                                  'Distance',
+                                ),
+                                _statChip(
+                                  Icons.timer_rounded,
+                                  durationMin != null ? '$durationMin min' : '—',
+                                  'Duration',
+                                ),
+                                _statChip(
+                                  Icons.percent_rounded,
+                                  '0%',
+                                  'App Fee',
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      // Zero commission banner
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.4)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Text('🎯', style: TextStyle(fontSize: 20)),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Ashwa takes ZERO commission. 100% of the fare goes directly to your driver!',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.success,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          _confettiController?.stop();
+                          context.read<RideProvider>().resetRide();
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(builder: (_) => const MainScreen()),
+                            (_) => false,
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          backgroundColor: AppTheme.primary,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16)),
+                          elevation: 0,
+                        ),
+                        child: Text(
+                          'Back to Home',
+                          style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statChip(IconData icon, String value, String label) {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, size: 22, color: AppTheme.primary),
         ),
-      );
-    });
+        const SizedBox(height: 6),
+        Text(value,
+            style: GoogleFonts.inter(
+                fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.text)),
+        Text(label,
+            style: GoogleFonts.inter(fontSize: 11, color: AppTheme.text3)),
+      ],
+    );
   }
 
   Future<void> _cancelRide() async {
@@ -303,17 +494,15 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     setState(() => _updating = true);
 
     try {
-      final operationId = const Uuid().v4();
-      final item = QueueItem(
-        id: operationId,
-        type: 'CANCEL_RIDE',
-        payload: {'rideId': widget.rideId},
-      );
-      await context.read<SyncEngine>().enqueue(item);
+      final callable = FirebaseFunctions.instance.httpsCallable('cancelRide');
+      await callable.call({'rideId': widget.rideId});
 
-      // ✅ Only reset local state on successful write
       if (!mounted) return;
-      context.read<RideProvider>().setActiveRide(null);
+      context.read<RideProvider>().resetRide();
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const MainScreen()),
+        (_) => false,
+      );
     } catch (e) {
       debugPrint('Error cancelling ride: $e');
       if (mounted) {
@@ -339,11 +528,13 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     }
 
     final status = _ride!['status'] ?? 'matched';
+    final isEndState = status == 'completed' || status == 'cancelled';
+
     // Build route coordinates based on status
     final routeCoords = <LatLng>[];
     if (status == 'matched') {
       routeCoords.addAll(_approachRouteCoords);
-    } else if (status == 'started') {
+    } else if (status == 'started' || status == 'completed') {
       if (_ride!['routeCoordinates'] != null) {
         for (final c in _ride!['routeCoordinates']) {
           routeCoords.add(LatLng(
@@ -359,6 +550,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         children: [
           // Map
           GoogleMap(
+            // Ensure maps buttons (zoom, etc) are above the bottom sheet in all states
+            padding: EdgeInsets.only(bottom: status == 'matched' ? 320 : 340),
             style: lightMapStyle,
             myLocationEnabled: true,
             myLocationButtonEnabled: false,
@@ -389,15 +582,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                   }
                 : {},
             markers: {
-              if (_ride!['pickup'] != null && status == 'matched')
-                Marker(
-                  markerId: const MarkerId('pickup'),
-                  position: LatLng(
-                    (_ride!['pickup']['lat'] as num).toDouble(),
-                    (_ride!['pickup']['lng'] as num).toDouble(),
-                  ),
-                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-                ),
+              // Rider's own location is shown by the native blue dot (myLocationEnabled: true).
+              // No custom pickup marker needed — avoids the green icon confusion.
               if (_ride!['drop'] != null && status == 'started')
                 Marker(
                   markerId: const MarkerId('drop'),
@@ -405,7 +591,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                     (_ride!['drop']['lat'] as num).toDouble(),
                     (_ride!['drop']['lng'] as num).toDouble(),
                   ),
-                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+                  icon: _dropDot ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
                 ),
               if (_driverPos != null)
                 Marker(
@@ -414,113 +600,119 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                   icon: _vehicleIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
                   rotation: _driverHeading,
                   anchor: const Offset(0.5, 0.5),
-                  zIndex: 1,
+                  zIndexInt: 1,
                 ),
-              if (_driverPos != null && _driverLabelIcon != null)
+              // Only show "Driver is here" label during matched phase; hide once ride starts
+              if (_driverPos != null && _driverLabelIcon != null && status == 'matched')
                 Marker(
                   markerId: const MarkerId('driver_label'),
                   position: _driverPos!,
                   icon: _driverLabelIcon!,
                   anchor: const Offset(0.5, 1.8),
-                  zIndex: 2,
+                  zIndexInt: 2,
                 ),
             },
           ),
 
-          // Status bar at top
-          SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  margin: const EdgeInsets.all(16),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: status == 'started'
-                        ? AppTheme.success.withValues(alpha: 0.2)
-                        : AppTheme.primary.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
+          // Status bar — hidden when ride ends
+          if (!isEndState)
+            SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    margin: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
                       color: status == 'started'
-                          ? AppTheme.success
-                          : AppTheme.primary,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        status == 'started'
-                            ? Icons.navigation
-                            : Icons.check_circle,
+                          ? AppTheme.success.withValues(alpha: 0.2)
+                          : AppTheme.primary.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
                         color: status == 'started'
                             ? AppTheme.success
                             : AppTheme.primary,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          status == 'started'
-                              ? '🚀 Ride in Progress'
-                              : '✅ Driver Matched${_driverProximity.isNotEmpty ? " • $_driverProximity" : ""}',
-                          style: GoogleFonts.inter(
-                            fontWeight: FontWeight.w700,
-                            color: status == 'started'
-                                ? AppTheme.success
-                                : AppTheme.primary,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (_isDriverSignalStale && (status == 'matched' || status == 'started'))
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppTheme.warning,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.signal_wifi_bad, color: Colors.white, size: 16),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Driver signal lost. Updating...',
-                            style: GoogleFonts.inter(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
                       ),
                     ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          status == 'started'
+                              ? Icons.navigation
+                              : Icons.check_circle,
+                          color: status == 'started'
+                              ? AppTheme.success
+                              : AppTheme.primary,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            status == 'started'
+                                ? '🚀 Ride in Progress'
+                                : '✅ Driver Matched${_driverProximity.isNotEmpty ? " • $_driverProximity" : ""}',
+                            style: GoogleFonts.inter(
+                              fontWeight: FontWeight.w700,
+                              color: status == 'started'
+                                  ? AppTheme.success
+                                  : AppTheme.primary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-              ],
+                  if (_isDriverSignalStale && (status == 'matched' || status == 'started'))
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppTheme.warning,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.1),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.signal_wifi_bad, color: Colors.white, size: 16),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Driver signal lost. Updating...',
+                              style: GoogleFonts.inter(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
 
-          // Bottom driver info panel
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: _buildDriverPanel(),
-          ),
+          // Bottom driver info panel — hidden when ride ends
+          if (!isEndState)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: _buildDriverPanel(),
+            ),
+
+          // Success / Cancellation Overlay
+          if (isEndState) Positioned.fill(child: _buildEndScreen(status)),
         ],
       ),
     );
@@ -570,10 +762,18 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                   color: AppTheme.bg,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: AppTheme.border),
+                  image: _ride!['driverImageUrl'] != null && _ride!['driverImageUrl'].toString().isNotEmpty
+                      ? DecorationImage(
+                          image: NetworkImage(_ride!['driverImageUrl']),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
                 ),
-                child: Center(
-                  child: Text(icon, style: const TextStyle(fontSize: 28)),
-                ),
+                child: _ride!['driverImageUrl'] == null || _ride!['driverImageUrl'].toString().isEmpty
+                    ? Center(
+                        child: Text(icon, style: const TextStyle(fontSize: 28)),
+                      )
+                    : null,
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -626,52 +826,65 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
           if (_ride!['rideOtp'] != null && (_ride!['status'] == 'matched')) ...[
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    AppTheme.primary.withValues(alpha: 0.15),
-                    AppTheme.primary.withValues(alpha: 0.05),
+                    AppTheme.primary.withValues(alpha: 0.12),
+                    AppTheme.primary.withValues(alpha: 0.04),
                   ],
                 ),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
               ),
-              child: Column(
+              child: Row(
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  // Label
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.shield, size: 18, color: AppTheme.primary),
-                      const SizedBox(width: 6),
+                      Row(
+                        children: [
+                          const Icon(Icons.shield, size: 13, color: AppTheme.primary),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Your OTP',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
                       Text(
-                        'Ride Verification Code',
+                        'Share with driver',
                         style: GoogleFonts.inter(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.primary,
+                          fontSize: 10,
+                          color: AppTheme.text3,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  const Spacer(),
+                  // OTP digits — compact
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
                     children: (_ride!['rideOtp'] as String).split('').map((d) {
                       return Container(
-                        width: 48,
-                        height: 56,
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        width: 40,
+                        height: 46,
+                        margin: const EdgeInsets.only(left: 6),
                         decoration: BoxDecoration(
                           color: AppTheme.surface,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: AppTheme.primary),
+                          border: Border.all(color: AppTheme.primary, width: 1.5),
                         ),
                         child: Center(
                           child: Text(
                             d,
                             style: GoogleFonts.inter(
-                              fontSize: 28,
+                              fontSize: 22,
                               fontWeight: FontWeight.w800,
                               color: AppTheme.primary,
                             ),
@@ -679,15 +892,6 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                         ),
                       );
                     }).toList(),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Share this code with your driver to start the ride',
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      color: AppTheme.text3,
-                    ),
-                    textAlign: TextAlign.center,
                   ),
                 ],
               ),

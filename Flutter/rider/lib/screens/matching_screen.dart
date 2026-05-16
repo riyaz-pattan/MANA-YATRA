@@ -14,9 +14,7 @@ import 'active_ride_screen.dart';
 import '../screens/main_screen.dart';
 import 'package:provider/provider.dart';
 import '../providers/ride_provider.dart';
-import '../services/sync_engine.dart';
-import '../models/queue_item.dart';
-import 'package:uuid/uuid.dart';
+import '../utils/skeleton.dart';
 
 class MatchingScreen extends StatefulWidget {
   final String rideId;
@@ -30,7 +28,8 @@ class _MatchingScreenState extends State<MatchingScreen>
     with TickerProviderStateMixin {
   Map<String, dynamic>? _ride;
   List<Map<String, dynamic>> _bids = [];
-  bool _accepting = false;
+  String? _processingBidId;
+  bool _cancelling = false;
   late AnimationController _pulseController;
   StreamSubscription? _rideListener;
   StreamSubscription? _bidListener;
@@ -81,28 +80,33 @@ class _MatchingScreenState extends State<MatchingScreen>
         .snapshots()
         .listen((snap) {
       if (!snap.exists) return;
-      final data = snap.data()!;
-      data['id'] = snap.id;
-      setState(() => _ride = data);
+      try {
+        final data = Map<String, dynamic>.from(snap.data() as Map);
+        data['id'] = snap.id;
+        if (!mounted) return;
+        setState(() => _ride = data);
 
-      // If matched or started, go to active ride
-      if (data['status'] == 'matched' || data['status'] == 'started') {
-        if (!mounted) return;
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => ActiveRideScreen(rideId: widget.rideId),
-          ),
-        );
+        // If matched or started, go to active ride
+        if (data['status'] == 'matched' || data['status'] == 'started') {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => ActiveRideScreen(rideId: widget.rideId),
+            ),
+          );
+        }
+        // If cancelled or expired, go back home
+        if (data['status'] == 'cancelled' || data['status'] == 'expired') {
+          context.read<RideProvider>().resetRide();
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const MainScreen()),
+            (_) => false,
+          );
+        }
+      } catch (e) {
+        debugPrint('Error in MatchingScreen _listenRide: $e');
       }
-      // If cancelled or expired, go back home
-      if (data['status'] == 'cancelled' || data['status'] == 'expired') {
-        if (!mounted) return;
-        context.read<RideProvider>().resetRide();
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const MainScreen()),
-          (_) => false,
-        );
-      }
+    }, onError: (error) {
+      debugPrint('Firestore stream error in MatchingScreen: $error');
     });
   }
 
@@ -117,7 +121,10 @@ class _MatchingScreenState extends State<MatchingScreen>
           final data = d.data();
           data['id'] = d.id;
           return data;
-        }).where((b) => b['status'] != 'rejected' && b['status'] != 'withdrawn').toList();
+        }).where((b) =>
+            b['status'] != 'rejected' &&
+            b['status'] != 'rejected_by_system' &&
+            b['status'] != 'withdrawn').toList();
         _bids.sort((a, b) =>
             (a['price'] as num).compareTo(b['price'] as num));
       });
@@ -125,21 +132,21 @@ class _MatchingScreenState extends State<MatchingScreen>
   }
 
   Future<void> _acceptBid(Map<String, dynamic> bid) async {
-    setState(() => _accepting = true);
+    setState(() => _processingBidId = bid['id']);
     try {
-      final operationId = const Uuid().v4();
-      final item = QueueItem(
-        id: operationId,
-        type: 'ACCEPT_BID',
-        payload: {
-          'rideId': widget.rideId,
-          'bidId': bid['id'],
-        },
-      );
-      await context.read<SyncEngine>().enqueue(item);
-      // Success! The _listenRide() listener will detect status='matched'
-      // and navigate to ActiveRideScreen automatically.
+      // Call the Cloud Function directly for immediate feedback.
+      // Unlike create/cancel which tolerate async processing, acceptBid
+      // is interactive — the rider needs to know RIGHT NOW if it worked.
+      final callable = FirebaseFunctions.instance.httpsCallable('acceptBid');
+      await callable.call<dynamic>({
+        'rideId': widget.rideId,
+        'bidId': bid['id'],
+      });
+      // Success! The _listenRide() snapshot listener will detect
+      // status='matched' and navigate to ActiveRideScreen automatically.
+      debugPrint('acceptBid: ✅ Cloud Function call succeeded');
     } on FirebaseFunctionsException catch (e) {
+      debugPrint('acceptBid: ❌ FirebaseFunctionsException: ${e.code} — ${e.message}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -148,8 +155,9 @@ class _MatchingScreenState extends State<MatchingScreen>
           ),
         );
       }
-      setState(() => _accepting = false);
+      setState(() => _processingBidId = null);
     } catch (e) {
+      debugPrint('acceptBid: ❌ Error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -158,7 +166,7 @@ class _MatchingScreenState extends State<MatchingScreen>
           ),
         );
       }
-      setState(() => _accepting = false);
+      setState(() => _processingBidId = null);
     }
   }
 
@@ -177,14 +185,11 @@ class _MatchingScreenState extends State<MatchingScreen>
   }
 
   Future<void> _cancelRide() async {
+    setState(() => _cancelling = true);
     try {
-      final operationId = const Uuid().v4();
-      final item = QueueItem(
-        id: operationId,
-        type: 'CANCEL_RIDE',
-        payload: {'rideId': widget.rideId},
-      );
-      await context.read<SyncEngine>().enqueue(item);
+      final callable = FirebaseFunctions.instance.httpsCallable('cancelRide');
+      await callable.call({'rideId': widget.rideId});
+      
       if (mounted) {
         context.read<RideProvider>().resetRide();
         Navigator.of(context).pushAndRemoveUntil(
@@ -202,6 +207,7 @@ class _MatchingScreenState extends State<MatchingScreen>
           ),
         );
       }
+      setState(() => _cancelling = false);
     }
   }
 
@@ -276,20 +282,30 @@ class _MatchingScreenState extends State<MatchingScreen>
                   width: double.infinity,
                   height: 48,
                   child: OutlinedButton(
-                    onPressed: _cancelRide,
+                    onPressed: _cancelling ? null : _cancelRide,
                     style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppTheme.danger),
+                      side: BorderSide(
+                          color: _cancelling ? AppTheme.text3 : AppTheme.danger),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: Text(
-                      'Cancel Ride',
-                      style: GoogleFonts.inter(
-                        color: AppTheme.danger,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    child: _cancelling
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppTheme.danger,
+                            ),
+                          )
+                        : Text(
+                            'Cancel Ride',
+                            style: GoogleFonts.inter(
+                              color: AppTheme.danger,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                   ),
                 ),
               ),
@@ -301,6 +317,7 @@ class _MatchingScreenState extends State<MatchingScreen>
   }
 
   Widget _buildSearchingHeader(String minutes, String seconds) {
+    final bidCount = _bids.length;
     return Column(
       children: [
         AnimatedBuilder(
@@ -325,20 +342,52 @@ class _MatchingScreenState extends State<MatchingScreen>
                     ),
                   ),
                 ),
-                const Text('🔍', style: TextStyle(fontSize: 42)),
+                Text(
+                  bidCount == 0 ? '🔍' : '🎯',
+                  style: const TextStyle(fontSize: 42),
+                ),
               ],
             );
           },
         ),
         const SizedBox(height: 16),
-        Text(
-          _bids.isEmpty ? 'Searching for drivers...' : 'Drivers found!',
-          style: GoogleFonts.inter(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
+        // Animated title — switches between searching and bids-found
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 400),
+          child: Text(
+            bidCount == 0
+                ? 'Searching for drivers...'
+                : '$bidCount driver${bidCount == 1 ? '' : 's'} placed a bid!',
+            key: ValueKey(bidCount == 0),
+            style: GoogleFonts.inter(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: bidCount > 0 ? AppTheme.success : AppTheme.text,
+            ),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
+        // Popular route badge — shows if many bids
+        if (bidCount >= 3) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppTheme.warning.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppTheme.warning.withValues(alpha: 0.4)),
+            ),
+            child: Text(
+              '🔥 Popular route! Lots of drivers available',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.warning,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+        ],
+        // Countdown timer
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           decoration: BoxDecoration(
@@ -355,7 +404,7 @@ class _MatchingScreenState extends State<MatchingScreen>
           ),
         ),
         const SizedBox(height: 6),
-        // Phase indicator — shows rider the system is actively expanding
+        // Phase indicator
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 400),
           child: Text(
@@ -459,24 +508,14 @@ class _MatchingScreenState extends State<MatchingScreen>
   }
 
   Widget _buildWaitingForBids() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const CircularProgressIndicator(
-            color: AppTheme.primary,
-            strokeWidth: 2,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Waiting for drivers to bid...',
-            style: GoogleFonts.inter(
-              color: AppTheme.text3,
-              fontSize: 14,
-            ),
-          ),
-        ],
-      ),
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      physics: const NeverScrollableScrollPhysics(),
+      children: const [
+        BidCardSkeleton(),
+        BidCardSkeleton(),
+        BidCardSkeleton(),
+      ],
     );
   }
 
@@ -494,86 +533,101 @@ class _MatchingScreenState extends State<MatchingScreen>
         final vType = bid['vehicleType'] ?? 'auto';
         final icon = AppConstants.vehicleTypes[vType]?.icon ?? '🚗';
 
-        // Determine bid type label
-        final bool isAcceptedPrice = bidPrice <= riderBid;
+                // Determine bid type label
+                final bool isAcceptedPrice = bidPrice == riderBid;
+                final bool isBetterOffer = bidPrice < riderBid;
+                final bool isCounterOffer = bidPrice > riderBid;
 
-        // Calculate distance from driver to pickup
-        String distanceLabel = '';
-        String etaLabel = '';
-        if (pickupLat != null && pickupLng != null &&
-            bid['driverLat'] != null && bid['driverLng'] != null) {
-          final distMeters = Geolocator.distanceBetween(
-            (bid['driverLat'] as num).toDouble(),
-            (bid['driverLng'] as num).toDouble(),
-            pickupLat,
-            pickupLng,
-          );
-          distanceLabel = distMeters < 1000
-              ? '${distMeters.toInt()}m away'
-              : '${(distMeters / 1000).toStringAsFixed(1)} km away';
-          final etaMin = ((distMeters / 1000) / 25 * 60).ceil();
-          etaLabel = etaMin < 1 ? '<1 min' : '$etaMin min';
-        }
+                // Calculate distance from driver to pickup
+                String distanceLabel = '';
+                String etaLabel = '';
+                if (pickupLat != null && pickupLng != null &&
+                    bid['driverLat'] != null && bid['driverLng'] != null) {
+                  final distMeters = Geolocator.distanceBetween(
+                    (bid['driverLat'] as num).toDouble(),
+                    (bid['driverLng'] as num).toDouble(),
+                    pickupLat,
+                    pickupLng,
+                  );
+                  distanceLabel = distMeters < 1000
+                      ? '${distMeters.toInt()}m away'
+                      : '${(distMeters / 1000).toStringAsFixed(1)} km away';
+                  final etaMin = ((distMeters / 1000) / 25 * 60).ceil();
+                  etaLabel = etaMin < 1 ? '<1 min' : '$etaMin min';
+                }
 
-        return Container(
-          margin: const EdgeInsets.only(bottom: 14),
-          decoration: BoxDecoration(
-            color: AppTheme.surface,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppTheme.border),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Column(
-            children: [
-              // Status label bar
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: isAcceptedPrice
-                      ? AppTheme.success.withValues(alpha: 0.1)
-                      : AppTheme.warning.withValues(alpha: 0.1),
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(18),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      isAcceptedPrice ? Icons.check_circle : Icons.swap_vert,
-                      size: 16,
-                      color: isAcceptedPrice ? AppTheme.success : AppTheme.warning,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      isAcceptedPrice
-                          ? 'Accepted your price'
-                          : 'Counter Offer',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: isAcceptedPrice ? AppTheme.success : AppTheme.warning,
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: AppTheme.border),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
                       ),
-                    ),
-                    const Spacer(),
-                    if (!isAcceptedPrice)
-                      Text(
-                        '+₹${bidPrice - riderBid}',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.warning,
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      // Status label bar
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isCounterOffer
+                              ? AppTheme.warning.withValues(alpha: 0.1)
+                              : AppTheme.success.withValues(alpha: 0.1),
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(18),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              isAcceptedPrice 
+                                  ? Icons.check_circle 
+                                  : (isBetterOffer ? Icons.local_offer : Icons.swap_vert),
+                              size: 16,
+                              color: isCounterOffer ? AppTheme.warning : AppTheme.success,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              isAcceptedPrice
+                                  ? 'Accepted your price'
+                                  : isBetterOffer 
+                                      ? 'Special Offer' 
+                                      : 'Counter Offer',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: isCounterOffer ? AppTheme.warning : AppTheme.success,
+                              ),
+                            ),
+                            const Spacer(),
+                            if (isCounterOffer)
+                              Text(
+                                '+₹${bidPrice - riderBid}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.warning,
+                                ),
+                              ),
+                            if (isBetterOffer)
+                              Text(
+                                '-₹${riderBid - bidPrice}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.success,
+                                ),
+                              ),
+                          ],
                         ),
                       ),
-                  ],
-                ),
-              ),
 
               // Driver detail card
               Padding(
@@ -590,10 +644,18 @@ class _MatchingScreenState extends State<MatchingScreen>
                           decoration: BoxDecoration(
                             color: AppTheme.bg2,
                             borderRadius: BorderRadius.circular(14),
+                            image: bid['driverImageUrl'] != null && bid['driverImageUrl'].toString().isNotEmpty
+                                ? DecorationImage(
+                                    image: NetworkImage(bid['driverImageUrl']),
+                                    fit: BoxFit.cover,
+                                  )
+                                : null,
                           ),
-                          child: Center(
-                            child: Text(icon, style: const TextStyle(fontSize: 28)),
-                          ),
+                          child: bid['driverImageUrl'] == null || bid['driverImageUrl'].toString().isEmpty
+                              ? Center(
+                                  child: Text(icon, style: const TextStyle(fontSize: 28)),
+                                )
+                              : null,
                         ),
                         const SizedBox(width: 14),
                         // Driver details
@@ -639,54 +701,67 @@ class _MatchingScreenState extends State<MatchingScreen>
                       ],
                     ),
                     const SizedBox(height: 14),
-                    // Distance & ETA row
+                    // Distance & ETA row — color-coded by ETA urgency
                     if (distanceLabel.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: AppTheme.bg2,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.near_me,
-                                size: 14, color: AppTheme.primary),
-                            const SizedBox(width: 8),
-                            Text(
-                              distanceLabel,
-                              style: GoogleFonts.inter(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.text,
-                              ),
-                            ),
-                            if (etaLabel.isNotEmpty) ...[
+                      Builder(builder: (_) {
+                        // Color-code by ETA: green < 3min, amber 3–7min, red > 7min
+                        final etaMin = int.tryParse(
+                              etaLabel.replaceAll(' min', '').replaceAll('<', '').trim(),
+                            ) ??
+                            99;
+                        final etaColor = etaMin < 3
+                            ? AppTheme.success
+                            : etaMin <= 7
+                                ? AppTheme.warning
+                                : AppTheme.danger;
+
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: etaColor.withValues(alpha: 0.07),
+                            borderRadius: BorderRadius.circular(10),
+                            border:
+                                Border.all(color: etaColor.withValues(alpha: 0.25)),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.near_me, size: 14, color: etaColor),
                               const SizedBox(width: 8),
-                              Container(
-                                width: 4,
-                                height: 4,
-                                decoration: BoxDecoration(
-                                  color: AppTheme.text3,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              const Icon(Icons.schedule,
-                                  size: 14, color: AppTheme.warning),
-                              const SizedBox(width: 4),
                               Text(
-                                'ETA $etaLabel',
+                                distanceLabel,
                                 style: GoogleFonts.inter(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
                                   color: AppTheme.text,
                                 ),
                               ),
+                              if (etaLabel.isNotEmpty) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  width: 4,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.text3,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Icon(Icons.schedule, size: 14, color: etaColor),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'ETA $etaLabel',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: etaColor,
+                                  ),
+                                ),
+                              ],
                             ],
-                          ],
-                        ),
-                      ),
+                          ),
+                        );
+                      }),
 
                     const SizedBox(height: 14),
                     // Accept/Reject buttons
@@ -696,7 +771,7 @@ class _MatchingScreenState extends State<MatchingScreen>
                           child: SizedBox(
                             height: 44,
                             child: OutlinedButton(
-                              onPressed: _accepting ? null : () => _declineBid(bid['id'], bid['driverId']),
+                              onPressed: _processingBidId != null ? null : () => _declineBid(bid['id'], bid['driverId']),
                               style: OutlinedButton.styleFrom(
                                 side: const BorderSide(color: AppTheme.danger),
                                 shape: RoundedRectangleBorder(
@@ -720,20 +795,29 @@ class _MatchingScreenState extends State<MatchingScreen>
                             height: 44,
                             child: ElevatedButton(
                               onPressed:
-                                  _accepting ? null : () => _acceptBid(bid),
+                                  _processingBidId != null ? null : () => _acceptBid(bid),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppTheme.primary,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                               ),
-                              child: Text(
-                                'Accept',
-                                style: GoogleFonts.inter(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
+                              child: _processingBidId == bid['id']
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : Text(
+                                      'Accept',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
                             ),
                           ),
                         ),

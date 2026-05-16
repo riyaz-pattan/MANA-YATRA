@@ -101,7 +101,7 @@ void _initFCM() {
     // Regular notification messages (e.g., admin broadcasts, driver approval)
     if (message.notification != null) {
       final ctx = navigatorKey.currentContext;
-      if (ctx != null) {
+      if (ctx != null && ctx.mounted) {
         CustomToast.show(
           context: ctx,
           message:

@@ -154,18 +154,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     .update({firestoreKey: detail.toMap()});
                                 
                                 if (ctx.mounted) Navigator.pop(ctx);
-                                if (mounted) {
-                                  CustomToast.show(
-                                      context: context,
-                                      message: '$label location saved');
-                                }
+                                if (!context.mounted) return;
+                                CustomToast.show(
+                                    context: context,
+                                    message: '$label location saved');
                               } else {
                                 setSheetState(() => searching = false);
-                                if (mounted) {
-                                  CustomToast.show(
-                                      context: context,
-                                      message: 'Failed to fetch location details');
-                                }
+                                if (!context.mounted) return;
+                                CustomToast.show(
+                                    context: context,
+                                    message: 'Failed to fetch location details');
                               }
                             },
                           );

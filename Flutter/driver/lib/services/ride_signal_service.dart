@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:dart_geohash/dart_geohash.dart';
 import '../config/constants.dart';
+import 'package:flutter/foundation.dart';
 
 /// Listens to `ride_signals/{vehicleType}/{geohash5}/` in RTDB and emits
 /// rides matching the driver's current geohash-5 zone.
@@ -28,7 +29,7 @@ class RideSignalService {
   /// Start the service. Does NOT subscribe to RTDB yet — call [updateZone]
   /// with the driver's location to begin listening.
   void start() {
-    print('🚗 RideSignalService started for vehicleType: $vehicleType');
+    debugPrint('🚗 RideSignalService started for vehicleType: $vehicleType');
     // Subscription is created dynamically in updateZone() when we know
     // the driver's geohash. No global listener needed.
   }
@@ -39,7 +40,7 @@ class RideSignalService {
   void updateZone(double lat, double lng) {
     final newHash = GeoHasher().encode(lng, lat, precision: 5);
     if (newHash != _currentGeohash5) {
-      print('📍 RideSignalService zone updated: $_currentGeohash5 -> $newHash');
+      debugPrint('📍 RideSignalService zone updated: $_currentGeohash5 -> $newHash');
       _currentGeohash5 = newHash;
       _subscribeToZone(newHash);
     }
@@ -52,7 +53,7 @@ class RideSignalService {
     _activeSignals.clear();
 
     final path = 'ride_signals/$vehicleType/$geohash5';
-    print('📡 RideSignalService subscribing to: $path');
+    debugPrint('📡 RideSignalService subscribing to: $path');
 
     _sub = FirebaseDatabase.instance
         .ref(path)
@@ -60,7 +61,7 @@ class RideSignalService {
         .limitToLast(50)
         .onValue
         .listen(_handleSnapshot, onError: (error) {
-      print('❌ RideSignalService RTDB Error: $error');
+      debugPrint('❌ RideSignalService RTDB Error: $error');
       if (onErrorCallback != null) {
         onErrorCallback!('RTDB Error: $error');
       }
@@ -71,7 +72,7 @@ class RideSignalService {
     _activeSignals.clear();
 
     final data = event.snapshot.value;
-    print('📡 RideSignalService received snapshot, data is null? ${data == null}');
+    debugPrint('📡 RideSignalService received snapshot, data is null? ${data == null}');
 
     if (data == null || data is! Map) {
       _controller.add([]);
@@ -79,7 +80,7 @@ class RideSignalService {
     }
 
     final signals = Map<String, dynamic>.from(data);
-    print('📡 RideSignalService zone signals: ${signals.length}');
+    debugPrint('📡 RideSignalService zone signals: ${signals.length}');
 
     final now = DateTime.now().millisecondsSinceEpoch;
 
@@ -106,7 +107,7 @@ class RideSignalService {
     // scopes to the correct vehicleType and zone.
     final filtered = _activeSignals.values.toList();
 
-    print('🔍 RideSignalService emitting ${filtered.length} signals from zone $_currentGeohash5');
+    debugPrint('🔍 RideSignalService emitting ${filtered.length} signals from zone $_currentGeohash5');
 
     // Sort by createdAt descending (newest first)
     filtered.sort((a, b) {

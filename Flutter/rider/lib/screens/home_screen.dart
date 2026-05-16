@@ -16,6 +16,7 @@ import '../utils/map_style.dart';
 import '../utils/custom_toast.dart';
 import 'package:uuid/uuid.dart';
 import '../utils/marker_utils.dart';
+import '../utils/skeleton.dart';
 import 'location_search_screen.dart';
 import 'matching_screen.dart';
 import 'active_ride_screen.dart';
@@ -51,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Set<Marker> _driverMarkers = {};
   Map<String, dynamic>? _savedHome;
   Map<String, dynamic>? _savedWork;
+  bool _bidBelowMinimum = false; // tracks min-fare warning state
 
   StreamSubscription? _rideListener;
   bool _isLocationCentered = false;
@@ -97,55 +99,61 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         .listen((snap) {
       if (snap.docs.isNotEmpty) {
         if (!mounted) return;
-        final ride = snap.docs.first;
-        final data = ride.data();
-        data['id'] = ride.id;
-        final provider = context.read<RideProvider>();
-        provider.setActiveRide(data);
+        try {
+          final ride = snap.docs.first;
+          final data = Map<String, dynamic>.from(ride.data() as Map);
+          data['id'] = ride.id;
+          final provider = context.read<RideProvider>();
+          provider.setActiveRide(data);
 
-        final status = data['status'];
-        final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+          final status = data['status'];
+          final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
 
-        if (status == 'searching' || status == 'bidding') {
-          if (createdAt != null && DateTime.now().difference(createdAt).inMinutes >= AppConstants.rideExpiryMinutes) {
-            // Force expire locally if the app was closed and server hasn't cleaned it up yet
-            FirebaseFirestore.instance.collection('rides').doc(ride.id).update({'status': 'expired'});
-            provider.setActiveRide(null);
-            return;
+          if (status == 'searching' || status == 'bidding') {
+            if (createdAt != null && DateTime.now().difference(createdAt).inMinutes >= AppConstants.rideExpiryMinutes) {
+              // Force expire locally if the app was closed and server hasn't cleaned it up yet
+              FirebaseFirestore.instance.collection('rides').doc(ride.id).update({'status': 'expired'});
+              provider.setActiveRide(null);
+              return;
+            }
+            
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => MatchingScreen(rideId: ride.id),
+              ),
+            );
+          } else if (status == 'matched') {
+            if (createdAt != null && DateTime.now().difference(createdAt).inMinutes >= 60) {
+              // Force expire locally if it's been stuck in matched for over 60 minutes
+              FirebaseFirestore.instance.collection('rides').doc(ride.id).update({
+                'status': 'cancelled',
+                'cancelReason': 'local_stale_cleanup'
+              });
+              provider.setActiveRide(null);
+              return;
+            }
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => ActiveRideScreen(rideId: ride.id),
+              ),
+            );
+          } else if (status == 'started') {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => ActiveRideScreen(rideId: ride.id),
+              ),
+            );
           }
-          
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => MatchingScreen(rideId: ride.id),
-            ),
-          );
-        } else if (status == 'matched') {
-          if (createdAt != null && DateTime.now().difference(createdAt).inMinutes >= 60) {
-            // Force expire locally if it's been stuck in matched for over 60 minutes
-            FirebaseFirestore.instance.collection('rides').doc(ride.id).update({
-              'status': 'cancelled',
-              'cancelReason': 'local_stale_cleanup'
-            });
-            provider.setActiveRide(null);
-            return;
-          }
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => ActiveRideScreen(rideId: ride.id),
-            ),
-          );
-        } else if (status == 'started') {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => ActiveRideScreen(rideId: ride.id),
-            ),
-          );
+        } catch (e) {
+          debugPrint('Error in HomeScreen _listenForActiveRide: $e');
         }
       } else {
         if (mounted) {
           context.read<RideProvider>().setActiveRide(null);
         }
       }
+    }, onError: (error) {
+      debugPrint('Firestore stream error in HomeScreen: $error');
     });
   }
 
@@ -270,7 +278,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
 
   void _toggleMapFocus() {
-    final provider = context.read<RideProvider>();
     setState(() {
       _isLocationCentered = !_isLocationCentered;
     });
@@ -310,14 +317,167 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  /// Shows a beautiful, informative error dialog when pickup/drop locations are invalid.
+  void _showInvalidRouteDialog({
+    required String title,
+    required String message,
+    required String hint,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: AppTheme.surface,
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppTheme.danger.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.location_off_rounded,
+                  color: AppTheme.danger,
+                  size: 44,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                title,
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.text,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                message,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppTheme.text2,
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 14),
+              // Hint pill
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppTheme.warning.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.warning.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.lightbulb_outline_rounded,
+                        color: AppTheme.warning, size: 16),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        hint,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.warning,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    // Reset to pickup state so rider can re-enter locations
+                    setState(() {
+                      _flowState = RideFlowState.pickup;
+                      _calculatingRoute = false;
+                    });
+                    final p = context.read<RideProvider>();
+                    p.setDrop(null);
+                    p.setRoute(null);
+                    // Reopen search screen to fix locations
+                    _openSearchScreen();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: Text(
+                    'Fix Locations',
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _confirmDrop() async {
     final provider = context.read<RideProvider>();
     if (provider.pickup == null || provider.drop == null) return;
 
+    // ── Layer 0: same-location guard ──
+    final straightLineM = Geolocator.distanceBetween(
+      provider.pickup!.lat,
+      provider.pickup!.lng,
+      provider.drop!.lat,
+      provider.drop!.lng,
+    );
+
+    if (straightLineM < 50) {
+      _showInvalidRouteDialog(
+        title: 'Same Location Selected',
+        message:
+            'Your pickup and drop locations are the same place (less than 50 m apart).\n\nPlease choose a different drop location.',
+        hint: 'Tip: Drop must be at least a few streets away from pickup.',
+      );
+      return;
+    }
+
+    // ── Layer 1: straight-line distance guard ──
+    final straightLineKm = straightLineM / 1000.0;
+
+    if (straightLineKm > 300) {
+      // Show dialog immediately — no spinner, no API call
+      _showInvalidRouteDialog(
+        title: 'Locations Too Far Apart',
+        message:
+            'Your pickup and drop locations are ${straightLineKm.toStringAsFixed(0)} km apart in a straight line.\n\nAshwa operates for local rides. Please set a nearby drop location.',
+        hint: 'Tip: Both locations should be in the same city or region.',
+      );
+      return;
+    }
+
     setState(() {
       _calculatingRoute = true;
       _flowState = RideFlowState.route;
-      _isLocationCentered = false; // Default to showing route
+      _isLocationCentered = false;
     });
 
     final route = await GoogleMapsService.getRoute(
@@ -327,37 +487,48 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       provider.drop!.lng,
     );
 
-    if (mounted) {
-      provider.setRoute(route);
-      
-      // Generate custom markers
-      _pickupDot = await MarkerGenerator.createDotMarker(color: Colors.green);
-      _dropDot = await MarkerGenerator.createDotMarker(color: Colors.red);
-      _pickupLabel = await MarkerGenerator.createLabelMarker(
-        text: provider.pickup?.displayName ?? 'Pickup',
-        isPickup: true,
+    if (!mounted) return;
+
+    // ── Layer 2: route API failure guard ──
+    // getRoute returns null when the API cannot find a driveable road path
+    // (e.g. locations in different countries, separated by ocean, etc.)
+    if (route == null) {
+      _showInvalidRouteDialog(
+        title: 'No Driveable Route Found',
+        message:
+            'We could not find a road route between your pickup and drop locations.\n\nThis usually happens when the locations are in different regions, countries, or separated by water.',
+        hint: 'Tip: Make sure both points are reachable by road in the same area.',
       );
-      _dropLabel = await MarkerGenerator.createLabelMarker(
-        text: provider.drop?.displayName ?? 'Drop',
-        isPickup: false,
-      );
-
-      setState(() => _calculatingRoute = false);
-
-      if (route != null) {
-        // Delay slightly to allow the bottom sheet to animate in and map padding to take effect
-        Future.delayed(const Duration(milliseconds: 500), () {
-          _fitRoute();
-        });
-
-        final estimate = AppConstants.estimatePrice(
-          route.distanceKm,
-          provider.vehicleType,
-        );
-        provider.setBidPrice(estimate.toInt());
-        _bidController.text = estimate.toInt().toString();
-      }
+      return;
     }
+
+    provider.setRoute(route);
+
+    // Generate custom markers
+    _pickupDot = await MarkerGenerator.createDotMarker(color: Colors.green);
+    _dropDot = await MarkerGenerator.createDotMarker(color: Colors.red);
+    _pickupLabel = await MarkerGenerator.createLabelMarker(
+      text: provider.pickup?.displayName ?? 'Pickup',
+      isPickup: true,
+    );
+    _dropLabel = await MarkerGenerator.createLabelMarker(
+      text: provider.drop?.displayName ?? 'Drop',
+      isPickup: false,
+    );
+
+    setState(() => _calculatingRoute = false);
+
+    // Delay slightly to allow bottom sheet to animate in before camera moves
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) _fitRoute();
+    });
+
+    final estimate = AppConstants.estimatePrice(
+      route.distanceKm,
+      provider.vehicleType,
+    );
+    provider.setBidPrice(estimate.toInt());
+    _bidController.text = estimate.toInt().toString();
   }
 
   Future<void> _requestRide() async {
@@ -536,6 +707,76 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 bottom: 0, left: 0, right: 0,
                 child: _buildBottomPanel(provider),
               ),
+              // Floating route stats pill — visible once route is loaded
+              if (provider.route != null)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: SafeArea(
+                    child: Center(
+                      child: Container(
+                        margin: const EdgeInsets.only(top: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surface,
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(color: AppTheme.border),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.12),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.straighten_rounded,
+                                size: 14, color: AppTheme.primary),
+                            const SizedBox(width: 5),
+                            Text(
+                              '${provider.route!.distanceKm.toStringAsFixed(1)} km',
+                              style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.text),
+                            ),
+                            const SizedBox(width: 12),
+                            Container(
+                                width: 1, height: 14, color: AppTheme.border),
+                            const SizedBox(width: 12),
+                            const Icon(Icons.schedule_rounded,
+                                size: 14, color: AppTheme.warning),
+                            const SizedBox(width: 5),
+                            Text(
+                              '${provider.route!.durationMin} min',
+                              style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.text),
+                            ),
+                            const SizedBox(width: 12),
+                            Container(
+                                width: 1, height: 14, color: AppTheme.border),
+                            const SizedBox(width: 12),
+                            const Icon(Icons.currency_rupee_rounded,
+                                size: 14, color: AppTheme.success),
+                            Text(
+                              '${AppConstants.estimatePrice(provider.route!.distanceKm, provider.vehicleType).toInt()}',
+                              style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.success),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -624,8 +865,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
     }
     if (_currentPos == null) return;
-    final provider = context.read<RideProvider>();
-
+    if (!mounted) return;
     final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -638,7 +878,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       ),
     );
 
-    if (result == true && mounted) {
+    if (!mounted) return;
+    final provider = context.read<RideProvider>();
+
+    if (result == true) {
       // Both pickup and drop are set in the provider by LocationSearchScreen.
       // If pickup was set to current location inside search screen, restore it.
       if (provider.pickup == null) {
@@ -646,6 +889,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           _currentPos!.latitude,
           _currentPos!.longitude,
         );
+        if (!context.mounted) return;
         provider.setPickup(loc);
       }
       // Calculate route and go to route flow.
@@ -825,13 +1069,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               color: AppTheme.text,
                             ),
                           ),
-                          Text(
-                            'Enter your offer',
-                            style: GoogleFonts.inter(
-                              fontSize: 11,
-                              color: AppTheme.text3,
-                            ),
-                          ),
+                          // Fare estimate range
+                          Builder(builder: (_) {
+                            final (low, high) = AppConstants.estimatePriceRange(
+                              provider.route!.distanceKm,
+                              provider.vehicleType,
+                            );
+                            return Text(
+                              'Estimate: ₹$low – ₹$high',
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                color: AppTheme.text3,
+                              ),
+                            );
+                          }),
                         ],
                       ),
                       Container(
@@ -871,6 +1122,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                   final price = int.tryParse(val);
                                   if (price != null) {
                                     provider.setBidPrice(price);
+                                    final min = AppConstants.minFare[provider.vehicleType] ?? 20;
+                                    setState(() => _bidBelowMinimum = price < min);
                                   }
                                 },
                               ),
@@ -883,6 +1136,37 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ],
               ),
             ),
+
+            // ── Minimum fare warning ──
+            if (_bidBelowMinimum) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                decoration: BoxDecoration(
+                  color: AppTheme.danger.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppTheme.danger.withValues(alpha: 0.35)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded,
+                        color: AppTheme.danger, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Very low bid — drivers may not accept this offer.',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.danger,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
 
             // Request ride button
@@ -909,7 +1193,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ] else if (_calculatingRoute) ...[
             const Padding(
               padding: EdgeInsets.all(16),
-              child: CircularProgressIndicator(color: AppTheme.primary),
+              child: RoutePanelSkeleton(),
             ),
           ] else ...[
             Container(

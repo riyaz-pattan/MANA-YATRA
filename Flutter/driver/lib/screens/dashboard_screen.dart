@@ -24,6 +24,7 @@ import '../utils/custom_toast.dart';
 import '../services/sync_engine.dart';
 import '../models/queue_item.dart';
 import 'package:uuid/uuid.dart';
+import '../utils/skeleton.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -191,20 +192,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
         .listen((snap) {
       if (snap.docs.isNotEmpty) {
         if (!mounted) return;
-        final ride = snap.docs.first;
-        final data = ride.data();
-        data['id'] = ride.id;
+        try {
+          final ride = snap.docs.first;
+          final data = Map<String, dynamic>.from(ride.data() as Map);
+          data['id'] = ride.id;
 
-        final status = data['status'];
-        final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
-        
-        context.read<DriverProvider>().setActiveRide(data);
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => ActiveRideScreen(rideId: ride.id),
-          ),
-        );
+          context.read<DriverProvider>().setActiveRide(data);
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => ActiveRideScreen(rideId: ride.id),
+            ),
+          );
+        } catch (e) {
+          debugPrint('Error in DashboardScreen _listenForActiveRide: $e');
+        }
       }
+    }, onError: (error) {
+      debugPrint('Firestore stream error in DashboardScreen: $error');
     });
   }
 
@@ -426,7 +430,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     setState(() => _bidding = true);
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
       final operationId = const Uuid().v4();
 
       // Enqueue to durable queue — SyncEngine will deliver via placeBid Cloud Function
@@ -441,6 +444,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           'driverPhone': provider.profile?['phone'] ?? '',
           'vehicleType': provider.profile?['vehicleType'] ?? 'auto',
           'vehicleNumber': provider.profile?['vehicleNumber'] ?? '',
+          'driverImageUrl': provider.profile?['documents']?['selfieUrl'] ?? '',
+          'vehicleImageUrl': provider.profile?['documents']?['vehicleUrl'] ?? '',
           'driverLat': provider.lat,
           'driverLng': provider.lng,
         },
@@ -874,21 +879,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       fontWeight: FontWeight.w700, fontSize: 16),
                 ),
                 const Spacer(),
-                if (_loadingRides)
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: AppTheme.primary),
-                  )
-                else
+                if (!_loadingRides)
                   Text('${_nearbyRides.length} rides',
                       style: GoogleFonts.inter(
                           color: AppTheme.text3, fontSize: 13)),
               ],
             ),
             const SizedBox(height: 8),
-            if (_nearbyRides.isEmpty)
+            if (_loadingRides)
+              ...List.generate(3, (index) => const RideCardSkeleton())
+            else if (_nearbyRides.isEmpty)
               Container(
                 padding: const EdgeInsets.all(20),
                 child: Text(
@@ -910,7 +910,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 final etaLabel = etaMin < 1 ? '<1 min' : '$etaMin min';
                 final rideId = ride['id'] as String;
                 final isBidded = _biddedRides.containsKey(rideId);
-                final bidAmount = _biddedRides[rideId];
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),
@@ -976,24 +975,72 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 Text(
-                                  'Offered Fare',
-                                  style: GoogleFonts.inter(fontSize: 12, color: AppTheme.text3, fontWeight: FontWeight.w600),
+                                  isBidded ? 'Your Bid' : 'Offered Fare',
+                                  style: GoogleFonts.inter(fontSize: 12, color: isBidded ? AppTheme.primary : AppTheme.text3, fontWeight: FontWeight.w600),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '₹${ride['riderBid']}',
+                                  isBidded ? '₹${_biddedRides[rideId]}' : '₹${ride['riderBid']}',
                                   style: GoogleFonts.inter(
                                       fontSize: 22,
                                       fontWeight: FontWeight.w800,
-                                      color: AppTheme.success),
+                                      color: isBidded ? AppTheme.primary : AppTheme.success),
                                 ),
+                                if (isBidded && _biddedRides[rideId] != ride['riderBid'])
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 2),
+                                    child: Text(
+                                      'Offer: ₹${ride['riderBid']}',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppTheme.text3,
+                                        decoration: TextDecoration.lineThrough,
+                                      ),
+                                    ),
+                                  ),
                               ],
                             ),
                           ],
                         ),
                       ),
                       const Divider(height: 1, color: AppTheme.border),
-                      // Locations
+                      // Pickup distance chip — prominent, colored by ETA urgency
+                      Builder(builder: (_) {
+                        final etaMin =
+                            ((distMeters / 1000) / AppConstants.avgSpeedKmh * 60)
+                                .ceil();
+                        final chipColor = etaMin < 3
+                            ? AppTheme.success
+                            : etaMin <= 7
+                                ? AppTheme.warning
+                                : AppTheme.danger;
+                        return Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: chipColor.withValues(alpha: 0.07),
+                            border: Border(
+                                bottom: BorderSide(color: AppTheme.border)),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.near_me_rounded,
+                                  size: 14, color: chipColor),
+                              const SizedBox(width: 6),
+                              Text(
+                                '$distLabel to pickup  ·  ~$etaLabel',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: chipColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
                       Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(
@@ -1023,11 +1070,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '$distLabel away (~$etaLabel)',
-                                        style: GoogleFonts.inter(fontSize: 12, color: AppTheme.primary, fontWeight: FontWeight.w600),
                                       ),
                                       const SizedBox(height: 16),
                                       Text(

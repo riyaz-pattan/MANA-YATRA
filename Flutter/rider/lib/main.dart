@@ -47,7 +47,7 @@ void main() async {
   // Only await the bare essentials — dotenv + Firebase Auth need to be ready
   await dotenv.load(fileName: ".env");
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
-  
+
   // Initialize Crashlytics and Global Error Handling
   await ErrorHandler.initialize();
 
@@ -57,7 +57,7 @@ void main() async {
   await actionQueueService.init();
   syncEngine = SyncEngine(actionQueueService);
   syncEngine.start();
-  
+
   rideRepository = FirestoreRideRepository(syncEngine: syncEngine);
   authRepository = FirebaseAuthRepository();
 
@@ -83,7 +83,7 @@ void _initFCM() {
       }
 
       final ctx = navigatorKey.currentContext;
-      if (ctx != null) {
+      if (ctx != null && ctx.mounted) {
         CustomToast.show(
           context: ctx,
           message:
@@ -175,7 +175,8 @@ class AuthGate extends StatelessWidget {
                 builder: (context, rideProvider, _) {
                   if (rideProvider.persistedRideId != null) {
                     return ActiveRideScreen(
-                        rideId: rideProvider.persistedRideId!);
+                      rideId: rideProvider.persistedRideId!,
+                    );
                   }
                   return _NameCheckGate(user: user);
                 },

@@ -7,7 +7,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dart_geohash/dart_geohash.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../config/constants.dart';
 
 enum TrackingMode { offline, discovery, activeRide }
@@ -47,47 +46,17 @@ class SmartTracker {
 
     if (mode == TrackingMode.offline) {
       _stopAll();
-      if (prev == TrackingMode.activeRide) _stopForegroundService();
     } else if (mode == TrackingMode.discovery && prev != TrackingMode.discovery) {
       _startWatching();
       _stopActiveRideTimer();
-      if (prev == TrackingMode.activeRide) _stopForegroundService();
+      if (_currentLat != null) _pushToFirebase(_currentLat!, _currentLng!);
     } else if (mode == TrackingMode.activeRide) {
       _startWatching();
       _startActiveRideTimer();
-      _startForegroundService();
+      if (_currentLat != null) _pushToFirebase(_currentLat!, _currentLng!);
     }
   }
 
-  void _startForegroundService() {
-    FlutterForegroundTask.init(
-      androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'active_ride_channel',
-        channelName: 'Active Ride Tracking',
-        channelDescription: 'Keeps location tracking alive during a ride',
-        channelImportance: NotificationChannelImportance.LOW,
-        priority: NotificationPriority.LOW,
-      ),
-      iosNotificationOptions: const IOSNotificationOptions(
-        showNotification: true,
-        playSound: false,
-      ),
-      foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.repeat(5000),
-        autoRunOnBoot: false,
-        allowWakeLock: true,
-      ),
-    );
-
-    FlutterForegroundTask.startService(
-      notificationTitle: 'Ashvo Saarathi: Active Ride',
-      notificationText: 'Tracking location to update the rider.',
-    );
-  }
-
-  void _stopForegroundService() {
-    FlutterForegroundTask.stopService();
-  }
 
   void _startWatching() {
     if (_positionStream != null) return;
@@ -118,8 +87,13 @@ class SmartTracker {
           final distance = _haversine(
               _lastLat, _lastLng, _currentLat!, _currentLng!);
           if (_lastLat == null ||
-              distance > AppConstants.discoveryMinDistanceM) {
+              distance > 20.0) {
             _pushToFirebase(_currentLat!, _currentLng!);
+          } else {
+            // Unconditionally touch the RTDB timestamp so Rider app doesn't mark it stale
+            FirebaseDatabase.instance
+                .ref('liveLocations/$driverId/updatedAt')
+                .set(ServerValue.timestamp);
           }
         }
       },
@@ -152,22 +126,22 @@ class SmartTracker {
   }
 
   void _handlePosition(Position pos) {
-    _currentLat = pos.latitude;
-    _currentLng = pos.longitude;
+    _currentLat = pos.latitude.clamp(-90.0, 90.0);
+    _currentLng = pos.longitude.clamp(-180.0, 180.0);
 
     // Notify UI immediately
-    onLocationUpdate?.call(pos.latitude, pos.longitude);
+    onLocationUpdate?.call(_currentLat!, _currentLng!);
 
     if (_mode == TrackingMode.offline) return;
 
-    // Both discovery and active ride: push if 500m+ moved
-    final distance = _haversine(_lastLat, _lastLng, pos.latitude, pos.longitude);
+    final distance = _haversine(_lastLat, _lastLng, _currentLat!, _currentLng!);
+    // Use 500m for discovery, 20m for active rides
+    final threshold = _mode == TrackingMode.activeRide ? 20.0 : AppConstants.discoveryMinDistanceM;
 
-    final shouldUpdate = _lastLat == null ||
-        distance > AppConstants.discoveryMinDistanceM;
+    final shouldUpdate = _lastLat == null || distance > threshold;
 
     if (shouldUpdate) {
-      _pushToFirebase(pos.latitude, pos.longitude);
+      _pushToFirebase(_currentLat!, _currentLng!);
     }
   }
 

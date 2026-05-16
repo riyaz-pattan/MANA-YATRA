@@ -213,20 +213,6 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
     }
   }
 
-  /// Calculate straight-line distance between current position and a search result.
-  String _formatDistance(LocationResult result) {
-    final distMeters = Geolocator.distanceBetween(
-      widget.currentPosition.latitude,
-      widget.currentPosition.longitude,
-      result.lat,
-      result.lng,
-    );
-    if (distMeters < 1000) {
-      return '${distMeters.round()} m';
-    } else {
-      return '${(distMeters / 1000).toStringAsFixed(1)} km';
-    }
-  }
 
   @override
   Widget build(BuildContext context) {

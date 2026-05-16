@@ -51,9 +51,11 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
 
       _nameController.clear();
       _phoneController.clear();
-      if (mounted) Navigator.pop(context); // Close the bottom sheet
+      if (!mounted) return;
+      Navigator.pop(context); // Close the bottom sheet
       CustomToast.show(context: context, message: 'Emergency contact added');
     } catch (e) {
+      if (!mounted) return;
       CustomToast.show(context: context, message: 'Failed to add contact', isError: true);
     } finally {
       if (mounted) setState(() => _isAdding = false);

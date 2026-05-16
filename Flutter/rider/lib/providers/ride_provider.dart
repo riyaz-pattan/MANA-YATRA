@@ -160,6 +160,8 @@ class RideProvider extends ChangeNotifier {
     _selectedBid = null;
     _drop = null;
     _route = null;
+    // Also clear persisted ride ID to prevent stale recovery on next app start
+    clearPersistedRideId();
     notifyListeners();
   }
 }

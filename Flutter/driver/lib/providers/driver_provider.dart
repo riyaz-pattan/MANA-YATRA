@@ -84,7 +84,7 @@ class DriverProvider extends ChangeNotifier {
           .snapshots()
           .listen((snap) {
         if (snap.exists) {
-          setProfile(snap.data() as Map<String, dynamic>?);
+          setProfile(snap.data());
         }
       });
     } else {

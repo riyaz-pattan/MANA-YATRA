@@ -97,6 +97,7 @@ class MarkerGenerator {
     final double width = textPainter.width + iconSize + (padding * 2.5);
     final double height = textPainter.height + (padding * 1.5);
 
+
     // Draw shadow
     final shadowPaint = Paint()
       ..color = Colors.black.withValues(alpha: 0.15)

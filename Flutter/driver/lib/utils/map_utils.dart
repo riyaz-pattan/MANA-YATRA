@@ -105,4 +105,55 @@ class MapUtils {
     final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
     return BitmapDescriptor.bytes(byteData!.buffer.asUint8List());
   }
+
+  /// Creates a stickman marker for the rider's location on the driver's map.
+  /// Shows a classic stick-figure person standing on a green circular base.
+  static Future<BitmapDescriptor> createStickmanMarker() async {
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(recorder);
+
+    const double w = 80.0;
+    const double h = 100.0;
+    final cx = w / 2;
+
+    final Paint greenPaint = Paint()
+      ..color = const Color(0xFF10B981) // success green
+      ..style = PaintingStyle.fill;
+
+    final Paint whitePaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.5
+      ..strokeCap = StrokeCap.round;
+
+    final Paint whiteFill = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+
+    // --- Base circle ---
+    canvas.drawCircle(Offset(cx, h - 16), 16, greenPaint);
+
+    // --- Stickman body proportions ---
+    const double headR = 10.0;
+    const double headY = 18.0;
+    const double neckY = headY + headR;
+    const double bodyLen = 22.0;
+    const double hipY = neckY + bodyLen;
+    const double legLen = 20.0;
+
+    // Head
+    canvas.drawCircle(Offset(cx, headY), headR, whiteFill);
+    // Neck / body
+    canvas.drawLine(Offset(cx, neckY), Offset(cx, hipY), whitePaint);
+    // Arms
+    canvas.drawLine(Offset(cx - 14, neckY + 6), Offset(cx + 14, neckY + 6), whitePaint);
+    // Left leg
+    canvas.drawLine(Offset(cx, hipY), Offset(cx - 10, hipY + legLen), whitePaint);
+    // Right leg
+    canvas.drawLine(Offset(cx, hipY), Offset(cx + 10, hipY + legLen), whitePaint);
+
+    final ui.Image image = await recorder.endRecording().toImage(w.toInt(), h.toInt());
+    final ByteData? bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(bytes!.buffer.asUint8List());
+  }
 }
