@@ -1,4 +1,3 @@
-// lib/screens/profile_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -246,15 +245,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       SkeletonBox(width: double.infinity, height: 96, borderRadius: 16),
                       SizedBox(height: 24),
                       SkeletonBox(width: 100, height: 16, borderRadius: 4),
-                      SizedBox(height: 8),
-                      SkeletonBox(width: double.infinity, height: 56, borderRadius: 16),
                       SizedBox(height: 12),
-                      SkeletonBox(width: double.infinity, height: 56, borderRadius: 16),
-                      SizedBox(height: 12),
-                      SkeletonBox(width: double.infinity, height: 56, borderRadius: 16),
+                      SkeletonBox(width: double.infinity, height: 180, borderRadius: 16),
                       SizedBox(height: 24),
                       SkeletonBox(width: 100, height: 16, borderRadius: 4),
-                      SizedBox(height: 8),
+                      SizedBox(height: 12),
                       SkeletonBox(width: double.infinity, height: 140, borderRadius: 16),
                     ],
                   );
@@ -310,51 +305,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     
                     const SizedBox(height: 24),
-                    Text('Dashboard', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.text2, letterSpacing: 1.2)),
-                    const SizedBox(height: 8),
-                    _buildTile(
-                      icon: Icons.history,
-                      title: 'Ride History',
-                      onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => const RideHistoryScreen()));
-                      },
-                    ),
-                    _buildTile(
-                      icon: Icons.emergency_share_outlined,
-                      title: 'Emergency Contacts',
-                      onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => const EmergencyContactsScreen()));
-                      },
-                    ),
-                    _buildTile(
-                      icon: Icons.payment,
-                      title: 'Payment',
-                      onTap: () {
-                        CustomToast.show(context: context, message: 'Payment module coming soon');
-                      },
+                    _buildSectionTitle('Dashboard'),
+                    _buildSettingsGroup(
+                      children: [
+                        _buildTile(
+                          icon: Icons.history,
+                          title: 'Ride History',
+                          onTap: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const RideHistoryScreen()));
+                          },
+                          showDivider: true,
+                        ),
+                        _buildTile(
+                          icon: Icons.emergency_share_outlined,
+                          title: 'Emergency Contacts',
+                          onTap: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const EmergencyContactsScreen()));
+                          },
+                          showDivider: true,
+                        ),
+                        _buildTile(
+                          icon: Icons.payment,
+                          title: 'Payment',
+                          onTap: () {
+                            CustomToast.show(context: context, message: 'Payment module coming soon');
+                          },
+                        ),
+                      ],
                     ),
                     
                     const SizedBox(height: 24),
-                    Text('Saved Places', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.text2, letterSpacing: 1.2)),
-                    const SizedBox(height: 8),
+                    _buildSectionTitle('Saved Places'),
                     _buildSavedPlacesSection(data),
 
                     const SizedBox(height: 24),
-                    Text('Preferences', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.text2, letterSpacing: 1.2)),
-                    const SizedBox(height: 8),
-                    _buildTile(
-                      icon: Icons.settings_outlined,
-                      title: 'Settings',
-                      onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
-                      },
-                    ),
-                    _buildTile(
-                      icon: Icons.help_outline,
-                      title: 'Help',
-                      onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen()));
-                      },
+                    _buildSectionTitle('Preferences'),
+                    _buildSettingsGroup(
+                      children: [
+                        _buildTile(
+                          icon: Icons.settings_outlined,
+                          title: 'Settings',
+                          onTap: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+                          },
+                          showDivider: true,
+                        ),
+                        _buildTile(
+                          icon: Icons.help_outline,
+                          title: 'Help',
+                          onTap: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen()));
+                          },
+                        ),
+                      ],
                     ),
                   ],
                 );
@@ -363,28 +366,55 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildTile({required IconData icon, required String title, required VoidCallback onTap}) {
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Text(
+        title,
+        style: GoogleFonts.inter(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: AppTheme.text2,
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSettingsGroup({required List<Widget> children}) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppTheme.border),
       ),
-      child: ListTile(
-        onTap: onTap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: AppTheme.bg2,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, color: AppTheme.primary, size: 20),
-        ),
-        title: Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 16)),
-        trailing: const Icon(Icons.chevron_right, color: AppTheme.text3),
+      child: Column(
+        children: children,
       ),
+    );
+  }
+
+  Widget _buildTile({required IconData icon, required String title, required VoidCallback onTap, bool showDivider = false}) {
+    return Column(
+      children: [
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          onTap: onTap,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppTheme.bg2,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: AppTheme.primary, size: 20),
+          ),
+          title: Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 15)),
+          trailing: const Icon(Icons.chevron_right, color: AppTheme.text3, size: 20),
+        ),
+        if (showDivider)
+          const Divider(height: 1, indent: 56, endIndent: 16, color: AppTheme.border),
+      ],
     );
   }
 
@@ -407,7 +437,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             address: homePlace?['short_name'],
             firestoreKey: 'savedHome',
           ),
-          Divider(color: AppTheme.border, height: 24),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Divider(color: AppTheme.border, height: 1),
+          ),
           _buildSavedPlaceRow(
             icon: Icons.work_rounded,
             label: 'Work',

@@ -1,4 +1,3 @@
-// lib/screens/settings_screen.dart
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -8,9 +7,24 @@ import 'about_screen.dart';
 import 'delete_account_screen.dart';
 import 'login_screen.dart';
 import '../config/theme.dart';
+import '../utils/skeleton.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  late Future<void> _loadSettingsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    // Simulate a brief loading state to show shimmer (as requested for UI polish)
+    _loadSettingsFuture = Future.delayed(const Duration(milliseconds: 600));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -21,86 +35,129 @@ class SettingsScreen extends StatelessWidget {
         backgroundColor: AppTheme.surface,
         elevation: 0,
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(24),
-        children: [
-          _buildSectionTitle('General'),
-          _buildSettingTile(
-            icon: Icons.info_outline,
-            title: 'About Mana Yatra',
-            onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutScreen()));
-            },
-          ),
-          
-          const SizedBox(height: 24),
-          _buildSectionTitle('Support'),
-          _buildSettingTile(
-            icon: Icons.help_outline,
-            title: 'Help Center',
-            onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen()));
-            },
-          ),
-          _buildSettingTile(
-            icon: Icons.description_outlined,
-            title: 'Terms of Service',
-            onTap: () async {
-              final Uri url = Uri.parse('https://manayatra.com/terms');
-              if (await canLaunchUrl(url)) await launchUrl(url);
-            },
-          ),
-          _buildSettingTile(
-            icon: Icons.privacy_tip_outlined,
-            title: 'Privacy Policy',
-            onTap: () async {
-              final Uri url = Uri.parse('https://manayatra.com/privacy');
-              if (await canLaunchUrl(url)) await launchUrl(url);
-            },
-          ),
-          
-          const SizedBox(height: 24),
-          _buildSectionTitle('Account'),
-          _buildSettingTile(
-            icon: Icons.logout,
-            title: 'Log Out',
-            textColor: AppTheme.danger,
-            iconColor: AppTheme.danger,
-            onTap: () async {
-              await FirebaseAuth.instance.signOut();
-              if (context.mounted) {
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                  (_) => false,
-                );
-              }
-            },
-          ),
-          _buildSettingTile(
-            icon: Icons.delete_forever_outlined,
-            title: 'Delete Account',
-            textColor: AppTheme.danger,
-            iconColor: AppTheme.danger,
-            onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const DeleteAccountScreen()));
-            },
-          ),
-          
-          const SizedBox(height: 48),
-          Center(
-            child: Text(
-              'App Version 1.0.0',
-              style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text3),
-            ),
-          ),
-        ],
+      body: FutureBuilder<void>(
+        future: _loadSettingsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return _buildShimmerLoading();
+          }
+
+          return ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              _buildSectionTitle('General'),
+              _buildSettingsGroup(
+                children: [
+                  _buildSettingTile(
+                    icon: Icons.info_outline,
+                    title: 'About Mana Yatra',
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutScreen()));
+                    },
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 24),
+              _buildSectionTitle('Support'),
+              _buildSettingsGroup(
+                children: [
+                  _buildSettingTile(
+                    icon: Icons.help_outline,
+                    title: 'Help Center',
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen()));
+                    },
+                    showDivider: true,
+                  ),
+                  _buildSettingTile(
+                    icon: Icons.description_outlined,
+                    title: 'Terms of Service',
+                    onTap: () async {
+                      final Uri url = Uri.parse('https://manayatra.com/terms');
+                      if (await canLaunchUrl(url)) await launchUrl(url);
+                    },
+                    showDivider: true,
+                  ),
+                  _buildSettingTile(
+                    icon: Icons.privacy_tip_outlined,
+                    title: 'Privacy Policy',
+                    onTap: () async {
+                      final Uri url = Uri.parse('https://manayatra.com/privacy');
+                      if (await canLaunchUrl(url)) await launchUrl(url);
+                    },
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 24),
+              _buildSectionTitle('Account'),
+              _buildSettingsGroup(
+                children: [
+                  _buildSettingTile(
+                    icon: Icons.logout,
+                    title: 'Log Out',
+                    textColor: AppTheme.danger,
+                    iconColor: AppTheme.danger,
+                    onTap: () async {
+                      await FirebaseAuth.instance.signOut();
+                      if (context.mounted) {
+                        Navigator.of(context).pushAndRemoveUntil(
+                          MaterialPageRoute(builder: (_) => const LoginScreen()),
+                          (_) => false,
+                        );
+                      }
+                    },
+                    showDivider: true,
+                  ),
+                  _buildSettingTile(
+                    icon: Icons.delete_forever_outlined,
+                    title: 'Delete Account',
+                    textColor: AppTheme.danger,
+                    iconColor: AppTheme.danger,
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const DeleteAccountScreen()));
+                    },
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 48),
+              Center(
+                child: Text(
+                  'App Version 1.0.0',
+                  style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text3, fontWeight: FontWeight.w500),
+                ),
+              ),
+            ],
+          );
+        },
       ),
+    );
+  }
+
+  Widget _buildShimmerLoading() {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        const SkeletonBox(width: 100, height: 16, borderRadius: 4),
+        const SizedBox(height: 16),
+        const SkeletonBox(width: double.infinity, height: 64, borderRadius: 16),
+        const SizedBox(height: 24),
+        const SkeletonBox(width: 100, height: 16, borderRadius: 4),
+        const SizedBox(height: 16),
+        const SkeletonBox(width: double.infinity, height: 180, borderRadius: 16),
+        const SizedBox(height: 24),
+        const SkeletonBox(width: 100, height: 16, borderRadius: 4),
+        const SizedBox(height: 16),
+        const SkeletonBox(width: double.infinity, height: 120, borderRadius: 16),
+      ],
     );
   }
 
   Widget _buildSectionTitle(String title) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Text(
         title,
         style: GoogleFonts.inter(
@@ -113,26 +170,54 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildSettingsGroup({required List<Widget> children}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(
+        children: children,
+      ),
+    );
+  }
+
   Widget _buildSettingTile({
     required IconData icon, 
     required String title, 
     required VoidCallback onTap,
     Color? textColor,
     Color? iconColor,
+    bool showDivider = false,
   }) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: iconColor ?? AppTheme.text),
-      title: Text(
-        title,
-        style: GoogleFonts.inter(
-          fontSize: 16, 
-          fontWeight: FontWeight.w500, 
-          color: textColor ?? AppTheme.text,
+    return Column(
+      children: [
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppTheme.bg2,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: iconColor ?? AppTheme.primary, size: 20),
+          ),
+          title: Text(
+            title,
+            style: GoogleFonts.inter(
+              fontSize: 15, 
+              fontWeight: FontWeight.w500, 
+              color: textColor ?? AppTheme.text,
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right, color: AppTheme.text3, size: 20),
+          onTap: onTap,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         ),
-      ),
-      trailing: const Icon(Icons.chevron_right, color: AppTheme.text3),
-      onTap: onTap,
+        if (showDivider)
+          const Divider(height: 1, indent: 56, endIndent: 16, color: AppTheme.border),
+      ],
     );
   }
 }

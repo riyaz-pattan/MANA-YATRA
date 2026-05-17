@@ -41,11 +41,9 @@ jobs:
 
       - name: Test (Driver)
         run: cd Flutter/driver && flutter test
-        continue-on-error: true # Tests might fail initially due to missing mocks
 
       - name: Test (Rider)
         run: cd Flutter/rider && flutter test
-        continue-on-error: true # Tests might fail initially due to missing mocks
 
       - name: Build APK (Driver)
         run: cd Flutter/driver && flutter build apk --release --no-tree-shake-icons

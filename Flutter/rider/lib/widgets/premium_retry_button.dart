@@ -72,7 +72,7 @@ class _PremiumRetryButtonState extends State<PremiumRetryButton>
               borderRadius: BorderRadius.circular(30),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFFD32F2F).withOpacity(0.4),
+                  color: const Color(0xFFD32F2F).withValues(alpha: 0.4),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),

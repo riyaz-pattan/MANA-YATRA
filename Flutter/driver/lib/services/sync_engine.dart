@@ -5,6 +5,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 import 'action_queue_service.dart';
+import 'package:firebase_performance/firebase_performance.dart';
 import '../models/queue_item.dart';
 
 /// SyncEngine processes the ActionQueueService with exponential backoff.
@@ -172,7 +173,13 @@ class SyncEngine extends ChangeNotifier {
     final payload = Map<String, dynamic>.from(item.payload);
     payload['operationId'] = item.id;
 
-    await callable.call<dynamic>(payload);
+    final trace = FirebasePerformance.instance.newTrace('${item.type.toLowerCase()}_trace');
+    await trace.start();
+    try {
+      await callable.call<dynamic>(payload);
+    } finally {
+      await trace.stop();
+    }
   }
 
   /// Map queue item types to Cloud Function names.
