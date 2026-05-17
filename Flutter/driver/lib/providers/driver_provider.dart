@@ -18,6 +18,7 @@ class DriverState {
 class DriverProvider extends ChangeNotifier {
   User? _user;
   bool _authLoading = true;
+  bool _profileLoading = false;
   Map<String, dynamic>? _profile;
   String _driverState = DriverState.offline;
   SmartTracker? _tracker;
@@ -33,6 +34,7 @@ class DriverProvider extends ChangeNotifier {
   // Getters
   User? get user => _user;
   bool get authLoading => _authLoading;
+  bool get profileLoading => _profileLoading;
   bool get isLoggedIn => _user != null && !_authLoading;
   Map<String, dynamic>? get profile => _profile;
   String get driverState => _driverState;
@@ -66,6 +68,9 @@ class DriverProvider extends ChangeNotifier {
     _profileSubscription?.cancel();
     
     if (user != null) {
+      // Mark profile as loading until first Firestore snapshot arrives
+      _profileLoading = true;
+
       if (_tracker == null) {
         _tracker = SmartTracker(user.uid);
         _tracker!.onLocationUpdate = (lat, lng) {
@@ -85,12 +90,20 @@ class DriverProvider extends ChangeNotifier {
           .listen((snap) {
         if (snap.exists) {
           setProfile(snap.data());
+        } else {
+          // No profile doc — stop loading so AuthGate shows OnboardingScreen
+          _profileLoading = false;
+          _profile = null;
+          notifyListeners();
         }
       }, onError: (error) {
         debugPrint('[DriverProvider] Profile listener error: $error');
+        _profileLoading = false;
+        notifyListeners();
       });
     } else {
       _profile = null;
+      _profileLoading = false;
       _driverState = DriverState.offline;
       _connectedSubscription?.cancel();
       _tracker?.destroy();
@@ -101,6 +114,7 @@ class DriverProvider extends ChangeNotifier {
 
   void setProfile(Map<String, dynamic>? profile) {
     _profile = profile;
+    _profileLoading = false; // First snapshot received — done loading
     if (profile != null) {
       // Read driverState, with migration fallback from old isOnline field
       final state = profile['driverState'] as String?;

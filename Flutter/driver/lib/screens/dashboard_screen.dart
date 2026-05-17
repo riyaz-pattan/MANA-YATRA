@@ -24,7 +24,7 @@ import '../utils/custom_toast.dart';
 import '../services/sync_engine.dart';
 import '../models/queue_item.dart';
 import 'package:uuid/uuid.dart';
-import '../utils/skeleton.dart';
+import '../utils/map_utils.dart';
 import '../widgets/premium_retry_button.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -39,14 +39,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
   BitmapDescriptor? _bikeIcon;
 
   List<Map<String, dynamic>> _nearbyRides = [];
+  // ignore: unused_field
   bool _loadingRides = false;
   bool _bidding = false;
   StreamSubscription? _rideListener;
   RideSignalService? _signalService;
   StreamSubscription? _signalSub;
   final Set<String> _declinedRides = {};
-  final Map<String, int> _biddedRides = {}; // Maps rideId to bid amount
-  final Map<String, StreamSubscription> _declineSubs = {}; // Per-ride decline listeners
+  final Map<String, int> _biddedRides = {};
+  final Map<String, StreamSubscription> _declineSubs = {};
+
+  // Snap carousel
+  late final PageController _ridePageController;
+  int _focusedRideIndex = 0;
+  // Cache of fare bubble markers keyed by "<rideId>_<isActive>"
+  final Map<String, BitmapDescriptor> _fareBubbleCache = {};
 
   bool _locating = false;
   bool _locationGranted = false;
@@ -54,6 +61,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _ridePageController = PageController(viewportFraction: 0.84);
     _requestPermissionsSequentially();
     _listenForActiveRide();
     _loadCustomMarkers();
@@ -171,6 +179,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    _ridePageController.dispose();
     _rideListener?.cancel();
     _signalSub?.cancel();
     _signalService?.dispose();
@@ -179,6 +188,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
     _declineSubs.clear();
     super.dispose();
+  }
+
+  /// Rebuilds fare bubble markers for all visible rides.
+  /// Called whenever [_nearbyRides] or [_focusedRideIndex] changes.
+  Future<void> _rebuildFareBubbles() async {
+    final Map<String, BitmapDescriptor> newCache = {};
+    for (int i = 0; i < _nearbyRides.length; i++) {
+      final ride = _nearbyRides[i];
+      final rideId = ride['id'] as String;
+      final fare = (ride['riderBid'] ?? ride['offeredPrice'] ?? 80) as num;
+      final isActive = i == _focusedRideIndex;
+      final key = '${rideId}_$isActive';
+      if (_fareBubbleCache.containsKey(key)) {
+        newCache[key] = _fareBubbleCache[key]!;
+      } else {
+        newCache[key] = await MapUtils.createFareBubbleMarker(
+          index: i + 1,
+          fare: fare.toInt(),
+          isActive: isActive,
+        );
+      }
+    }
+    _fareBubbleCache
+      ..clear()
+      ..addAll(newCache);
+    if (mounted) setState(() {});
   }
 
   void _listenForActiveRide() {
@@ -347,7 +382,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             .take(AppConstants.maxVisibleRides)
             .toList();
         _loadingRides = false;
+        // Reset carousel to first card when ride list refreshes
+        _focusedRideIndex = 0;
       });
+      _rebuildFareBubbles();
     });
   }
 
@@ -403,6 +441,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _declineSubs[rideId]?.cancel();
         _declineSubs.remove(rideId);
       }
+    }, onError: (error) {
+      debugPrint('Error listening to ride declines: $error');
     });
   }
 
@@ -711,6 +751,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // Map
           GoogleMap(
             style: lightMapStyle,
+            // Top padding keeps the compass/north-reset button below the status bar
+            padding: const EdgeInsets.only(top: 90),
             initialCameraPosition: CameraPosition(
               target: provider.lat != null
                   ? LatLng(provider.lat!, provider.lng!)
@@ -727,17 +769,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   position: LatLng(provider.lat!, provider.lng!),
                   icon: _getVehicleIcon(provider.profile?['vehicleType']),
                 ),
-              // Nearby ride markers
-              ..._nearbyRides.map((ride) {
-                return Marker(
-                  markerId: MarkerId(ride['id'] ?? ride.hashCode.toString()),
-                  position: LatLng(
-                    (ride['pickup']['lat'] as num).toDouble(),
-                    (ride['pickup']['lng'] as num).toDouble(),
-                  ),
-                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-                );
-              }),
+              ..._buildRideMarkers(),
             },
           ),
 
@@ -864,10 +896,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// Builds the Set of fare-bubble Markers for the nearby rides list.
+  Set<Marker> _buildRideMarkers() {
+    final markers = <Marker>{};
+    for (int i = 0; i < _nearbyRides.length; i++) {
+      final ride = _nearbyRides[i];
+      final rideId = ride['id'] as String;
+      final isActive = i == _focusedRideIndex;
+      final cacheKey = '${rideId}_$isActive';
+      final icon = _fareBubbleCache[cacheKey];
+      if (icon == null) continue;
+      final lat = (ride['pickup']?['lat'] as num?)?.toDouble();
+      final lng = (ride['pickup']?['lng'] as num?)?.toDouble();
+      if (lat == null || lng == null) continue;
+      markers.add(Marker(
+        markerId: MarkerId(rideId),
+        position: LatLng(lat, lng),
+        icon: icon,
+        onTap: () {
+          _ridePageController.animateToPage(
+            i,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeInOut,
+          );
+        },
+      ));
+    }
+    return markers;
+  }
+
   Widget _buildBottomPanel(DriverProvider provider) {
     return Container(
       padding: EdgeInsets.fromLTRB(
-          20, 16, 20, MediaQuery.of(context).padding.bottom + 16),
+          0, 12, 0, MediaQuery.of(context).padding.bottom + 8),
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -883,320 +944,411 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Drag handle
           Container(
             width: 40,
             height: 4,
-            margin: const EdgeInsets.only(bottom: 16),
+            margin: const EdgeInsets.only(bottom: 10),
             decoration: BoxDecoration(
               color: AppTheme.text3,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
 
-          // Nearby rides
           if (provider.isOnline) ...[
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Text(
-                  'Nearby Rides',
-                  style: GoogleFonts.inter(
-                      fontWeight: FontWeight.w700, fontSize: 16),
-                ),
-                const Spacer(),
-                if (!_loadingRides)
+            // Header row
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Row(
+                children: [
+                  Text(
+                    'Nearby Rides',
+                    style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w700, fontSize: 16),
+                  ),
+                  const Spacer(),
                   Text('${_nearbyRides.length} rides',
                       style: GoogleFonts.inter(
                           color: AppTheme.text3, fontSize: 13)),
-              ],
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            if (_loadingRides)
-              ...List.generate(3, (index) => const RideCardSkeleton())
-            else if (_nearbyRides.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(20),
+
+            if (_nearbyRides.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
                 child: Text(
                   provider.lat == null
                       ? 'Getting your location...'
                       : 'No rides nearby. Stay online!',
-                  style: GoogleFonts.inter(
-                      color: AppTheme.text3, fontSize: 14),
+                  style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 14),
                   textAlign: TextAlign.center,
                 ),
               )
             else
-              ...(_nearbyRides.take(5).map((ride) {
-                final distMeters = (ride['distance'] as double);
-                final distLabel = distMeters < 1000
-                    ? '${distMeters.toInt()}m'
-                    : '${(distMeters / 1000).toStringAsFixed(1)} km';
-                final etaMin = ((distMeters / 1000) / AppConstants.avgSpeedKmh * 60).ceil();
-                final etaLabel = etaMin < 1 ? '<1 min' : '$etaMin min';
-                final rideId = ride['id'] as String;
-                final isBidded = _biddedRides.containsKey(rideId);
+              // ── Snap Carousel ──────────────────────────────────────
+              SizedBox(
+                height: 255,
+                child: PageView.builder(
+                  controller: _ridePageController,
+                  itemCount: _nearbyRides.length,
+                  onPageChanged: (index) {
+                    setState(() => _focusedRideIndex = index);
+                    // Rebuild markers so active glow switches correctly
+                    _rebuildFareBubbles();
+                    // Animate map camera to the focused pickup
+                    final ride = _nearbyRides[index];
+                    final lat = (ride['pickup']?['lat'] as num?)?.toDouble();
+                    final lng = (ride['pickup']?['lng'] as num?)?.toDouble();
+                    if (lat != null && lng != null) {
+                      _mapController?.animateCamera(
+                        CameraUpdate.newLatLngZoom(LatLng(lat, lng), 15),
+                      );
+                    }
+                  },
+                  itemBuilder: (context, index) {
+                    final ride = _nearbyRides[index];
+                    final distMeters = (ride['distance'] as double);
+                    final distLabel = distMeters < 1000
+                        ? '${distMeters.toInt()}m'
+                        : '${(distMeters / 1000).toStringAsFixed(1)} km';
+                    final etaMin =
+                        ((distMeters / 1000) / AppConstants.avgSpeedKmh * 60)
+                            .ceil();
+                    final etaLabel = etaMin < 1 ? '<1 min' : '$etaMin min';
+                    final rideId = ride['id'] as String;
+                    final isBidded = _biddedRides.containsKey(rideId);
+                    final isFocused = index == _focusedRideIndex;
 
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.bg,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: isBidded ? AppTheme.primary : AppTheme.border, width: isBidded ? 2 : 1),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.1),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      // Ride Header (Fare & Distance)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Text(
-                                      'Ride Request',
-                                      style: GoogleFonts.inter(fontSize: 12, color: AppTheme.text3, fontWeight: FontWeight.w600),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    const Icon(Icons.timer_outlined, size: 14, color: AppTheme.primary),
-                                    const SizedBox(width: 4),
-                                    RideTimerText(
-                                      createdAtMs: (ride['createdAt'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
-                                      onExpired: () {
-                                        if (mounted) {
-                                          setState(() {
-                                            _nearbyRides.removeWhere((r) => r['id'] == rideId);
-                                          });
-                                        }
-                                      },
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.electric_rickshaw, color: AppTheme.primary, size: 20),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      '${ride['distanceKm']} km',
-                                      style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 18),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                    return AnimatedScale(
+                      scale: isFocused ? 1.0 : 0.93,
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOut,
+                      child: AnimatedOpacity(
+                        opacity: isFocused ? 1.0 : 0.60,
+                        duration: const Duration(milliseconds: 280),
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: AppTheme.bg,
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(
+                                  color: isBidded
+                                      ? AppTheme.primary
+                                      : isFocused
+                                          ? AppTheme.border
+                                          : AppTheme.border.withValues(alpha: 0.5),
+                                  width: isBidded ? 2 : 1),
+                              boxShadow: isFocused
+                                  ? [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.18),
+                                        blurRadius: 16,
+                                        offset: const Offset(0, 6),
+                                      )
+                                    ]
+                                  : [],
                             ),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(
-                                  isBidded ? 'Your Bid' : 'Offered Fare',
-                                  style: GoogleFonts.inter(fontSize: 12, color: isBidded ? AppTheme.primary : AppTheme.text3, fontWeight: FontWeight.w600),
+                              // Card header — fare + distance
+                              Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(children: [
+                                          Text(
+                                            'Ride ${index + 1} of ${_nearbyRides.length}',
+                                            style: GoogleFonts.inter(
+                                                fontSize: 11,
+                                                color: AppTheme.text3,
+                                                fontWeight: FontWeight.w600),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          const Icon(Icons.timer_outlined,
+                                              size: 13, color: AppTheme.primary),
+                                          const SizedBox(width: 3),
+                                          RideTimerText(
+                                            createdAtMs:
+                                                (ride['createdAt'] as num?)
+                                                        ?.toInt() ??
+                                                    DateTime.now()
+                                                        .millisecondsSinceEpoch,
+                                            onExpired: () {
+                                              if (mounted) {
+                                                setState(() {
+                                                  _nearbyRides.removeWhere(
+                                                      (r) => r['id'] == rideId);
+                                                });
+                                                _rebuildFareBubbles();
+                                              }
+                                            },
+                                          ),
+                                        ]),
+                                        const SizedBox(height: 4),
+                                        Row(children: [
+                                          const Icon(Icons.electric_rickshaw,
+                                              color: AppTheme.primary, size: 18),
+                                          const SizedBox(width: 5),
+                                          Text(
+                                            '${ride['distanceKm']} km',
+                                            style: GoogleFonts.inter(
+                                                fontWeight: FontWeight.w800,
+                                                fontSize: 17),
+                                          ),
+                                        ]),
+                                      ],
+                                    ),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                          isBidded ? 'Your Bid' : 'Offered',
+                                          style: GoogleFonts.inter(
+                                              fontSize: 11,
+                                              color: isBidded
+                                                  ? AppTheme.primary
+                                                  : AppTheme.text3,
+                                              fontWeight: FontWeight.w600),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          isBidded
+                                              ? '₹${_biddedRides[rideId]}'
+                                              : '₹${ride['riderBid']}',
+                                          style: GoogleFonts.inter(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.w800,
+                                              color: isBidded
+                                                  ? AppTheme.primary
+                                                  : AppTheme.success),
+                                        ),
+                                        if (isBidded &&
+                                            _biddedRides[rideId] !=
+                                                ride['riderBid'])
+                                          Text(
+                                            'Offer: ₹${ride['riderBid']}',
+                                            style: GoogleFonts.inter(
+                                              fontSize: 11,
+                                              color: AppTheme.text3,
+                                              decoration:
+                                                  TextDecoration.lineThrough,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  isBidded ? '₹${_biddedRides[rideId]}' : '₹${ride['riderBid']}',
-                                  style: GoogleFonts.inter(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.w800,
-                                      color: isBidded ? AppTheme.primary : AppTheme.success),
-                                ),
-                                if (isBidded && _biddedRides[rideId] != ride['riderBid'])
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 2),
-                                    child: Text(
-                                      'Offer: ₹${ride['riderBid']}',
+                              ),
+
+                              // ETA chip
+                              Builder(builder: (_) {
+                                final chipColor = etaMin < 3
+                                    ? AppTheme.success
+                                    : etaMin <= 7
+                                        ? AppTheme.warning
+                                        : AppTheme.danger;
+                                return Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: chipColor.withValues(alpha: 0.07),
+                                    border: Border.symmetric(
+                                        horizontal: BorderSide(
+                                            color: AppTheme.border)),
+                                  ),
+                                  child: Row(children: [
+                                    Icon(Icons.near_me_rounded,
+                                        size: 13, color: chipColor),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      '$distLabel to pickup  ·  ~$etaLabel',
                                       style: GoogleFonts.inter(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppTheme.text3,
-                                        decoration: TextDecoration.lineThrough,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: chipColor),
+                                    ),
+                                  ]),
+                                );
+                              }),
+
+                              // Route preview
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Column(children: [
+                                      const Icon(Icons.my_location,
+                                          color: AppTheme.primary, size: 18),
+                                      Container(
+                                          width: 2,
+                                          height: 20,
+                                          margin: const EdgeInsets.symmetric(
+                                              vertical: 3),
+                                          color: AppTheme.border),
+                                      const Icon(Icons.location_on,
+                                          color: AppTheme.danger, size: 18),
+                                    ]),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            ride['pickup']?['short_name'] ??
+                                                ride['pickup']?['display_name'] ??
+                                                'Pickup',
+                                            style: GoogleFonts.inter(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 14),
+                                          Text(
+                                            ride['drop']?['short_name'] ??
+                                                ride['drop']?['display_name'] ??
+                                                'Drop',
+                                            style: GoogleFonts.inter(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                  ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Divider(height: 1, color: AppTheme.border),
-                      // Pickup distance chip — prominent, colored by ETA urgency
-                      Builder(builder: (_) {
-                        final etaMin =
-                            ((distMeters / 1000) / AppConstants.avgSpeedKmh * 60)
-                                .ceil();
-                        final chipColor = etaMin < 3
-                            ? AppTheme.success
-                            : etaMin <= 7
-                                ? AppTheme.warning
-                                : AppTheme.danger;
-                        return Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: chipColor.withValues(alpha: 0.07),
-                            border: Border(
-                                bottom: BorderSide(color: AppTheme.border)),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.near_me_rounded,
-                                  size: 14, color: chipColor),
-                              const SizedBox(width: 6),
-                              Text(
-                                '$distLabel to pickup  ·  ~$etaLabel',
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: chipColor,
+                                  ],
                                 ),
+                              ),
+
+                              // Action buttons
+                              Container(
+                                decoration: const BoxDecoration(
+                                  color: AppTheme.surface,
+                                  borderRadius: BorderRadius.vertical(
+                                      bottom: Radius.circular(18)),
+                                ),
+                                child: isBidded
+                                    ? Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 12),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            const Icon(Icons.check_circle,
+                                                color: AppTheme.success,
+                                                size: 18),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              'Bid placed · waiting for rider',
+                                              style: GoogleFonts.inter(
+                                                  color: AppTheme.success,
+                                                  fontWeight: FontWeight.w700,
+                                                  fontSize: 13),
+                                            ),
+                                          ],
+                                        ),
+                                      )
+                                    : Row(children: [
+                                        Expanded(
+                                          child: InkWell(
+                                            onTap: () {
+                                              setState(() {
+                                                _declinedRides.add(rideId);
+                                                _nearbyRides.removeWhere(
+                                                    (r) => r['id'] == rideId);
+                                                if (_focusedRideIndex >=
+                                                    _nearbyRides.length) {
+                                                  _focusedRideIndex =
+                                                      (_nearbyRides.length - 1)
+                                                          .clamp(0, 999);
+                                                }
+                                              });
+                                              _rebuildFareBubbles();
+                                            },
+                                            borderRadius: const BorderRadius.only(
+                                                bottomLeft: Radius.circular(18)),
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 14),
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.danger
+                                                    .withValues(alpha: 0.1),
+                                                borderRadius:
+                                                    const BorderRadius.only(
+                                                        bottomLeft:
+                                                            Radius.circular(18)),
+                                              ),
+                                              alignment: Alignment.center,
+                                              child: Text('Decline',
+                                                  style: GoogleFonts.inter(
+                                                      color: AppTheme.danger,
+                                                      fontWeight: FontWeight.w700,
+                                                      fontSize: 15)),
+                                            ),
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: InkWell(
+                                            onTap: () => _showBidDialog(ride),
+                                            borderRadius: const BorderRadius.only(
+                                                bottomRight:
+                                                    Radius.circular(18)),
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 14),
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.primary
+                                                    .withValues(alpha: 0.1),
+                                                borderRadius:
+                                                    const BorderRadius.only(
+                                                        bottomRight:
+                                                            Radius.circular(18)),
+                                              ),
+                                              alignment: Alignment.center,
+                                              child: Text('Place Bid',
+                                                  style: GoogleFonts.inter(
+                                                      color: AppTheme.primary,
+                                                      fontWeight: FontWeight.w700,
+                                                      fontSize: 15)),
+                                            ),
+                                          ),
+                                        ),
+                                      ]),
                               ),
                             ],
                           ),
-                        );
-                      }),
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Column(
-                                  children: [
-                                    const Icon(Icons.my_location, color: AppTheme.primary, size: 20),
-                                    Container(
-                                      width: 2,
-                                      height: 24,
-                                      color: AppTheme.border,
-                                      margin: const EdgeInsets.symmetric(vertical: 4),
-                                    ),
-                                    const Icon(Icons.location_on, color: AppTheme.danger, size: 20),
-                                  ],
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        ride['pickup']?['display_name'] ?? ride['pickup']?['short_name'] ?? 'Pickup',
-                                        style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 16),
-                                      Text(
-                                        ride['drop']?['display_name'] ?? ride['drop']?['short_name'] ?? 'Drop',
-                                        style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
                         ),
                       ),
-                      // Action Button
-                      Container(
-                        width: double.infinity,
-                        decoration: const BoxDecoration(
-                          color: AppTheme.surface,
-                          borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
-                        ),
-                        child: isBidded
-                            ? Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 16),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    const Icon(Icons.check_circle, color: AppTheme.success, size: 20),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'Bid placed, waiting for rider to accept',
-                                      style: GoogleFonts.inter(
-                                          color: AppTheme.success,
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 14),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : Row(
-                                children: [
-                                  Expanded(
-                                    child: InkWell(
-                                      onTap: () {
-                                        setState(() {
-                                          _declinedRides.add(rideId);
-                                          _nearbyRides.removeWhere((r) => r['id'] == rideId);
-                                        });
-                                      },
-                                      borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(16)),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(vertical: 16),
-                                        decoration: BoxDecoration(
-                                          color: AppTheme.danger.withValues(alpha: 0.1),
-                                          borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(16)),
-                                        ),
-                                        alignment: Alignment.center,
-                                        child: Text(
-                                          'Decline',
-                                          style: GoogleFonts.inter(
-                                              color: AppTheme.danger,
-                                              fontWeight: FontWeight.w700,
-                                              fontSize: 16),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: InkWell(
-                                      onTap: () => _showBidDialog(ride),
-                                      borderRadius: const BorderRadius.only(bottomRight: Radius.circular(16)),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(vertical: 16),
-                                        decoration: BoxDecoration(
-                                          color: AppTheme.primary.withValues(alpha: 0.1),
-                                          borderRadius: const BorderRadius.only(bottomRight: Radius.circular(16)),
-                                        ),
-                                        alignment: Alignment.center,
-                                        child: Text(
-                                          'Place Bid',
-                                          style: GoogleFonts.inter(
-                                              color: AppTheme.primary,
-                                              fontWeight: FontWeight.w700,
-                                              fontSize: 16),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                      ),
-                    ],
-                  ),
-                );
-              })),
+                    ),
+                  );
+                },
+                ),
+              ),
           ],
         ],
       ),
     );
   }
+
   Widget _buildDrawer(BuildContext context, DriverProvider provider) {
     return Drawer(
       backgroundColor: AppTheme.surface,

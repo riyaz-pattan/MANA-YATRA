@@ -14,7 +14,28 @@ void main() {
       await tester.pumpAndSettle(const Duration(seconds: 5));
 
       // 1. Ensure user is logged in
-      final user = FirebaseAuth.instance.currentUser;
+      var user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        final phoneField = find.byType(TextField).first;
+        await tester.enterText(phoneField, '9177570220');
+        await tester.pumpAndSettle();
+
+        final sendOtpBtn = find.textContaining('Send OTP');
+        await tester.tap(sendOtpBtn);
+        await tester.pumpAndSettle(const Duration(seconds: 4));
+
+        final pinField = find.byType(EditableText).last;
+        await tester.enterText(pinField, '222222');
+        await tester.pumpAndSettle(const Duration(seconds: 3));
+
+        final verifyBtn = find.textContaining('Verify');
+        if (verifyBtn.evaluate().isNotEmpty) {
+           await tester.tap(verifyBtn.first);
+           await tester.pumpAndSettle(const Duration(seconds: 4));
+        }
+        user = FirebaseAuth.instance.currentUser;
+      }
+      
       expect(user, isNotNull, reason: 'Test requires a logged-in user');
       final uid = user!.uid;
 

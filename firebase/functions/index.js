@@ -383,9 +383,16 @@ exports.completeRide = functions.https.onCall(async (data, context) => {
         );
       }
 
+      const startedAt = ride.startedAt ? ride.startedAt.toDate() : null;
+      const completedAtDate = new Date();
+      const actualDurationMin = startedAt
+        ? Math.round((completedAtDate.getTime() - startedAt.getTime()) / 60000)
+        : null;
+
       txn.update(rideRef, {
         status: "completed",
         completedAt: admin.firestore.FieldValue.serverTimestamp(),
+        ...(actualDurationMin !== null && { actualDurationMin }),
       });
 
       txn.update(driverRef, {
@@ -443,8 +450,12 @@ exports.cancelRide = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError("permission-denied", "Not authorized to cancel this ride.");
       }
 
-      const canceller = ride.riderId === userId ? "rider" : "driver";
-
+      let canceller;
+      if (data.role === 'rider' || data.role === 'driver') {
+        canceller = data.role;
+      } else {
+        canceller = ride.riderId === userId ? "rider" : "driver";
+      }
       if (ride.status === "completed" || ride.status === "cancelled" || ride.status === "expired") {
         throw new functions.https.HttpsError(
           "failed-precondition",

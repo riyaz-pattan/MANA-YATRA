@@ -1,9 +1,15 @@
 import 'dart:ui';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 class ErrorHandler {
   static Future<void> initialize() async {
+    if (kDebugMode) {
+      debugPrint('ErrorHandler: Running in debug mode, skipping Crashlytics initialization to preserve test error handlers.');
+      return;
+    }
+
     // Pass all uncaught "fatal" errors from the framework to Crashlytics
     FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
 

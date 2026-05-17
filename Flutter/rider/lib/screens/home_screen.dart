@@ -56,6 +56,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   StreamSubscription? _rideListener;
   bool _isLocationCentered = false;
+  bool _isFetchingLocation = false;
 
   @override
   void initState() {
@@ -704,79 +705,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
               ),
               Positioned(
-                bottom: 0, left: 0, right: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
                 child: _buildBottomPanel(provider),
               ),
-              // Floating route stats pill — visible once route is loaded
-              if (provider.route != null)
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: SafeArea(
-                    child: Center(
-                      child: Container(
-                        margin: const EdgeInsets.only(top: 8),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: AppTheme.surface,
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: AppTheme.border),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.12),
-                              blurRadius: 10,
-                              offset: const Offset(0, 3),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.straighten_rounded,
-                                size: 14, color: AppTheme.primary),
-                            const SizedBox(width: 5),
-                            Text(
-                              '${provider.route!.distanceKm.toStringAsFixed(1)} km',
-                              style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.text),
-                            ),
-                            const SizedBox(width: 12),
-                            Container(
-                                width: 1, height: 14, color: AppTheme.border),
-                            const SizedBox(width: 12),
-                            const Icon(Icons.schedule_rounded,
-                                size: 14, color: AppTheme.warning),
-                            const SizedBox(width: 5),
-                            Text(
-                              '${provider.route!.durationMin} min',
-                              style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.text),
-                            ),
-                            const SizedBox(width: 12),
-                            Container(
-                                width: 1, height: 14, color: AppTheme.border),
-                            const SizedBox(width: 12),
-                            const Icon(Icons.currency_rupee_rounded,
-                                size: 14, color: AppTheme.success),
-                            Text(
-                              '${AppConstants.estimatePrice(provider.route!.distanceKm, provider.vehicleType).toInt()}',
-                              style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.success),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+              // Floating route stats pill removed.
             ],
           ),
         ),
@@ -825,16 +759,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ],
       ),
       child: GestureDetector(
-        onTap: _openSearchScreen,
+        onTap: _isFetchingLocation ? null : _openSearchScreen,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
             children: [
-              const Icon(Icons.search_rounded, color: Colors.black54, size: 22),
+              if (_isFetchingLocation)
+                const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black54),
+                )
+              else
+                const Icon(Icons.search_rounded, color: Colors.black54, size: 22),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  'Where are you going?',
+                  _isFetchingLocation ? 'Fetching location...' : 'Where are you going?',
                   style: GoogleFonts.inter(
                     color: Colors.black87,
                     fontSize: 15,
@@ -853,7 +794,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _openSearchScreen({bool? focusDrop}) async {
     // If location is not available, try to get it now
     if (_currentPos == null) {
+      setState(() => _isFetchingLocation = true);
       await _getCurrentLocation();
+      setState(() => _isFetchingLocation = false);
+      
       // If still null after requesting, show toast
       if (_currentPos == null && mounted) {
         CustomToast.show(
@@ -920,16 +864,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Handle
-          Container(
-            width: 40,
-            height: 4,
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              color: AppTheme.text3,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
+          // Handle removed to save space
 
 
           // Vehicle type selector
@@ -952,10 +887,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     margin: const EdgeInsets.symmetric(horizontal: 4),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                       border: Border.all(
                         color: isSelected ? Colors.black : AppTheme.border,
                         width: isSelected ? 2 : 1,
@@ -968,8 +903,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Text(entry.value.icon,
-                                style: const TextStyle(fontSize: 32)),
-                            const SizedBox(width: 6),
+                                style: const TextStyle(fontSize: 24)),
+                            const SizedBox(width: 4),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 4, vertical: 1),
@@ -1003,11 +938,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 4),
                         Text(
                           entry.value.label,
                           style: GoogleFonts.inter(
-                            fontSize: 12,
+                            fontSize: 11,
                             fontWeight:
                                 isSelected ? FontWeight.w700 : FontWeight.w500,
                             color: Colors.black,
@@ -1020,15 +955,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               );
             }).toList(),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
           // Route info + price
           if (provider.route != null) ...[
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: AppTheme.bg,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: AppTheme.border),
               ),
               child: Column(
@@ -1052,144 +987,196 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  const Divider(height: 1, color: AppTheme.border),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Your Bid Price',
-                            style: GoogleFonts.inter(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.text,
-                            ),
+                  if (provider.vehicleType.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    const Divider(height: 1, color: AppTheme.border),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          // Fare estimate range
-                          Builder(builder: (_) {
-                            final (low, high) = AppConstants.estimatePriceRange(
-                              provider.route!.distanceKm,
-                              provider.vehicleType,
-                            );
-                            return Text(
-                              'Estimate: ₹$low – ₹$high',
-                              style: GoogleFonts.inter(
-                                fontSize: 11,
-                                color: AppTheme.text3,
-                              ),
-                            );
-                          }),
-                        ],
-                      ),
-                      Container(
-                        width: 100,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AppTheme.surface2,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: AppTheme.border),
+                          child: Text(
+                            AppConstants.vehicleTypes[provider.vehicleType]!.icon,
+                            style: const TextStyle(fontSize: 20),
+                          ),
                         ),
-                        child: Row(
-                          children: [
-                            Text(
-                              '₹',
-                              style: GoogleFonts.inter(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                                color: AppTheme.success,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: TextField(
-                                controller: _bidController,
-                                keyboardType: TextInputType.number,
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${AppConstants.vehicleTypes[provider.vehicleType]!.label} Selected',
                                 style: GoogleFonts.inter(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppTheme.success,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.text,
                                 ),
-                                decoration: const InputDecoration(
-                                  border: InputBorder.none,
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                ),
-                                onChanged: (val) {
-                                  final price = int.tryParse(val);
-                                  if (price != null) {
-                                    provider.setBidPrice(price);
-                                    final min = AppConstants.minFare[provider.vehicleType] ?? 20;
-                                    setState(() => _bidBelowMinimum = price < min);
-                                  }
-                                },
                               ),
-                            ),
-                          ],
+                              Builder(builder: (_) {
+                                final (low, high) = AppConstants.estimatePriceRange(
+                                  provider.route!.distanceKm,
+                                  provider.vehicleType,
+                                );
+                                return Text(
+                                  'Rec: ₹$low – ₹$high',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppTheme.primary,
+                                  ),
+                                );
+                              }),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3), width: 1.5),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppTheme.primary.withValues(alpha: 0.05),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '₹',
+                                style: GoogleFonts.inter(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.primary,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              SizedBox(
+                                width: 50,
+                                child: TextField(
+                                  controller: _bidController,
+                                  keyboardType: TextInputType.number,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppTheme.primary,
+                                  ),
+                                  decoration: const InputDecoration(
+                                    border: InputBorder.none,
+                                    isDense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
+                                  onChanged: (val) {
+                                    final price = int.tryParse(val);
+                                    if (price != null) {
+                                      provider.setBidPrice(price);
+                                      final min = AppConstants.minFare[provider.vehicleType] ?? 20;
+                                      setState(() => _bidBelowMinimum = price < min);
+                                    }
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
 
-            // ── Minimum fare warning ──
-            if (_bidBelowMinimum) ...[
-              const SizedBox(height: 8),
+            if (provider.vehicleType.isNotEmpty) ...[
+              // ── Minimum fare warning ──
+              if (_bidBelowMinimum) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.danger.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.danger.withValues(alpha: 0.35)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded,
+                          color: AppTheme.danger, size: 14),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Very low bid — drivers may not accept this offer.',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.danger,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+
+              // Request ride button
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: _requestRide,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    'Request Ride →',
+                    style: GoogleFonts.inter(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 12),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
-                  color: AppTheme.danger.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppTheme.danger.withValues(alpha: 0.35)),
+                  color: AppTheme.primary.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
                 ),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.warning_amber_rounded,
-                        color: AppTheme.danger, size: 16),
+                    const Icon(Icons.touch_app, size: 16, color: AppTheme.primary),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Very low bid — drivers may not accept this offer.',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.danger,
-                        ),
+                    Text(
+                      'Select a vehicle type to continue',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary,
                       ),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(height: 12),
             ],
-            const SizedBox(height: 16),
-
-            // Request ride button
-            SizedBox(
-              width: double.infinity,
-              height: 54,
-              child: ElevatedButton(
-                onPressed: _requestRide,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: Text(
-                  'Request Ride →',
-                  style: GoogleFonts.inter(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
           ] else if (_calculatingRoute) ...[
             const Padding(
               padding: EdgeInsets.all(16),

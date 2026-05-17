@@ -6,7 +6,7 @@ class MarkerGenerator {
   /// Generates a professional location marker with a stem (pinpoint).
   static Future<BitmapDescriptor> createDotMarker({
     required Color color,
-    double radius = 26,
+    double radius = 18,
     double borderWidth = 2,
   }) async {
     final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();

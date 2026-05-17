@@ -17,7 +17,7 @@ class RideProvider extends ChangeNotifier {
   RouteInfo? _route;
 
   // Ride config
-  String _vehicleType = 'auto';
+  String _vehicleType = '';
   int _bidPrice = 80;
 
   // Active ride

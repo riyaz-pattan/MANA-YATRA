@@ -190,7 +190,7 @@ class AuthGate extends StatelessWidget {
         return Consumer<DriverProvider>(
           builder: (context, provider, _) {
             // Wait for initial profile load
-            if (provider.user == null || provider.authLoading) {
+            if (provider.user == null || provider.authLoading || provider.profileLoading) {
               return const Scaffold(
                 body: Center(
                   child: CircularProgressIndicator(color: AppTheme.primary),

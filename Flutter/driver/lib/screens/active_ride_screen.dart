@@ -36,13 +36,16 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   bool _updating = false;
   bool _cameraFitted = false;
   BitmapDescriptor? _riderPinIcon;
-  BitmapDescriptor? _riderLabelIcon;
+  BitmapDescriptor? _vehicleIcon;
+  BitmapDescriptor? _dropDot;
   List<LatLng> _approachRouteCoords = [];
   bool _isFetchingApproach = false;
   LatLng? _lastDriverPos;
   String _driverProximity = '';
   DriverProvider? _driverProvider;
   ConfettiController? _confettiController;
+  int _swipeCompleteCounter = 0;
+  int _swipeCancelCounter = 0;
 
   // OTP verification
   final List<TextEditingController> _otpControllers = List.generate(
@@ -91,6 +94,11 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
 
             if (prevStatus == 'matched' && data['status'] == 'started') {
               _cameraFitted = false;
+            }
+            
+            if (_vehicleIcon == null) {
+              final vType = data['vehicleType'] ?? 'auto';
+              _loadVehicleIcon(vType);
             }
 
             // Fit camera to route bounds once
@@ -157,9 +165,17 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
 
   Future<void> _loadCustomIcons() async {
     try {
-      // Use stickman marker so driver can visually identify where rider is standing
-      _riderPinIcon = await MapUtils.createStickmanMarker();
-      _riderLabelIcon = await MapUtils.createLabelMarker('Rider is here');
+      // Use combined pin and label marker so driver can visually identify where rider is standing
+      _riderPinIcon = await MapUtils.createRiderLocationMarker();
+      _dropDot = await MapUtils.createDotMarker(color: const Color(0xFFEA4335));
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
+  Future<void> _loadVehicleIcon(String type) async {
+    final path = 'assets/images/map_icons/$type.png';
+    try {
+      _vehicleIcon = await MapUtils.getBytesFromAsset(path, 80);
       if (mounted) setState(() {});
     } catch (_) {}
   }
@@ -315,12 +331,16 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     }
   }
 
-  Future<void> _completeRide() async {
+  Future<void> _completeRide({BuildContext? sheetContext}) async {
+    if (_updating) return;
     setState(() => _updating = true);
     
-    CustomToast.show(
+    showDialog(
       context: context,
-      message: '⏳ Completing ride...',
+      barrierDismissible: false,
+      builder: (dialogContext) => const Center(
+        child: CircularProgressIndicator(color: AppTheme.success),
+      ),
     );
 
     try {
@@ -334,11 +354,16 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         debugPrint('Error stopping foreground task: $e');
       }
 
-      // The Firestore stream will update _ride status to 'completed',
-      // and the build() method will then render _buildEndScreen automatically.
+      if (!mounted) return;
+      Navigator.pop(context); // pop the loading dialog
+
+      if (sheetContext != null && sheetContext.mounted) {
+        Navigator.pop(sheetContext); // pop the bottom sheet
+      }
     } catch (e) {
       debugPrint('Error completing ride: $e');
       if (mounted) {
+        Navigator.pop(context); // pop the loading dialog
         CustomToast.show(
           context: context,
           message: '❌ Failed to complete ride. Check connection.',
@@ -352,13 +377,99 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     }
   }
 
-  Future<void> _cancelRide() async {
+  void _showCompleteConfirmation() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20, right: 20, top: 24, bottom: MediaQuery.of(context).padding.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 24),
+              const Icon(Icons.check_circle_outline, color: AppTheme.success, size: 60),
+              const SizedBox(height: 16),
+              Text('Complete Ride?', style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.text)),
+              const SizedBox(height: 8),
+              Text(
+                'Are you sure you have reached the destination and dropped off the rider?',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(fontSize: 15, color: Colors.grey[600]),
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: () {
+                    _completeRide(sheetContext: sheetContext);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.success,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    '✅ Complete & Collect Cash',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 15),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: OutlinedButton(
+                  onPressed: () {
+                    Navigator.pop(sheetContext);
+                    setState(() {
+                      _swipeCompleteCounter++;
+                    });
+                  },
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: Colors.grey[300]!),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    'Cancel',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15, color: Colors.grey[700]),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ).whenComplete(() {
+      // If the sheet was dismissed by tapping outside or swiping down, reset the slider
+      setState(() {
+        _swipeCompleteCounter++;
+      });
+    });
+  }
+
+  Future<void> _cancelRide({BuildContext? sheetContext}) async {
     if (_updating) return;
     setState(() => _updating = true);
 
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => const Center(
+        child: CircularProgressIndicator(color: AppTheme.danger),
+      ),
+    );
+
     try {
       final callable = FirebaseFunctions.instance.httpsCallable('cancelRide');
-      await callable.call({'rideId': widget.rideId});
+      await callable.call({'rideId': widget.rideId, 'role': 'driver'});
 
       // Stop the foreground tracking service as the ride is cancelled
       try {
@@ -369,10 +480,17 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
 
       // ✅ Only reset local state on successful write
       if (!mounted) return;
+      Navigator.pop(context); // pop the loading dialog
+
+      if (sheetContext != null && sheetContext.mounted) {
+        Navigator.pop(sheetContext); // pop the bottom sheet
+      }
+      
       context.read<DriverProvider>().setActiveRide(null);
     } catch (e) {
       debugPrint('Error cancelling ride: $e');
       if (mounted) {
+        Navigator.pop(context); // pop the loading dialog
         CustomToast.show(
           context: context,
           message: '❌ Failed to cancel ride. Please try again.',
@@ -384,6 +502,83 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         setState(() => _updating = false);
       }
     }
+  }
+
+  void _showCancelConfirmation() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20, right: 20, top: 24, bottom: MediaQuery.of(context).padding.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 24),
+              const Icon(Icons.cancel_outlined, color: AppTheme.danger, size: 60),
+              const SizedBox(height: 16),
+              Text('Cancel Ride?', style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.text)),
+              const SizedBox(height: 8),
+              Text(
+                'Are you sure you want to cancel this ride? This may affect your rating.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(fontSize: 15, color: Colors.grey[600]),
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: () {
+                    _cancelRide(sheetContext: sheetContext);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.danger,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    'Yes, Cancel Ride',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 15),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: OutlinedButton(
+                  onPressed: () {
+                    Navigator.pop(sheetContext);
+                    setState(() {
+                      _swipeCancelCounter++;
+                    });
+                  },
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: Colors.grey[300]!),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    'No, Keep Ride',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15, color: Colors.grey[700]),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ).whenComplete(() {
+      setState(() {
+        _swipeCancelCounter++;
+      });
+    });
   }
 
   Widget _buildEndScreen(String status) {
@@ -399,7 +594,16 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     // Try to parse ride stats from Firestore
     final finalPrice = _ride?['finalPrice'] ?? _ride?['riderBid'] ?? 0;
     final distanceKm = _ride?['distanceKm'];
-    final durationMin = _ride?['durationMin'];
+    // Prefer the actual elapsed time; fall back to the estimated duration
+    final durationMin = _ride?['actualDurationMin'] ?? _ride?['durationMin'];
+
+    final cancelledBy = _ride?['cancelledBy'];
+    String cancelReason = 'The ride was cancelled.';
+    if (cancelledBy == 'driver') {
+      cancelReason = 'The ride was cancelled by you (Driver).';
+    } else if (cancelledBy == 'rider') {
+      cancelReason = 'The ride was cancelled by the Rider.';
+    }
 
     return Container(
       color: AppTheme.surface,
@@ -463,7 +667,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                   Text(
                     isCompleted
                         ? 'Great job! Collect cash from the rider.'
-                        : 'The ride was cancelled.',
+                        : cancelReason,
                     style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2),
                     textAlign: TextAlign.center,
                   ),
@@ -717,10 +921,10 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
             // Push Google Maps UI elements (compass, my-location) below the top bar and above bottom sheet
             padding: EdgeInsets.only(
               top: 90,
-              bottom: status == 'matched' ? 320 : 380,
+              bottom: status == 'matched' ? 380 : 380, // Bump padding so zoom controls clear the OTP bottom sheet
             ),
             style: lightMapStyle,
-            myLocationEnabled: true,
+            myLocationEnabled: status != 'started',
             myLocationButtonEnabled: false,
             initialCameraPosition: CameraPosition(
               target: provider.lat != null
@@ -761,17 +965,6 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                   anchor: const Offset(0.5, 0.5),
                   zIndexInt: 1,
                 ),
-              if (_ride!['pickup'] != null && status == 'matched' && _riderLabelIcon != null)
-                Marker(
-                  markerId: const MarkerId('rider_label'),
-                  position: LatLng(
-                    (_ride!['pickup']['lat'] as num).toDouble(),
-                    (_ride!['pickup']['lng'] as num).toDouble(),
-                  ),
-                  icon: _riderLabelIcon!,
-                  anchor: const Offset(0.5, 1.8),
-                  zIndexInt: 2,
-                ),
               if (_ride!['drop'] != null && status == 'started')
                 Marker(
                   markerId: const MarkerId('drop'),
@@ -779,8 +972,17 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                     (_ride!['drop']['lat'] as num).toDouble(),
                     (_ride!['drop']['lng'] as num).toDouble(),
                   ),
-                  // Use the standard red pin so it points precisely at the location
-                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+                  icon: _dropDot ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+                  anchor: const Offset(0.5, 0.9), // Anchor at the bottom of the stem
+                ),
+              // Show driver's vehicle marker instead of the blue dot when the ride has started
+              if (status == 'started' && _lastDriverPos != null)
+                Marker(
+                  markerId: const MarkerId('driver_vehicle'),
+                  position: _lastDriverPos!,
+                  icon: _vehicleIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
+                  anchor: const Offset(0.5, 0.5),
+                  zIndexInt: 3,
                 ),
             },
           ),
@@ -1081,32 +1283,23 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                 ],
               ),
             ] else if (status == 'started') ...[
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: _updating ? null : _completeRide,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.success,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: _updating
-                      ? const SizedBox(
-                          width: 22, height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                      : Text(
-                          '✅ Complete & Collect Cash',
-                          style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 15),
-                        ),
-                ),
+              SwipeAction(
+                key: ValueKey('complete_$_swipeCompleteCounter'),
+                text: 'Swipe to Complete',
+                onSwipe: () {
+                  if (!_updating) _showCompleteConfirmation();
+                },
+                baseColor: AppTheme.success,
+                activeColor: AppTheme.success,
               ),
             ],
 
             const SizedBox(height: 8),
             SwipeAction(
+              key: ValueKey('cancel_$_swipeCancelCounter'),
               text: 'Swipe to Cancel',
               onSwipe: () {
-                if (!_updating) _cancelRide();
+                if (!_updating) _showCancelConfirmation();
               },
               baseColor: AppTheme.danger,
               activeColor: AppTheme.danger,
