@@ -24,6 +24,9 @@ import 'services/sync_engine.dart';
 import 'services/error_handler.dart';
 import 'repositories/ride_repository.dart';
 import 'repositories/auth_repository.dart';
+import 'services/analytics_service.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:upgrader/upgrader.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -39,6 +42,7 @@ late final ActionQueueService actionQueueService;
 late final SyncEngine syncEngine;
 late final FirestoreRideRepository rideRepository;
 late final FirebaseAuthRepository authRepository;
+late final AnalyticsService analyticsService;
 
 void main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
@@ -47,6 +51,10 @@ void main() async {
   // Only await the bare essentials — dotenv + Firebase Auth need to be ready
   await dotenv.load(fileName: ".env");
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
+
+  await FirebaseAppCheck.instance.activate(
+    androidProvider: AndroidProvider.playIntegrity,
+  );
 
   // Initialize Crashlytics and Global Error Handling
   await ErrorHandler.initialize();
@@ -60,6 +68,7 @@ void main() async {
 
   rideRepository = FirestoreRideRepository(syncEngine: syncEngine);
   authRepository = FirebaseAuthRepository();
+  analyticsService = AnalyticsService();
 
   // Remove splash immediately — UI is ready to render
   FlutterNativeSplash.remove();
@@ -113,7 +122,12 @@ class ManaYatraRiderApp extends StatelessWidget {
         title: 'Mana Yatra - Rider',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
-        home: const AuthGate(),
+        home: UpgradeAlert(
+          showIgnore: true,
+          showLater: true,
+          upgrader: Upgrader(),
+          child: const AuthGate(),
+        ),
       ),
     );
   }

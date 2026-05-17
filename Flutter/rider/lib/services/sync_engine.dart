@@ -30,6 +30,22 @@ class SyncEngine extends ChangeNotifier {
   /// Number of pending items (for UI badge display).
   int get pendingCount => _queue.pendingCount;
 
+  /// Returns true if there are any items that have failed and are waiting for retry.
+  bool get hasFailedItems => _queue.getPendingItems().any((item) => item.status == 'failed' || item.status == 'dead');
+
+  /// Force an immediate retry of the queue, ignoring backoff.
+  Future<void> forceRetry() async {
+    final items = _queue.getPendingItems();
+    for (final item in items) {
+      if (item.status == 'failed' || item.status == 'dead') {
+        item.status = 'pending';
+        item.retryCount = 0;
+        await _queue.update(item);
+      }
+    }
+    await _processQueue(ignoreBackoff: true);
+  }
+
   /// Whether the engine believes Firebase is reachable.
   bool get isFirebaseReachable => _isFirebaseReachable;
 
@@ -78,7 +94,7 @@ class SyncEngine extends ChangeNotifier {
   }
 
   /// Core processing loop. Processes items one at a time, FIFO order.
-  Future<void> _processQueue() async {
+  Future<void> _processQueue({bool ignoreBackoff = false}) async {
     if (_processing) return;
     _processing = true;
 
@@ -93,7 +109,7 @@ class SyncEngine extends ChangeNotifier {
         }
 
         // Check backoff: don't retry too quickly
-        if (item.lastAttemptAt != null) {
+        if (!ignoreBackoff && item.lastAttemptAt != null) {
           final backoff = _getBackoff(item.retryCount);
           final elapsed = DateTime.now().difference(item.lastAttemptAt!);
           if (elapsed < backoff) continue; // Not time yet

@@ -86,6 +86,8 @@ class DriverProvider extends ChangeNotifier {
         if (snap.exists) {
           setProfile(snap.data());
         }
+      }, onError: (error) {
+        debugPrint('[DriverProvider] Profile listener error: $error');
       });
     } else {
       _profile = null;
@@ -213,6 +215,8 @@ class DriverProvider extends ChangeNotifier {
       if (connected && isOnline) {
         _setPresence(true);
       }
+    }, onError: (error) {
+      debugPrint('[DriverProvider] Presence listener error: $error');
     });
   }
 

@@ -29,10 +29,10 @@ class _SkeletonBoxState extends State<SkeletonBox>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 1500),
     )..repeat();
     _animation = Tween<double>(begin: -2, end: 2).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOutSine),
     );
   }
 
@@ -45,9 +45,8 @@ class _SkeletonBoxState extends State<SkeletonBox>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final baseColor = isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE8E8E8);
-    final shimmerColor =
-        isDark ? const Color(0xFF3D3D3D) : const Color(0xFFF5F5F5);
+    final baseColor = isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0);
+    final shimmerColor = isDark ? const Color(0xFF3D3D3D) : const Color(0xFFF5F5F5);
 
     return AnimatedBuilder(
       animation: _animation,
@@ -59,9 +58,10 @@ class _SkeletonBoxState extends State<SkeletonBox>
           child: DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment(_animation.value - 1, 0),
-                end: Alignment(_animation.value + 1, 0),
+                begin: Alignment(_animation.value - 1, -0.3),
+                end: Alignment(_animation.value + 1, 0.3),
                 colors: [baseColor, shimmerColor, baseColor],
+                stops: const [0.0, 0.5, 1.0],
               ),
             ),
           ),
@@ -151,6 +151,61 @@ class RoutePanelSkeleton extends StatelessWidget {
         SizedBox(height: 14),
         SkeletonBox(height: 52, borderRadius: 14),
       ],
+    );
+  }
+}
+
+/// A skeleton card that mimics the ride history card layout.
+class RideHistoryCardSkeleton extends StatelessWidget {
+  const RideHistoryCardSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE0E0E0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: const [
+              SkeletonBox(width: 120, height: 16, borderRadius: 4),
+              SkeletonBox(width: 60, height: 28, borderRadius: 8),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: const [
+              SkeletonBox(width: 16, height: 16, borderRadius: 8),
+              SizedBox(width: 6),
+              SkeletonBox(width: 100, height: 16, borderRadius: 4),
+              SizedBox(width: 8),
+              SkeletonBox(width: 60, height: 20, borderRadius: 4),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: const [
+              SkeletonBox(width: 80, height: 20, borderRadius: 4),
+              SizedBox(width: 12),
+              SkeletonBox(width: 60, height: 20, borderRadius: 4),
+              SizedBox(width: 12),
+              SkeletonBox(width: 60, height: 20, borderRadius: 4),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(color: Color(0xFFE0E0E0), height: 1),
+          const SizedBox(height: 16),
+          const SkeletonBox(width: double.infinity, height: 16, borderRadius: 4),
+          const SizedBox(height: 16),
+          const SkeletonBox(width: double.infinity, height: 16, borderRadius: 4),
+        ],
+      ),
     );
   }
 }

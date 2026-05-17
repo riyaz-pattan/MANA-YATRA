@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
+import '../utils/skeleton.dart';
 
 class RideHistoryScreen extends StatelessWidget {
   const RideHistoryScreen({super.key});
@@ -29,7 +30,12 @@ class RideHistoryScreen extends StatelessWidget {
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: 4,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (_, __) => const RideHistoryCardSkeleton(),
+            );
           }
 
           if (snapshot.hasError) {

@@ -4,6 +4,9 @@ import 'home_screen.dart';
 import 'ride_history_screen.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
+import 'package:provider/provider.dart';
+import '../services/sync_engine.dart';
+import '../widgets/premium_retry_button.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -44,9 +47,33 @@ class _MainScreenState extends State<MainScreen> {
     ];
 
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: pages,
+      body: Stack(
+        children: [
+          IndexedStack(
+            index: _currentIndex,
+            children: pages,
+          ),
+          Consumer<SyncEngine>(
+            builder: (ctx, syncEngine, _) {
+              if (!syncEngine.hasFailedItems) return const SizedBox.shrink();
+              return Positioned(
+                top: MediaQuery.of(context).padding.top + 16,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: PremiumRetryButton(
+                    onRetry: () {
+                      syncEngine.forceRetry();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Retrying connection...')),
+                      );
+                    },
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       bottomNavigationBar: _isBooking
           ? null

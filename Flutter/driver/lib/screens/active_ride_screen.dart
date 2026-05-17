@@ -20,6 +20,7 @@ import '../providers/driver_provider.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'dashboard_screen.dart';
 import '../widgets/swipe_action.dart';
+import '../utils/skeleton.dart';
 
 class ActiveRideScreen extends StatefulWidget {
   final String rideId;
@@ -651,8 +652,44 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   @override
   Widget build(BuildContext context) {
     if (_ride == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+      return Scaffold(
+        body: Stack(
+          children: [
+            const SkeletonBox(height: double.infinity),
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                height: 340,
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.1),
+                      blurRadius: 20,
+                      offset: const Offset(0, -5),
+                    )
+                  ],
+                ),
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(child: SkeletonBox(width: 40, height: 4, borderRadius: 2)),
+                    const SizedBox(height: 24),
+                    const SkeletonBox(width: 140, height: 28, borderRadius: 8),
+                    const SizedBox(height: 24),
+                    const SkeletonBox(width: double.infinity, height: 80, borderRadius: 16),
+                    const SizedBox(height: 16),
+                    const SkeletonBox(width: double.infinity, height: 60, borderRadius: 16),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       );
     }
 

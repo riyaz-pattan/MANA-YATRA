@@ -47,9 +47,13 @@ class RideProvider extends ChangeNotifier {
     _authLoading = false;
     if (user != null) {
       // Subscribe to relevant FCM topics for the user
-      FirebaseMessaging.instance.subscribeToTopic('all_riders');
-      FirebaseMessaging.instance.subscribeToTopic('riders');
-      FirebaseMessaging.instance.subscribeToTopic('rider_${user.uid}');
+      try {
+        FirebaseMessaging.instance.subscribeToTopic('all_riders');
+        FirebaseMessaging.instance.subscribeToTopic('riders');
+        FirebaseMessaging.instance.subscribeToTopic('rider_${user.uid}');
+      } catch (e) {
+        debugPrint('[RideProvider] FCM subscription error: $e');
+      }
     }
     notifyListeners();
   }

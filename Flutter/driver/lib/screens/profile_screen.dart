@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../config/theme.dart';
 import '../providers/driver_provider.dart';
+import '../utils/skeleton.dart';
 import 'profile_status_screen.dart';
 import 'delete_account_screen.dart';
 
@@ -17,8 +18,32 @@ class ProfileScreen extends StatelessWidget {
     final profile = provider.profile;
 
     if (profile == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      return Scaffold(
+        appBar: AppBar(
+          title: Text('My Profile', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+          backgroundColor: AppTheme.bg,
+          elevation: 0,
+        ),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: const [
+                SkeletonBox(width: 100, height: 100, borderRadius: 50),
+                SizedBox(height: 16),
+                SkeletonBox(width: 140, height: 28, borderRadius: 8),
+                SizedBox(height: 4),
+                SkeletonBox(width: 120, height: 24, borderRadius: 12),
+                SizedBox(height: 32),
+                SkeletonBox(width: double.infinity, height: 72, borderRadius: 16),
+                SizedBox(height: 16),
+                SkeletonBox(width: double.infinity, height: 72, borderRadius: 16),
+                SizedBox(height: 16),
+                SkeletonBox(width: double.infinity, height: 72, borderRadius: 16),
+              ],
+            ),
+          ),
+        ),
       );
     }
 

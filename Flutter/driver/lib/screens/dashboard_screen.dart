@@ -25,6 +25,7 @@ import '../services/sync_engine.dart';
 import '../models/queue_item.dart';
 import 'package:uuid/uuid.dart';
 import '../utils/skeleton.dart';
+import '../widgets/premium_retry_button.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -825,6 +826,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
             ),
+          ),
+
+          // Sync Engine Retry Button
+          Consumer<SyncEngine>(
+            builder: (ctx, syncEngine, _) {
+              if (!syncEngine.hasFailedItems) return const SizedBox.shrink();
+              return Positioned(
+                top: 100, // Below top status bar
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: PremiumRetryButton(
+                    onRetry: () {
+                      syncEngine.forceRetry();
+                      CustomToast.show(
+                        context: context,
+                        message: 'Retrying connection...',
+                        isError: false,
+                      );
+                    },
+                  ),
+                ),
+              );
+            },
           ),
 
           // Bottom panel

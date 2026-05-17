@@ -11,6 +11,7 @@ import 'ride_history_screen.dart';
 import 'settings_screen.dart';
 import 'support_screen.dart';
 import 'emergency_contacts_screen.dart';
+import '../utils/skeleton.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -239,7 +240,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
               stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator(color: AppTheme.primary));
+                  return ListView(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+                    children: const [
+                      SkeletonBox(width: double.infinity, height: 96, borderRadius: 16),
+                      SizedBox(height: 24),
+                      SkeletonBox(width: 100, height: 16, borderRadius: 4),
+                      SizedBox(height: 8),
+                      SkeletonBox(width: double.infinity, height: 56, borderRadius: 16),
+                      SizedBox(height: 12),
+                      SkeletonBox(width: double.infinity, height: 56, borderRadius: 16),
+                      SizedBox(height: 12),
+                      SkeletonBox(width: double.infinity, height: 56, borderRadius: 16),
+                      SizedBox(height: 24),
+                      SkeletonBox(width: 100, height: 16, borderRadius: 4),
+                      SizedBox(height: 8),
+                      SkeletonBox(width: double.infinity, height: 140, borderRadius: 16),
+                    ],
+                  );
                 }
 
                 final data = snapshot.data!.data() as Map<String, dynamic>?;
