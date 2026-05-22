@@ -166,20 +166,240 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
+  /// Shows a dialog prompting the user to enable device location (GPS).
+  /// Returns true if the user enabled location after visiting settings.
+  Future<bool> _showEnableLocationDialog() async {
+    if (!mounted) return false;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: AppTheme.surface,
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppTheme.warning.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.location_off_rounded,
+                  color: AppTheme.warning,
+                  size: 44,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Enable Device Location',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.text,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Your device location (GPS) is turned off. Please enable it to use Mana Yatra.',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppTheme.text2,
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    await Geolocator.openLocationSettings();
+                    // After returning from settings, check again
+                    final enabled = await Geolocator.isLocationServiceEnabled();
+                    if (ctx.mounted) Navigator.pop(ctx, enabled);
+                  },
+                  icon: const Icon(Icons.settings_rounded, size: 18),
+                  label: Text(
+                    'Enable Location',
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(
+                  'Cancel',
+                  style: GoogleFonts.inter(
+                    color: AppTheme.text3,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return result ?? false;
+  }
+
+  /// Shows a dialog prompting the user to grant location permission in app settings.
+  /// Used when permission is permanently denied (deniedForever).
+  Future<bool> _showOpenAppSettingsDialog() async {
+    if (!mounted) return false;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: AppTheme.surface,
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppTheme.danger.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.location_disabled_rounded,
+                  color: AppTheme.danger,
+                  size: 44,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Location Permission Required',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.text,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Location permission has been permanently denied. Please enable it from app settings to continue.',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppTheme.text2,
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    await Geolocator.openAppSettings();
+                    // After returning from settings, check again
+                    final perm = await Geolocator.checkPermission();
+                    final granted = perm == LocationPermission.whileInUse ||
+                        perm == LocationPermission.always;
+                    if (ctx.mounted) Navigator.pop(ctx, granted);
+                  },
+                  icon: const Icon(Icons.settings_rounded, size: 18),
+                  label: Text(
+                    'Open Settings',
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(
+                  'Cancel',
+                  style: GoogleFonts.inter(
+                    color: AppTheme.text3,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return result ?? false;
+  }
+
   Future<void> _getCurrentLocation() async {
     try {
+      // Step 1: Check if device GPS/location service is enabled
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        if (mounted) {
-          CustomToast.show(context: context, message: 'Please enable location services', isError: true);
+        // Show dialog prompting user to enable device location
+        final enabled = await _showEnableLocationDialog();
+        if (!enabled) {
+          if (mounted) {
+            CustomToast.show(context: context, message: 'Device location is required to continue.', isError: true);
+          }
+          return;
         }
-        return;
+        // Re-verify after returning from settings
+        serviceEnabled = await Geolocator.isLocationServiceEnabled();
+        if (!serviceEnabled) {
+          if (mounted) {
+            CustomToast.show(context: context, message: 'Device location is still off. Please enable GPS.', isError: true);
+          }
+          return;
+        }
       }
+
+      // Step 2: Check app-level location permission
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.deniedForever) {
+        // Show dialog to open app settings
+        final granted = await _showOpenAppSettingsDialog();
+        if (!granted) {
+          return;
+        }
+        // Re-check permission after returning from settings
+        permission = await Geolocator.checkPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
         if (mounted) {
           CustomToast.show(context: context, message: 'Location permission denied. Please enable in settings.', isError: true);
         }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config/theme.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -32,6 +33,19 @@ class _LoginScreenState extends State<LoginScreen>
     );
     _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
+    _checkIfKickedOut();
+  }
+
+  Future<void> _checkIfKickedOut() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('kicked_out') == true) {
+      if (mounted) {
+        setState(() {
+          _error = 'Session expired: Logged in from another device.';
+        });
+      }
+      await prefs.remove('kicked_out');
+    }
   }
 
   @override

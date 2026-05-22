@@ -29,6 +29,7 @@ class AppConstants {
   static const int discoveryIntervalMs = 120000;   // 2 minutes
   static const int discoveryMinDistanceM = 500;     // 500 meters
   static const int activeRideIntervalMs = 5000;     // 5 seconds
+  static const int autoOfflineMinutes = 120;          // 2 hours — auto-offline idle drivers
 
   static const Map<String, double> pricePerKm = {
     'auto': 12,

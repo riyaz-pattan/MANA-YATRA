@@ -23,9 +23,11 @@ import 'settings_screen.dart';
 import '../utils/custom_toast.dart';
 import '../services/sync_engine.dart';
 import '../models/queue_item.dart';
+import '../widgets/moving_vehicle_loader.dart';
 import 'package:uuid/uuid.dart';
-import '../utils/map_utils.dart';
 import '../widgets/premium_retry_button.dart';
+import '../utils/marker_animator.dart';
+import '../utils/map_utils.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -33,7 +35,7 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingObserver, TickerProviderStateMixin {
   GoogleMapController? _mapController;
   BitmapDescriptor? _autoIcon;
   BitmapDescriptor? _bikeIcon;
@@ -58,13 +60,61 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _locating = false;
   bool _locationGranted = false;
 
+  // Auto-offline: track last user activity to disconnect idle drivers
+  DateTime _lastActiveTime = DateTime.now();
+  Timer? _autoOfflineTimer;
+  
+  late final MarkerAnimator _driverAnimator;
+  DriverProvider? _driverProvider;
+
   @override
   void initState() {
     super.initState();
+    _driverAnimator = MarkerAnimator(vsync: this);
+    WidgetsBinding.instance.addObserver(this);
     _ridePageController = PageController(viewportFraction: 0.84);
     _requestPermissionsSequentially();
     _listenForActiveRide();
     _loadCustomMarkers();
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _driverProvider = context.read<DriverProvider>();
+      _driverProvider?.addListener(_onDriverLocationChanged);
+    });
+  }
+  
+  void _onDriverLocationChanged() {
+    if (_driverProvider?.lat != null && _driverProvider?.lng != null) {
+      final newPos = LatLng(_driverProvider!.lat!, _driverProvider!.lng!);
+      _driverAnimator.animate(
+        newPos: newPos,
+        newHeading: _driverProvider?.heading ?? 0.0,
+        onUpdate: () {
+          if (mounted) setState(() {});
+        },
+      );
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      // App came back to foreground — check if we've been idle too long
+      final provider = context.read<DriverProvider>();
+      if (provider.isOnline) {
+        final elapsed = DateTime.now().difference(_lastActiveTime);
+        if (elapsed.inMinutes >= AppConstants.autoOfflineMinutes) {
+          _autoOffline();
+          return;
+        }
+      }
+      // Reset activity timer since user is actively using the app
+      _lastActiveTime = DateTime.now();
+    } else if (state == AppLifecycleState.paused) {
+      // App went to background — _lastActiveTime stays at the last foreground time
+      // so we can measure how long the app was backgrounded
+    }
   }
 
   /// Request notification permission first, then location permission.
@@ -97,27 +147,261 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  /// Shows a dialog prompting the user to enable device location (GPS).
+  /// Returns true if the user enabled location after visiting settings.
+  Future<bool> _showEnableLocationDialog() async {
+    if (!mounted) return false;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: AppTheme.surface,
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppTheme.warning.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.location_off_rounded,
+                  color: AppTheme.warning,
+                  size: 44,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Enable Device Location',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.text,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Your device location (GPS) is turned off. Please enable it to use Mana Yatra Driver.',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppTheme.text2,
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    await Geolocator.openLocationSettings();
+                    // After returning from settings, check again
+                    final enabled = await Geolocator.isLocationServiceEnabled();
+                    if (ctx.mounted) Navigator.pop(ctx, enabled);
+                  },
+                  icon: const Icon(Icons.settings_rounded, size: 18),
+                  label: Text(
+                    'Enable Location',
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(
+                  'Cancel',
+                  style: GoogleFonts.inter(
+                    color: AppTheme.text3,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return result ?? false;
+  }
+
+  /// Shows a dialog prompting the user to grant location permission in app settings.
+  /// Used when permission is permanently denied (deniedForever).
+  Future<bool> _showOpenAppSettingsDialog() async {
+    if (!mounted) return false;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: AppTheme.surface,
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppTheme.danger.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.location_disabled_rounded,
+                  color: AppTheme.danger,
+                  size: 44,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Location Permission Required',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.text,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Location permission has been permanently denied. Please enable it from app settings to continue.',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppTheme.text2,
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    await Geolocator.openAppSettings();
+                    // After returning from settings, check again
+                    final perm = await Geolocator.checkPermission();
+                    final granted = perm == LocationPermission.whileInUse ||
+                        perm == LocationPermission.always;
+                    if (ctx.mounted) Navigator.pop(ctx, granted);
+                  },
+                  icon: const Icon(Icons.settings_rounded, size: 18),
+                  label: Text(
+                    'Open Settings',
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(
+                  'Cancel',
+                  style: GoogleFonts.inter(
+                    color: AppTheme.text3,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return result ?? false;
+  }
+
   Future<void> _getCurrentLocation() async {
     if (mounted) setState(() => _locating = true);
     try {
+      // Step 1: Check if device GPS/location service is enabled
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        if (mounted) {
-          CustomToast.show(
-            context: context,
-            message: 'Please enable location services',
-            isError: true,
-          );
-          setState(() {
-            _locating = false;
-            _locationGranted = false;
-          });
+        // Show dialog prompting user to enable device location
+        final enabled = await _showEnableLocationDialog();
+        if (!enabled) {
+          if (mounted) {
+            CustomToast.show(
+              context: context,
+              message: 'Device location is required to continue.',
+              isError: true,
+            );
+            setState(() {
+              _locating = false;
+              _locationGranted = false;
+            });
+          }
+          return;
         }
-        return;
+        // Re-verify after returning from settings
+        serviceEnabled = await Geolocator.isLocationServiceEnabled();
+        if (!serviceEnabled) {
+          if (mounted) {
+            CustomToast.show(
+              context: context,
+              message: 'Device location is still off. Please enable GPS.',
+              isError: true,
+            );
+            setState(() {
+              _locating = false;
+              _locationGranted = false;
+            });
+          }
+          return;
+        }
       }
+
+      // Step 2: Check app-level location permission
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.deniedForever) {
+        // Show dialog to open app settings
+        final granted = await _showOpenAppSettingsDialog();
+        if (!granted) {
+          if (mounted) {
+            setState(() {
+              _locating = false;
+              _locationGranted = false;
+            });
+          }
+          return;
+        }
+        // Re-check permission after returning from settings
+        permission = await Geolocator.checkPermission();
       }
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
         if (mounted) {
@@ -163,7 +447,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       if (mounted) {
         final provider = context.read<DriverProvider>();
-        provider.updateLocation(pos.latitude, pos.longitude);
+        provider.updateLocation(pos.latitude, pos.longitude, pos.heading);
         _mapController?.animateCamera(CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 15));
         setState(() => _locating = false);
         
@@ -179,6 +463,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autoOfflineTimer?.cancel();
     _ridePageController.dispose();
     _rideListener?.cancel();
     _signalSub?.cancel();
@@ -187,6 +473,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       sub.cancel();
     }
     _declineSubs.clear();
+    _driverAnimator.dispose();
+    _driverProvider?.removeListener(_onDriverLocationChanged);
     super.dispose();
   }
 
@@ -299,12 +587,70 @@ class _DashboardScreenState extends State<DashboardScreen> {
     provider.setOnline(goingOnline);
 
     if (goingOnline) {
+      _lastActiveTime = DateTime.now();
+      _startAutoOfflineTimer();
       _startSignalService(provider);
     } else {
+      _stopAutoOfflineTimer();
       _signalSub?.cancel();
       _signalService?.dispose();
       _signalService = null;
       setState(() => _nearbyRides = []);
+    }
+  }
+
+  /// Starts a periodic timer that checks for driver inactivity.
+  /// Fires every 60 seconds to see if 2 hours have elapsed since last activity.
+  void _startAutoOfflineTimer() {
+    _autoOfflineTimer?.cancel();
+    _autoOfflineTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) {
+        final elapsed = DateTime.now().difference(_lastActiveTime);
+        if (elapsed.inMinutes >= AppConstants.autoOfflineMinutes) {
+          _autoOffline();
+        }
+      },
+    );
+  }
+
+  void _stopAutoOfflineTimer() {
+    _autoOfflineTimer?.cancel();
+    _autoOfflineTimer = null;
+  }
+
+  /// Automatically takes the driver offline after prolonged inactivity.
+  Future<void> _autoOffline() async {
+    _stopAutoOfflineTimer();
+    final provider = context.read<DriverProvider>();
+    if (!provider.isOnline) return;
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(uid)
+          .update({
+            'driverState': 'OFFLINE',
+            'isOnline': false,
+          });
+
+      provider.setOnline(false);
+      _signalSub?.cancel();
+      _signalService?.dispose();
+      _signalService = null;
+      if (mounted) {
+        setState(() => _nearbyRides = []);
+        CustomToast.show(
+          context: context,
+          message: 'You were automatically taken offline due to inactivity.',
+          isError: true,
+        );
+      }
+    } catch (e) {
+      debugPrint('Auto-offline failed: $e');
     }
   }
 
@@ -763,10 +1109,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _mapController = controller;
             },
             markers: {
-              if (provider.lat != null && provider.isOnline)
+              if (_driverAnimator.currentPos != null && provider.isOnline)
                 Marker(
                   markerId: const MarkerId('driver'),
-                  position: LatLng(provider.lat!, provider.lng!),
+                  position: _driverAnimator.currentPos!,
+                  rotation: _driverAnimator.currentHeading,
                   icon: _getVehicleIcon(provider.profile?['vehicleType']),
                 ),
               ..._buildRideMarkers(),
@@ -777,17 +1124,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (_locating)
             Container(
               color: AppTheme.bg.withValues(alpha: 0.9),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const CircularProgressIndicator(
-                        color: AppTheme.primary),
-                    const SizedBox(height: 16),
-                    Text('Getting your location...',
-                        style: GoogleFonts.inter(color: AppTheme.text2)),
-                  ],
-                ),
+              child: const Center(
+                child: MovingVehicleLoader(text: 'Getting your location...'),
               ),
             ),
 
@@ -988,7 +1326,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             else
               // ── Snap Carousel ──────────────────────────────────────
               SizedBox(
-                height: 255,
+                height: 270,
                 child: PageView.builder(
                   controller: _ridePageController,
                   itemCount: _nearbyRides.length,
@@ -1374,38 +1712,111 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   : null,
             ),
           ),
-          // Earnings Progress Stub
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.bg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppTheme.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // Today's Earnings — real data from Firestore
+          StreamBuilder<QuerySnapshot>(
+            stream: () {
+              final uid = FirebaseAuth.instance.currentUser?.uid;
+              if (uid == null) return Stream<QuerySnapshot>.empty();
+              final now = DateTime.now();
+              final todayStart = DateTime(now.year, now.month, now.day);
+              return FirebaseFirestore.instance
+                  .collection('rides')
+                  .where('driverId', isEqualTo: uid)
+                  .where('status', isEqualTo: 'completed')
+                  .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart))
+                  .snapshots();
+            }(),
+            builder: (context, snapshot) {
+              double todayEarnings = 0;
+              int todayRides = 0;
+              if (snapshot.hasData) {
+                for (final doc in snapshot.data!.docs) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  todayEarnings += double.tryParse(data['finalPrice']?.toString() ?? '0') ?? 0.0;
+                  todayRides++;
+                }
+              }
+              final isLoading = snapshot.connectionState == ConnectionState.waiting;
+              return Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppTheme.bg,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: Row(
                   children: [
-                    Text('Today\'s Goal', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-                    Text('₹450 / ₹1000', style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppTheme.success)),
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: AppTheme.success.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.account_balance_wallet_rounded,
+                          color: AppTheme.success, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Today's Earnings",
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: AppTheme.text2,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          isLoading
+                              ? Container(
+                                  height: 20,
+                                  width: 80,
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.border,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                )
+                              : Text(
+                                  '₹${todayEarnings.toStringAsFixed(0)}',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppTheme.success,
+                                  ),
+                                ),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          isLoading ? '--' : '$todayRides',
+                          style: GoogleFonts.inter(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.text,
+                          ),
+                        ),
+                        Text(
+                          'rides',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: AppTheme.text3,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: const LinearProgressIndicator(
-                    value: 0.45,
-                    backgroundColor: AppTheme.border,
-                    color: AppTheme.success,
-                    minHeight: 8,
-                  ),
-                ),
-              ],
-            ),
+              );
+            },
           ),
+
           ListTile(
             leading: const Icon(Icons.history, color: AppTheme.text),
             title: Text('Earnings History', style: GoogleFonts.inter(color: AppTheme.text)),

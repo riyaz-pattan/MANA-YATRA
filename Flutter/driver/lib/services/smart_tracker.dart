@@ -22,7 +22,8 @@ class SmartTracker {
   Map<String, double>? _pendingLocation;
   double? _currentLat;
   double? _currentLng;
-  void Function(double lat, double lng)? onLocationUpdate;
+  double? _currentHeading;
+  void Function(double lat, double lng, double heading)? onLocationUpdate;
   void Function(double lat, double lng)? onZoneChanged;
 
   // FCM zone topic tracking
@@ -49,11 +50,11 @@ class SmartTracker {
     } else if (mode == TrackingMode.discovery && prev != TrackingMode.discovery) {
       _startWatching();
       _stopActiveRideTimer();
-      if (_currentLat != null) _pushToFirebase(_currentLat!, _currentLng!);
+      if (_currentLat != null) _pushToFirebase(_currentLat!, _currentLng!, _currentHeading ?? 0.0);
     } else if (mode == TrackingMode.activeRide) {
       _startWatching();
       _startActiveRideTimer();
-      if (_currentLat != null) _pushToFirebase(_currentLat!, _currentLng!);
+      if (_currentLat != null) _pushToFirebase(_currentLat!, _currentLng!, _currentHeading ?? 0.0);
     }
   }
 
@@ -88,7 +89,7 @@ class SmartTracker {
               _lastLat, _lastLng, _currentLat!, _currentLng!);
           if (_lastLat == null ||
               distance > 20.0) {
-            _pushToFirebase(_currentLat!, _currentLng!);
+            _pushToFirebase(_currentLat!, _currentLng!, _currentHeading ?? 0.0);
           } else {
             // Unconditionally touch the RTDB timestamp so Rider app doesn't mark it stale
             FirebaseDatabase.instance
@@ -115,7 +116,7 @@ class SmartTracker {
     if (_retryTimer != null) return;
     _retryTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (_pendingLocation != null) {
-        _pushToFirebase(_pendingLocation!['lat']!, _pendingLocation!['lng']!);
+        _pushToFirebase(_pendingLocation!['lat']!, _pendingLocation!['lng']!, _pendingLocation!['heading'] ?? 0.0);
       }
     });
   }
@@ -129,8 +130,11 @@ class SmartTracker {
     _currentLat = pos.latitude.clamp(-90.0, 90.0);
     _currentLng = pos.longitude.clamp(-180.0, 180.0);
 
+    final heading = pos.heading;
+    _currentHeading = heading;
+
     // Notify UI immediately
-    onLocationUpdate?.call(_currentLat!, _currentLng!);
+    onLocationUpdate?.call(_currentLat!, _currentLng!, heading);
 
     if (_mode == TrackingMode.offline) return;
 
@@ -141,11 +145,11 @@ class SmartTracker {
     final shouldUpdate = _lastLat == null || distance > threshold;
 
     if (shouldUpdate) {
-      _pushToFirebase(_currentLat!, _currentLng!);
+      _pushToFirebase(_currentLat!, _currentLng!, heading);
     }
   }
 
-  Future<void> _pushToFirebase(double lat, double lng) async {
+  Future<void> _pushToFirebase(double lat, double lng, double heading) async {
     // Update coordinates immediately to prevent GPS spamming if offline
     _lastLat = lat;
     _lastLng = lng;
@@ -154,7 +158,7 @@ class SmartTracker {
       // 1. Realtime DB
       await FirebaseDatabase.instance
           .ref('liveLocations/$driverId')
-          .set({'lat': lat, 'lng': lng, 'updatedAt': ServerValue.timestamp});
+          .set({'lat': lat, 'lng': lng, 'heading': heading, 'updatedAt': ServerValue.timestamp});
 
       // 2. Firestore with geohash
       final geohash = GeoHasher().encode(lat, lng, precision: 6);
@@ -164,6 +168,7 @@ class SmartTracker {
           .update({
         'lat': lat,
         'lng': lng,
+        'heading': heading,
         'geohash': geohash,
         'lastLocationUpdate': FieldValue.serverTimestamp(),
       });
@@ -180,7 +185,7 @@ class SmartTracker {
       _pendingLocation = null;
     } catch (e) {
       // Save for retry queue
-      _pendingLocation = {'lat': lat, 'lng': lng};
+      _pendingLocation = {'lat': lat, 'lng': lng, 'heading': heading};
       debugPrint('SmartTracker: Firebase push failed, queued for retry. Error: $e');
     }
   }

@@ -478,7 +478,8 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
   }
 
   Widget _buildActionRow() {
-    return Padding(
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: [

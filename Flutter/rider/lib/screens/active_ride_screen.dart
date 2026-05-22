@@ -23,6 +23,7 @@ import 'main_screen.dart';
 import '../utils/custom_toast.dart';
 import '../widgets/swipe_action.dart';
 import '../utils/skeleton.dart';
+import '../utils/marker_animator.dart';
 
 class ActiveRideScreen extends StatefulWidget {
   final String rideId;
@@ -32,7 +33,7 @@ class ActiveRideScreen extends StatefulWidget {
   State<ActiveRideScreen> createState() => _ActiveRideScreenState();
 }
 
-class _ActiveRideScreenState extends State<ActiveRideScreen> {
+class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProviderStateMixin {
   GoogleMapController? _mapController;
   Map<String, dynamic>? _ride;
   LatLng? _driverPos;
@@ -50,10 +51,12 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   int _swipeCancelCounter = 0;
   bool _isDriverSignalStale = false;
   ConfettiController? _confettiController;
+  late final MarkerAnimator _driverAnimator;
 
   @override
   void initState() {
     super.initState();
+    _driverAnimator = MarkerAnimator(vsync: this);
     _listenRide();
   }
 
@@ -61,6 +64,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   void dispose() {
     _rideListener?.cancel();
     _locationListener?.cancel();
+    _driverAnimator.dispose();
     super.dispose();
   }
 
@@ -193,12 +197,23 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
           final lng = (data['lng'] as num).toDouble();
           final newPos = LatLng(lat, lng);
           
-          if (_driverPos != null && (newPos.latitude != _driverPos!.latitude || newPos.longitude != _driverPos!.longitude)) {
-             _driverHeading = Geolocator.bearingBetween(
+          double headingToAnimate = _driverHeading;
+          if (data.containsKey('heading') && data['heading'] != null) {
+            headingToAnimate = (data['heading'] as num).toDouble();
+          } else if (_driverPos != null && (newPos.latitude != _driverPos!.latitude || newPos.longitude != _driverPos!.longitude)) {
+             headingToAnimate = Geolocator.bearingBetween(
                 _driverPos!.latitude, _driverPos!.longitude,
                 newPos.latitude, newPos.longitude,
              );
           }
+          
+          _driverAnimator.animate(
+            newPos: newPos,
+            newHeading: headingToAnimate,
+            onUpdate: () {
+              if (mounted) setState(() {});
+            },
+          );
           
           // Calculate proximity
           String proximity = '';
@@ -228,6 +243,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
           if (mounted) {
             setState(() {
               _driverPos = newPos;
+              _driverHeading = headingToAnimate;
               _driverProximity = proximity;
               _isDriverSignalStale = isStale;
             });
@@ -733,20 +749,20 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                   ),
                   icon: _dropDot ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
                 ),
-              if (_driverPos != null)
+              if (_driverAnimator.currentPos != null)
                 Marker(
                   markerId: const MarkerId('driver'),
-                  position: _driverPos!,
+                  position: _driverAnimator.currentPos!,
                   icon: _vehicleIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
-                  rotation: _driverHeading,
+                  rotation: _driverAnimator.currentHeading,
                   anchor: const Offset(0.5, 0.5),
                   zIndexInt: 1,
                 ),
               // Only show "Driver is here" label during matched phase; hide once ride starts
-              if (_driverPos != null && _driverLabelIcon != null && status == 'matched')
+              if (_driverAnimator.currentPos != null && _driverLabelIcon != null && status == 'matched')
                 Marker(
                   markerId: const MarkerId('driver_label'),
-                  position: _driverPos!,
+                  position: _driverAnimator.currentPos!,
                   icon: _driverLabelIcon!,
                   anchor: const Offset(0.5, 1.8),
                   zIndexInt: 2,

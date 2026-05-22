@@ -1,10 +1,12 @@
 // lib/providers/ride_provider.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/google_maps_service.dart';
+import '../utils/device_session_manager.dart';
 
 class RideProvider extends ChangeNotifier {
   // Auth state: null = loading, User object or 'logged_out' sentinel
@@ -24,6 +26,7 @@ class RideProvider extends ChangeNotifier {
   Map<String, dynamic>? _activeRide;
   Map<String, dynamic>? _selectedBid;
   String? _persistedRideId; // Loaded from SharedPreferences on startup
+  StreamSubscription<DocumentSnapshot>? _profileSubscription;
 
   static const _kActiveRideKey = 'rider_active_ride_id';
 
@@ -45,17 +48,65 @@ class RideProvider extends ChangeNotifier {
   void setUser(User? user) {
     _user = user;
     _authLoading = false;
+    _profileSubscription?.cancel();
+    
     if (user != null) {
-      // Subscribe to relevant FCM topics for the user
-      try {
-        FirebaseMessaging.instance.subscribeToTopic('all_riders');
-        FirebaseMessaging.instance.subscribeToTopic('riders');
-        FirebaseMessaging.instance.subscribeToTopic('rider_${user.uid}');
-      } catch (e) {
-        debugPrint('[RideProvider] FCM subscription error: $e');
-      }
+      _initSessionAndListen(user);
+    } else {
+      _profileSubscription?.cancel();
     }
     notifyListeners();
+  }
+
+  Future<void> _initSessionAndListen(User user) async {
+    // Subscribe to relevant FCM topics for the user
+    try {
+      FirebaseMessaging.instance.subscribeToTopic('all_riders');
+      FirebaseMessaging.instance.subscribeToTopic('riders');
+      FirebaseMessaging.instance.subscribeToTopic('rider_${user.uid}');
+    } catch (e) {
+      debugPrint('[RideProvider] FCM subscription error: $e');
+    }
+    
+    final localDeviceId = await DeviceSessionManager.getDeviceId();
+    
+    // Update Firestore with the current device ID
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'deviceId': localDeviceId,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('[RideProvider] Failed to update deviceId: $e');
+    }
+    
+    // Start real-time profile listener
+    _profileSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .snapshots()
+        .listen((snap) {
+      if (snap.exists) {
+        final data = snap.data()!;
+        final remoteDeviceId = data['deviceId'] as String?;
+        
+        // If the database device ID changes and doesn't match our local device ID,
+        // it means the user logged in from another device.
+        if (remoteDeviceId != null && remoteDeviceId != localDeviceId) {
+          debugPrint('[RideProvider] Logged in from another device. Forcing logout.');
+          
+          // Clean up stream subscriptions before logging out
+          setUser(null);
+          
+          SharedPreferences.getInstance().then((prefs) {
+            prefs.setBool('kicked_out', true);
+            FirebaseAuth.instance.signOut();
+          });
+          return;
+        }
+      }
+    }, onError: (error) {
+      debugPrint('[RideProvider] Profile listener error: $error');
+    });
   }
 
   void setPickup(LocationResult? pickup) {
@@ -167,5 +218,11 @@ class RideProvider extends ChangeNotifier {
     // Also clear persisted ride ID to prevent stale recovery on next app start
     clearPersistedRideId();
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _profileSubscription?.cancel();
+    super.dispose();
   }
 }

@@ -14,6 +14,7 @@ import '../config/theme.dart';
 import '../services/google_maps_service.dart';
 import '../utils/map_style.dart';
 import '../utils/map_utils.dart';
+import '../utils/marker_animator.dart';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import '../providers/driver_provider.dart';
@@ -29,7 +30,7 @@ class ActiveRideScreen extends StatefulWidget {
   State<ActiveRideScreen> createState() => _ActiveRideScreenState();
 }
 
-class _ActiveRideScreenState extends State<ActiveRideScreen> {
+class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProviderStateMixin {
   GoogleMapController? _mapController;
   Map<String, dynamic>? _ride;
   StreamSubscription? _rideListener;
@@ -46,6 +47,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   ConfettiController? _confettiController;
   int _swipeCompleteCounter = 0;
   int _swipeCancelCounter = 0;
+  late final MarkerAnimator _driverAnimator;
 
   // OTP verification
   final List<TextEditingController> _otpControllers = List.generate(
@@ -57,6 +59,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   @override
   void initState() {
     super.initState();
+    _driverAnimator = MarkerAnimator(vsync: this);
     _listenRide();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _driverProvider = context.read<DriverProvider>();
@@ -74,6 +77,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     for (final n in _otpFocusNodes) {
       n.dispose();
     }
+    _driverAnimator.dispose();
     _driverProvider?.removeListener(_onDriverLocationChanged);
     super.dispose();
   }
@@ -153,6 +157,14 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         _lastDriverPos = newPos;
         _driverProximity = proximity;
       });
+
+      _driverAnimator.animate(
+        newPos: newPos,
+        newHeading: _driverProvider?.heading ?? 0.0,
+        onUpdate: () {
+          if (mounted) setState(() {});
+        },
+      );
 
       if (_ride?['status'] == 'matched') {
         _fetchApproachRoute();
@@ -976,10 +988,11 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                   anchor: const Offset(0.5, 0.9), // Anchor at the bottom of the stem
                 ),
               // Show driver's vehicle marker instead of the blue dot when the ride has started
-              if (status == 'started' && _lastDriverPos != null)
+              if (status == 'started' && _driverAnimator.currentPos != null)
                 Marker(
                   markerId: const MarkerId('driver_vehicle'),
-                  position: _lastDriverPos!,
+                  position: _driverAnimator.currentPos!,
+                  rotation: _driverAnimator.currentHeading,
                   icon: _vehicleIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
                   anchor: const Offset(0.5, 0.5),
                   zIndexInt: 3,

@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/smart_tracker.dart';
+import '../utils/device_session_manager.dart';
 
 /// Driver states for the state machine.
 /// OFFLINE → ONLINE_IDLE → BIDDING → ON_RIDE
@@ -24,6 +25,7 @@ class DriverProvider extends ChangeNotifier {
   SmartTracker? _tracker;
   double? _lat;
   double? _lng;
+  double? _heading;
   Map<String, dynamic>? _activeRide;
   StreamSubscription<DocumentSnapshot>? _profileSubscription;
   StreamSubscription<DatabaseEvent>? _connectedSubscription;
@@ -40,6 +42,7 @@ class DriverProvider extends ChangeNotifier {
   String get driverState => _driverState;
   double? get lat => _lat;
   double? get lng => _lng;
+  double? get heading => _heading;
   Map<String, dynamic>? get activeRide => _activeRide;
   SmartTracker? get tracker => _tracker;
   String? get persistedRideId => _persistedRideId;
@@ -68,39 +71,7 @@ class DriverProvider extends ChangeNotifier {
     _profileSubscription?.cancel();
     
     if (user != null) {
-      // Mark profile as loading until first Firestore snapshot arrives
-      _profileLoading = true;
-
-      if (_tracker == null) {
-        _tracker = SmartTracker(user.uid);
-        _tracker!.onLocationUpdate = (lat, lng) {
-          _lat = lat;
-          _lng = lng;
-          notifyListeners();
-        };
-      }
-      
-      _setupPresence();
-      
-      // Start real-time profile listener
-      _profileSubscription = FirebaseFirestore.instance
-          .collection('drivers')
-          .doc(user.uid)
-          .snapshots()
-          .listen((snap) {
-        if (snap.exists) {
-          setProfile(snap.data());
-        } else {
-          // No profile doc — stop loading so AuthGate shows OnboardingScreen
-          _profileLoading = false;
-          _profile = null;
-          notifyListeners();
-        }
-      }, onError: (error) {
-        debugPrint('[DriverProvider] Profile listener error: $error');
-        _profileLoading = false;
-        notifyListeners();
-      });
+      _initSessionAndListen(user);
     } else {
       _profile = null;
       _profileLoading = false;
@@ -110,6 +81,72 @@ class DriverProvider extends ChangeNotifier {
       _tracker = null;
     }
     notifyListeners();
+  }
+
+  Future<void> _initSessionAndListen(User user) async {
+    _profileLoading = true;
+    notifyListeners();
+
+    if (_tracker == null) {
+      _tracker = SmartTracker(user.uid);
+      _tracker!.onLocationUpdate = (lat, lng, heading) {
+        _lat = lat;
+        _lng = lng;
+        _heading = heading;
+        notifyListeners();
+      };
+    }
+    
+    _setupPresence();
+
+    final localDeviceId = await DeviceSessionManager.getDeviceId();
+    
+    // Update Firestore with the current device ID
+    try {
+      await FirebaseFirestore.instance.collection('drivers').doc(user.uid).set({
+        'deviceId': localDeviceId,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('[DriverProvider] Failed to update deviceId: $e');
+    }
+    
+    // Start real-time profile listener
+    _profileSubscription = FirebaseFirestore.instance
+        .collection('drivers')
+        .doc(user.uid)
+        .snapshots()
+        .listen((snap) {
+      if (snap.exists) {
+        final data = snap.data()!;
+        final remoteDeviceId = data['deviceId'] as String?;
+        
+        // If the database device ID changes and doesn't match our local device ID,
+        // it means the user logged in from another device.
+        if (remoteDeviceId != null && remoteDeviceId != localDeviceId) {
+          debugPrint('[DriverProvider] Logged in from another device. Forcing logout.');
+          
+          // Clean up background trackers and stream subscriptions before logging out
+          setUser(null);
+          
+          SharedPreferences.getInstance().then((prefs) {
+            prefs.setBool('kicked_out', true);
+            FirebaseAuth.instance.signOut();
+          });
+          return;
+        }
+        
+        setProfile(data);
+      } else {
+        // No profile doc — stop loading so AuthGate shows OnboardingScreen
+        _profileLoading = false;
+        _profile = null;
+        notifyListeners();
+      }
+    }, onError: (error) {
+      debugPrint('[DriverProvider] Profile listener error: $error');
+      _profileLoading = false;
+      notifyListeners();
+    });
   }
 
   void setProfile(Map<String, dynamic>? profile) {
@@ -214,9 +251,10 @@ class DriverProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updateLocation(double lat, double lng) {
+  void updateLocation(double lat, double lng, double heading) {
     _lat = lat;
     _lng = lng;
+    _heading = heading;
     notifyListeners();
   }
 
