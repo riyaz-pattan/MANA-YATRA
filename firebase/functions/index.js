@@ -1534,3 +1534,266 @@ exports.processTasks = functions.firestore
     }
   });
 
+// ============================================================
+// RBAC: SET ADMIN ROLE
+// ============================================================
+/**
+ * setAdminRole (Callable)
+ *
+ * Allows a super_admin to assign RBAC roles to other users.
+ * Sets a custom claim `role` on the target user's Firebase Auth token.
+ *
+ * Valid roles: super_admin, operations_manager, finance_manager,
+ *              support_executive, business_analyst, viewer
+ *
+ * Also creates/updates the admin_users Firestore doc and writes an audit log.
+ *
+ * Input: { uid: string, role: string, displayName?: string, email?: string }
+ * Caller must have custom claim: role == 'super_admin'
+ */
+const VALID_ADMIN_ROLES = [
+  'super_admin',
+  'operations_manager',
+  'finance_manager',
+  'support_executive',
+  'business_analyst',
+  'viewer',
+];
+
+exports.setAdminRole = functions.https.onCall(async (data, context) => {
+  // 1. Authentication check
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "You must be logged in."
+    );
+  }
+
+  // 2. Authorization: only super_admin can assign roles
+  const callerRole = context.auth.token.role;
+  const callerIsLegacyAdmin = context.auth.token.admin === true;
+
+  if (callerRole !== 'super_admin' && !callerIsLegacyAdmin) {
+    throw new functions.https.HttpsError(
+      "permission-denied",
+      "Only super admins can assign roles."
+    );
+  }
+
+  // 3. Validate input
+  const { uid, role, displayName, email } = data;
+
+  if (!uid || !role) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Missing uid or role."
+    );
+  }
+
+  if (!VALID_ADMIN_ROLES.includes(role)) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      `Invalid role: ${role}. Must be one of: ${VALID_ADMIN_ROLES.join(', ')}`
+    );
+  }
+
+  // 4. Prevent self-demotion for safety
+  if (uid === context.auth.uid && role !== 'super_admin') {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "You cannot demote your own super_admin role."
+    );
+  }
+
+  try {
+    // 5. Verify target user exists in Firebase Auth
+    const targetUser = await admin.auth().getUser(uid);
+
+    // 6. Set custom claims — merge with existing claims
+    const existingClaims = targetUser.customClaims || {};
+    await admin.auth().setCustomUserClaims(uid, {
+      ...existingClaims,
+      role: role,
+      admin: true,  // Keep legacy admin flag for backward compat
+    });
+
+    // 7. Create/update admin_users document in Firestore
+    const db = admin.firestore();
+    await db.collection('admin_users').doc(uid).set({
+      uid: uid,
+      role: role,
+      displayName: displayName || targetUser.displayName || '',
+      email: email || targetUser.email || '',
+      phone: targetUser.phoneNumber || '',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedBy: context.auth.uid,
+    }, { merge: true });
+
+    // 8. Write audit log
+    await db.collection('audit_logs').add({
+      action: 'set_admin_role',
+      targetUid: uid,
+      newRole: role,
+      previousRole: existingClaims.role || null,
+      performedBy: context.auth.uid,
+      performedByRole: callerRole || 'legacy_admin',
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      metadata: {
+        targetEmail: email || targetUser.email || '',
+        targetDisplayName: displayName || targetUser.displayName || '',
+      },
+    });
+
+    console.log(`Role '${role}' assigned to user ${uid} by ${context.auth.uid}`);
+
+
+    return {
+      success: true,
+      message: `Role '${role}' has been assigned to user ${uid}.`,
+      uid: uid,
+      role: role,
+    };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+
+    if (error.code === 'auth/user-not-found') {
+      throw new functions.https.HttpsError(
+        "not-found",
+        `User with UID ${uid} not found in Firebase Auth.`
+      );
+    }
+
+    console.error("setAdminRole error:", error);
+    throw new functions.https.HttpsError("internal", error.message || "Failed to set admin role.");
+  }
+});
+
+/**
+ * removeAdminRole (Callable)
+ *
+ * Allows a super_admin to remove the admin role from a user.
+ * Removes the `role` and `admin` custom claims and updates Firestore.
+ *
+ * Input: { uid: string }
+ * Caller must have custom claim: role == 'super_admin'
+ */
+exports.removeAdminRole = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+  }
+
+  const callerRole = context.auth.token.role;
+  const callerIsLegacyAdmin = context.auth.token.admin === true;
+
+  if (callerRole !== 'super_admin' && !callerIsLegacyAdmin) {
+    throw new functions.https.HttpsError("permission-denied", "Only super admins can remove roles.");
+  }
+
+  const { uid } = data;
+  if (!uid) {
+    throw new functions.https.HttpsError("invalid-argument", "Missing uid.");
+  }
+
+  // Prevent self-removal
+  if (uid === context.auth.uid) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "You cannot remove your own admin role."
+    );
+  }
+
+  try {
+    const targetUser = await admin.auth().getUser(uid);
+    const existingClaims = targetUser.customClaims || {};
+    const previousRole = existingClaims.role || null;
+
+    // Remove role and admin claims
+    const { role: _r, admin: _a, ...remainingClaims } = existingClaims;
+    await admin.auth().setCustomUserClaims(uid, remainingClaims);
+
+    // Update Firestore
+    const db = admin.firestore();
+    await db.collection('admin_users').doc(uid).update({
+      role: admin.firestore.FieldValue.delete(),
+      removedAt: admin.firestore.FieldValue.serverTimestamp(),
+      removedBy: context.auth.uid,
+      isActive: false,
+    });
+
+    // Audit log
+    await db.collection('audit_logs').add({
+      action: 'remove_admin_role',
+      targetUid: uid,
+      previousRole: previousRole,
+      performedBy: context.auth.uid,
+      performedByRole: callerRole || 'legacy_admin',
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    return { success: true, message: `Admin role removed from user ${uid}.` };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error("removeAdminRole error:", error);
+    throw new functions.https.HttpsError("internal", error.message || "Failed to remove admin role.");
+  }
+});
+
+exports.createAdminUser = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+
+  const callerRole = context.auth.token.role;
+  const callerIsLegacyAdmin = context.auth.token.admin === true;
+
+  if (callerRole !== 'super_admin' && !callerIsLegacyAdmin) {
+    throw new functions.https.HttpsError("permission-denied", "Only super admins can create admin users.");
+  }
+
+  const { email, password, displayName, role } = data;
+
+  if (!email || !password || !displayName || !role) {
+    throw new functions.https.HttpsError("invalid-argument", "Missing required fields.");
+  }
+
+  try {
+    const userRecord = await admin.auth().createUser({
+      email: email,
+      password: password,
+      displayName: displayName,
+    });
+
+    const uid = userRecord.uid;
+
+    await admin.auth().setCustomUserClaims(uid, {
+      role: role,
+      admin: true,
+    });
+
+    const db = admin.firestore();
+    await db.collection('admin_users').doc(uid).set({
+      uid: uid,
+      role: role,
+      displayName: displayName,
+      email: email,
+      isActive: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdBy: context.auth.uid,
+    });
+
+    await db.collection('audit_logs').add({
+      action: 'create_admin_user',
+      targetUid: uid,
+      newRole: role,
+      performedBy: context.auth.uid,
+      performedByRole: callerRole || 'legacy_admin',
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      metadata: { targetEmail: email, targetDisplayName: displayName },
+    });
+
+    return { success: true, message: `Created admin user ${email} with role ${role}` };
+  } catch (error) {
+    console.error("Error creating admin user:", error);
+    throw new functions.https.HttpsError("internal", error.message);
+  }
+});
+

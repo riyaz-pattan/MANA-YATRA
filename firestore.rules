@@ -2,52 +2,116 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Global Admin Access
-    match /{document=**} {
-      allow read, write: if request.auth != null && request.auth.token.admin == true;
+    // ============================================================
+    // RBAC HELPER FUNCTIONS
+    // ============================================================
+
+    // Check if the user has any valid admin role
+    function isAdmin() {
+      return request.auth != null && request.auth.token.role != null
+        && request.auth.token.role in [
+          'super_admin',
+          'operations_manager',
+          'finance_manager',
+          'support_executive',
+          'business_analyst',
+          'viewer'
+        ];
     }
 
-    // Users — schema-validated
+    function hasRole(role) {
+      return request.auth != null
+        && request.auth.token.role == role;
+    }
+
+    function hasAnyRole(roles) {
+      return request.auth != null
+        && request.auth.token.role != null
+        && request.auth.token.role in roles;
+    }
+
+    function isSuperAdmin() {
+      return hasRole('super_admin');
+    }
+
+    // ============================================================
+    // GLOBAL ADMIN OVERRIDE (backwards-compat + RBAC)
+    // Super admins get full read/write on everything.
+    // Legacy admin == true also still works for migration period.
+    // ============================================================
+    match /{document=**} {
+      allow read, write: if isSuperAdmin()
+        || (request.auth != null && request.auth.token.admin == true);
+    }
+
+    // ============================================================
+    // ADMIN USERS COLLECTION
+    // Super Admin: RW | Others: R (self only)
+    // ============================================================
+    match /admin_users/{adminId} {
+      // Super admin can read all; other admin roles can only read their own doc
+      allow read: if isSuperAdmin()
+        || (hasAnyRole(['operations_manager', 'finance_manager', 'support_executive'])
+            && request.auth.uid == adminId);
+      // Only super admin can create/update/delete admin users
+      allow write: if isSuperAdmin();
+    }
+
+    // ============================================================
+    // USERS — schema-validated (preserved existing + RBAC overlay)
+    // Super Admin: RW | Ops: RW | Finance/Support/Analyst/Viewer: R
+    // ============================================================
     match /users/{userId} {
+      // Existing: any auth user can read. Admin roles also get read.
       allow read: if request.auth != null;
+      // Admin write: super_admin (global override) + operations_manager
+      allow write: if hasRole('operations_manager');
+      // Existing rider rules: create own profile
       allow create: if request.auth.uid == userId
         && request.resource.data.keys().hasAll(['name', 'phone'])
         && request.resource.data.name is string
         && request.resource.data.phone is string;
+      // Existing rider rules: update own profile (restricted fields)
       allow update: if request.auth.uid == userId
-        // Prevent users from modifying their own UID or role fields
         && (!request.resource.data.diff(resource.data).affectedKeys()
             .hasAny(['uid', 'role', 'createdAt']));
     }
 
-    // Drivers — schema-validated
+    // ============================================================
+    // DRIVERS — schema-validated (preserved existing + RBAC overlay)
+    // Super Admin: RW | Ops: RW | Finance/Support/Analyst/Viewer: R
+    // ============================================================
     match /drivers/{driverId} {
+      // Existing: any auth user can read. Admin roles also get read.
       allow read: if request.auth != null;
+      // Admin write: operations_manager
+      allow write: if hasRole('operations_manager');
+      // Existing driver rules: create own profile
       allow create: if request.auth.uid == driverId
         && request.resource.data.keys().hasAll(['name', 'phone', 'vehicleType'])
         && request.resource.data.vehicleType in ['auto', 'bike'];
-      // Drivers can update their own doc. For going online:
-      // must be approved, not blocked, and have active subscription.
-      // Going offline (isOnline == false) is always allowed.
-      // Location updates (lat, lng, geohash) are always allowed.
-      // Drivers can NEVER modify their own isApproved, isBlocked, or subscriptionActiveUntil.
+      // Existing driver rules: update own profile (with business logic)
       allow update: if request.auth.uid == driverId &&
         (!request.resource.data.diff(resource.data).affectedKeys()
             .hasAny(['isApproved', 'isBlocked', 'subscriptionActiveUntil', 'createdAt'])) &&
         (
-          // Always allow going offline or location updates
           request.resource.data.isOnline == false ||
-          // Allow going online only if approved + not blocked + subscription active
           (resource.data.isApproved == true &&
            resource.data.isBlocked != true &&
            resource.data.subscriptionActiveUntil > request.time)
         );
     }
 
-    // Rides — schema-validated creation
+    // ============================================================
+    // RIDES — schema-validated creation (preserved existing + RBAC overlay)
+    // Super Admin: RW | Ops: RW | Finance/Support/Analyst/Viewer: R
+    // ============================================================
     match /rides/{rideId} {
+      // Existing: any auth user can read
       allow read: if request.auth != null;
-      // Only the rider can create their own ride, with required fields
+      // Admin write: operations_manager
+      allow write: if hasRole('operations_manager');
+      // Existing rider rules: create ride
       allow create: if request.auth.uid == request.resource.data.riderId
         && request.resource.data.keys().hasAll(['riderId', 'status', 'vehicleType', 'pickupLat', 'pickupLng', 'dropLat', 'dropLng'])
         && request.resource.data.status == 'searching'
@@ -56,50 +120,145 @@ service cloud.firestore {
         && request.resource.data.pickupLng is number
         && request.resource.data.dropLat is number
         && request.resource.data.dropLng is number;
-      // Rider or assigned driver can update, EXCEPT the status field.
-      // Status transitions (matched, started, completed, cancelled) MUST use Cloud Functions.
-      // We allow updates only if the status field is not being changed.
+      // Existing: rider or driver can update (except status)
       allow update: if (request.auth.uid == resource.data.riderId ||
                         request.auth.uid == resource.data.driverId)
                     && request.resource.data.status == resource.data.status;
     }
 
-    // Bids — hardened with price cap validation
+    // ============================================================
+    // BIDS — hardened with price cap validation (preserved + RBAC)
+    // Super Admin: RW | Ops: RW | Finance: R | Analyst/Viewer: R
+    // ============================================================
     match /bids/{bidId} {
-      allow read: if request.auth != null;
-      
-      // Only drivers can create bids, with validation:
+      // Admin read: ops, finance, analyst, viewer
+      allow read: if request.auth != null
+        || hasAnyRole(['operations_manager', 'finance_manager', 'business_analyst', 'viewer']);
+      // Admin write: operations_manager
+      allow write: if hasRole('operations_manager');
+      // Existing driver rules: create bid
       allow create: if request.auth.uid == request.resource.data.driverId
-        // Must have required fields
         && request.resource.data.keys().hasAll(['rideId', 'riderId', 'driverId', 'price', 'status'])
-        // Status must start as 'pending'
         && request.resource.data.status == 'pending'
-        // Price must be a positive number and capped (prevent abuse)
         && request.resource.data.price is int
         && request.resource.data.price > 0
         && request.resource.data.price <= 50000;
-
-      // Update rules:
-      // - Drivers can only withdraw their own bids
-      // - Riders can accept/reject bids on their rides
-      allow update: if 
-        // Driver can only set status to 'withdrawn'
+      // Existing: driver withdraw or rider reject
+      allow update: if
         (request.auth.uid == resource.data.driverId &&
          request.resource.data.status == 'withdrawn') ||
-        // Rider can only REJECT bids (Accepting MUST go through Cloud Functions)
         (request.auth.uid == resource.data.riderId &&
          request.resource.data.status == 'rejected');
     }
 
-    // Payments — scoped reads, driver-only creation with validation
+    // ============================================================
+    // PAYMENTS — scoped reads (preserved + RBAC)
+    // Super Admin: RW | Ops: R | Finance: RW | Support/Analyst/Viewer: R
+    // ============================================================
     match /payments/{paymentId} {
+      // Existing rider/driver scoped read
       allow read: if request.auth.uid == resource.data.driverId ||
                      request.auth.uid == resource.data.riderId;
+      // Admin read: all admin roles can read
+      allow read: if hasAnyRole(['operations_manager', 'finance_manager',
+                                  'support_executive', 'business_analyst', 'viewer']);
+      // Admin write: finance_manager
+      allow write: if hasRole('finance_manager');
+      // Existing driver rules: create payment
       allow create: if request.auth.uid == request.resource.data.driverId
         && request.resource.data.keys().hasAll(['rideId', 'driverId', 'riderId', 'amount'])
         && request.resource.data.amount is number
         && request.resource.data.amount > 0;
     }
+
+    // ============================================================
+    // SUPPORT TICKETS (new collection)
+    // Super Admin: RW | Ops: R | Support Exec: RW | Analyst/Viewer: R
+    // ============================================================
+    match /support_tickets/{ticketId} {
+      allow read: if hasAnyRole(['operations_manager', 'support_executive',
+                                  'business_analyst', 'viewer']);
+      allow write: if hasRole('support_executive');
+      // Riders/drivers can create support tickets for themselves
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasAll(['uid', 'subject', 'status'])
+        && request.resource.data.status == 'open';
+      // Riders/drivers can read their own tickets
+      allow read: if request.auth != null
+        && resource.data.uid == request.auth.uid;
+    }
+
+    // ============================================================
+    // SOS ALERTS (new collection)
+    // Super Admin: RW | Ops: RW | Support: R | Analyst/Viewer: R
+    // ============================================================
+    match /sos_alerts/{alertId} {
+      allow read: if hasAnyRole(['operations_manager', 'support_executive',
+                                  'business_analyst', 'viewer']);
+      allow write: if hasRole('operations_manager');
+      // Riders/drivers can create SOS alerts
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasAll(['userId', 'rideId', 'type']);
+      // Riders/drivers can read their own SOS alerts
+      allow read: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // ============================================================
+    // ZONES (new collection)
+    // Super Admin: RW | Ops: RW | Analyst/Viewer: R
+    // ============================================================
+    match /zones/{zoneId} {
+      allow read: if hasAnyRole(['operations_manager', 'business_analyst', 'viewer']);
+      allow write: if hasRole('operations_manager');
+    }
+
+    // ============================================================
+    // AUDIT LOGS (new collection) — append-only, read for all admins
+    // All admin roles: R only | No client-side writes (admin SDK only)
+    // ============================================================
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+      // Only Cloud Functions (admin SDK) can write audit logs
+    }
+
+    // ============================================================
+    // INCENTIVES (new collection)
+    // Super Admin: RW | Ops: RW | Finance: RW | Analyst: R
+    // ============================================================
+    match /incentives/{incentiveId} {
+      allow read: if hasAnyRole(['operations_manager', 'finance_manager',
+                                  'business_analyst']);
+      allow write: if hasAnyRole(['operations_manager', 'finance_manager']);
+    }
+
+    // ============================================================
+    // ANNOUNCEMENTS (new collection)
+    // Super Admin: RW | Ops: RW | Viewer: R
+    // ============================================================
+    match /announcements/{announcementId} {
+      allow read: if hasAnyRole(['operations_manager', 'viewer']);
+      allow write: if hasRole('operations_manager');
+      // All authenticated users can read announcements (for in-app display)
+      allow read: if request.auth != null;
+    }
+
+    // ============================================================
+    // APP CONFIG (new collection)
+    // Super Admin: RW | All other admins: R
+    // ============================================================
+    match /app_config/{configId} {
+      allow read: if isAdmin();
+      // Only super_admin can write (handled by global override)
+      allow write: if false;
+    }
+
+    // ============================================================
+    // EXISTING COLLECTIONS (preserved as-is)
+    // ============================================================
 
     // Notifications log — read only for authenticated users
     match /notifications_log/{logId} {
@@ -130,9 +289,10 @@ service cloud.firestore {
       // Only Cloud Functions (admin SDK) can read/write
     }
 
-    // Admin-only: admin collection
+    // Admin-only: legacy admin collection (backward compat)
     match /admin/{docId} {
-      allow read, write: if request.auth.token.admin == true;
+      allow read, write: if isAdmin()
+        || (request.auth != null && request.auth.token.admin == true);
     }
   }
 }

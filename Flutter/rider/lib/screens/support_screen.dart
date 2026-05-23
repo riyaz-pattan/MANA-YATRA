@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/theme.dart';
 import '../config/constants.dart';
+import 'report_issue_screen.dart';
 
 class SupportScreen extends StatelessWidget {
   const SupportScreen({super.key});
@@ -48,6 +49,15 @@ class SupportScreen extends StatelessWidget {
               if (await canLaunchUrl(launchUri)) {
                 await launchUrl(launchUri);
               }
+            },
+          ),
+          const SizedBox(height: 16),
+          _buildContactCard(
+            icon: Icons.report_problem_outlined,
+            title: 'Report an Issue',
+            subtitle: 'Raise a support ticket',
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportIssueScreen()));
             },
           ),
           const SizedBox(height: 32),

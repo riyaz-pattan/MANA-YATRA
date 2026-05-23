@@ -10,22 +10,33 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  # Firebase
   firebase_core: ^3.13.0
   firebase_auth: ^5.6.0
   cloud_firestore: ^5.6.7
-  provider: ^6.1.2
-  google_fonts: ^6.2.1
-  intl: ^0.20.2
-  http: ^1.2.1
   cloud_functions: ^5.6.2
   firebase_messaging: ^15.2.10
+  # State Management
+  flutter_riverpod: ^2.6.1
+  # Routing
+  go_router: ^15.1.2
+  # UI & Charts
+  google_fonts: ^6.2.1
+  fl_chart: ^0.70.2
+  responsive_framework: ^1.5.1
+  # Utilities
+  intl: ^0.20.2
+  http: ^1.2.1
+  csv: ^6.0.0
+  url_launcher: ^6.3.1
+  timeago: ^3.7.0
+  flutter_native_splash: ^2.4.7
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.13.1
-  flutter_native_splash: ^2.4.0
 
 flutter_launcher_icons:
   android: true
