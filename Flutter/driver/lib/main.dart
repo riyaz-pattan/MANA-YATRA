@@ -16,7 +16,7 @@ import 'screens/onboarding_screen.dart';
 import 'screens/pending_screen.dart';
 import 'screens/rejected_screen.dart';
 import 'screens/account_deletion_pending_screen.dart';
-import 'screens/subscription_screen.dart';
+
 import 'screens/dashboard_screen.dart';
 import 'screens/active_ride_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -62,7 +62,7 @@ void main() async {
   // Only await the bare essentials — dotenv + Firebase Auth need to be ready
   await dotenv.load(fileName: ".env");
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
-  
+
   await FirebaseAppCheck.instance.activate(
     androidProvider: AndroidProvider.playIntegrity,
   );
@@ -76,7 +76,7 @@ void main() async {
   await actionQueueService.init();
   syncEngine = SyncEngine(actionQueueService);
   syncEngine.start();
-  
+
   rideRepository = FirestoreRideRepository(syncEngine: syncEngine);
   authRepository = FirebaseAuthRepository();
   analyticsService = AnalyticsService();
@@ -190,29 +190,15 @@ class AuthGate extends StatelessWidget {
         return Consumer<DriverProvider>(
           builder: (context, provider, _) {
             // Wait for initial profile load
-            if (provider.user == null || provider.authLoading || provider.profileLoading) {
+            if (provider.user == null ||
+                provider.authLoading ||
+                provider.profileLoading) {
               return const Scaffold(
                 body: Center(
                   child: CircularProgressIndicator(color: AppTheme.primary),
                 ),
               );
             }
-
-            // Deletion logic can stay here as a separate check if needed,
-            // or we could move it to the provider too.
-            // For now, let's use a StreamBuilder for deletion requests as it's a niche case.
-            return StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('account_deletion_requests')
-                  .where('uid', isEqualTo: user.uid)
-                  .where('role', isEqualTo: 'driver')
-                  .where('status', isEqualTo: 'pending')
-                  .snapshots(),
-              builder: (context, deletionSnap) {
-                if (deletionSnap.hasData &&
-                    deletionSnap.data!.docs.isNotEmpty) {
-                  return const AccountDeletionPendingScreen();
-                }
 
                 // Handle Profile states from Provider
                 if (!provider.hasProfile) {
@@ -236,9 +222,9 @@ class AuthGate extends StatelessWidget {
                   return const PendingScreen();
                 }
 
-                if (!provider.isSubscriptionActive) {
-                  return const SubscriptionScreen();
-                }
+                // NOTE: Subscription check removed — drivers can access dashboard
+                // even with expired subscription. They'll be kept offline and prompted
+                // to renew when trying to go online.
 
                 // All clear — check for persisted active ride first
                 return Consumer<DriverProvider>(
@@ -249,8 +235,6 @@ class AuthGate extends StatelessWidget {
                     return const DashboardScreen();
                   },
                 );
-              },
-            );
           },
         );
       },

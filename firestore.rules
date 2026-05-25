@@ -113,13 +113,13 @@ service cloud.firestore {
       allow write: if hasRole('operations_manager');
       // Existing rider rules: create ride
       allow create: if request.auth.uid == request.resource.data.riderId
-        && request.resource.data.keys().hasAll(['riderId', 'status', 'vehicleType', 'pickupLat', 'pickupLng', 'dropLat', 'dropLng'])
+        && request.resource.data.keys().hasAll(['riderId', 'status', 'vehicleType', 'pickup', 'drop'])
         && request.resource.data.status == 'searching'
         && request.resource.data.vehicleType in ['auto', 'bike']
-        && request.resource.data.pickupLat is number
-        && request.resource.data.pickupLng is number
-        && request.resource.data.dropLat is number
-        && request.resource.data.dropLng is number;
+        && request.resource.data.pickup.lat is number
+        && request.resource.data.pickup.lng is number
+        && request.resource.data.drop.lat is number
+        && request.resource.data.drop.lng is number;
       // Existing: rider or driver can update (except status)
       allow update: if (request.auth.uid == resource.data.riderId ||
                         request.auth.uid == resource.data.driverId)
@@ -266,16 +266,7 @@ service cloud.firestore {
       // Only Cloud Functions (admin SDK) can write
     }
 
-    // Account deletion requests — scoped to own requests
-    match /account_deletion_requests/{requestId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.keys().hasAll(['uid', 'role', 'status'])
-        && request.resource.data.status == 'pending'
-        && request.resource.data.role in ['rider', 'driver'];
-      // Only admin (Cloud Functions) can update
-    }
+
 
     // Operations (idempotency records) — admin-only
     match /operations/{opId} {

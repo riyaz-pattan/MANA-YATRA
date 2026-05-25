@@ -14,7 +14,12 @@ class AppConstants {
   };
 
   static const int rideExpiryMinutes = 5;
-  static const int subscriptionDailyRate = 15;
+  // Subscription plan pricing
+  static const List<Map<String, dynamic>> subscriptionPlans = [
+    {'days': 1, 'label': '1 Day', 'emoji': '🌅', 'totalPrice': 20, 'perDay': 20},
+    {'days': 7, 'label': '7 Days', 'emoji': '⚡', 'totalPrice': 133, 'perDay': 19},
+    {'days': 30, 'label': '30 Days', 'emoji': '🗓️', 'totalPrice': 540, 'perDay': 18},
+  ];
 
   // Matching & safety
   static const int maxVisibleRides = 10;
@@ -40,4 +45,7 @@ class AppConstants {
     'auto': 30,
     'bike': 20,
   };
+
+  // Razorpay — swap this to rzp_live_... for production
+  static const String razorpayKeyId = 'rzp_test_StTUBd9Fsqxj8F';
 }

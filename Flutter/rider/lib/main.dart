@@ -163,38 +163,15 @@ class AuthGate extends StatelessWidget {
           FirebaseMessaging.instance.subscribeToTopic('riders');
           FirebaseMessaging.instance.subscribeToTopic('rider_${user.uid}');
 
-          // Check for pending deletion requests
-          return StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('account_deletion_requests')
-                .where('uid', isEqualTo: user.uid)
-                .where('role', isEqualTo: 'rider')
-                .where('status', isEqualTo: 'pending')
-                .snapshots(),
-            builder: (context, deletionSnap) {
-              if (deletionSnap.connectionState == ConnectionState.waiting) {
-                return const Scaffold(
-                  body: Center(
-                    child: CircularProgressIndicator(color: AppTheme.primary),
-                  ),
+          // Check for a persisted active ride (offline startup recovery)
+          return Consumer<RideProvider>(
+            builder: (context, rideProvider, _) {
+              if (rideProvider.persistedRideId != null) {
+                return ActiveRideScreen(
+                  rideId: rideProvider.persistedRideId!,
                 );
               }
-
-              if (deletionSnap.hasData && deletionSnap.data!.docs.isNotEmpty) {
-                return const AccountDeletionPendingScreen();
-              }
-
-              // Check for a persisted active ride (offline startup recovery)
-              return Consumer<RideProvider>(
-                builder: (context, rideProvider, _) {
-                  if (rideProvider.persistedRideId != null) {
-                    return ActiveRideScreen(
-                      rideId: rideProvider.persistedRideId!,
-                    );
-                  }
-                  return _NameCheckGate(user: user);
-                },
-              );
+              return _NameCheckGate(user: user);
             },
           );
         }

@@ -117,12 +117,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     }
   }
 
-  /// Request notification permission first, then location permission.
-  /// Android cannot show two permission dialogs at the same time,
-  /// so they must be chained sequentially.
+  /// Request notification permission on startup.
+  /// Location permission is deferred until the driver toggles online,
+  /// so we don't fetch location or show the "getting your location" spinner
+  /// while the driver is offline.
   Future<void> _requestPermissionsSequentially() async {
     await _checkNotificationPermission();
-    await _getCurrentLocation();
   }
 
   Future<void> _loadCustomMarkers() async {
@@ -536,6 +536,151 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     });
   }
 
+  /// Shows a beautiful floating dialog when the driver's subscription is expired
+  /// and they attempt to go online.
+  void _showSubscriptionExpiredDialog() {
+    final provider = context.read<DriverProvider>();
+    final bool hasTrial = provider.profile?['hasFreeTrialUsed'] != true;
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        backgroundColor: AppTheme.surface,
+        child: Padding(
+          padding: const EdgeInsets.all(0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Gradient header with icon
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 32),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: hasTrial
+                        ? [const Color(0xFF6C63FF), const Color(0xFF9B59B6)]
+                        : [const Color(0xFFFF6B6B), const Color(0xFFFF8E53)],
+                  ),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                ),
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        hasTrial ? Icons.star_rounded : Icons.timer_off_rounded,
+                        size: 48,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      hasTrial ? 'Start Free Trial' : 'Subscription Expired',
+                      style: GoogleFonts.inter(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Body content
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+                child: Column(
+                  children: [
+                    Text(
+                      hasTrial
+                          ? 'Start your 7-day free trial to go online and receive rides.'
+                          : 'Activate your subscription to go online and receive rides.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        color: AppTheme.text2,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Per-day starting price hint
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        hasTrial
+                            ? '7 Days of full access for free'
+                            : 'Plans starting at just ₹18/day',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    // Renew Plan button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+                          );
+                        },
+                        icon: Icon(hasTrial ? Icons.star : Icons.rocket_launch_rounded, size: 20),
+                        label: Text(
+                          hasTrial ? 'Get Free Trial' : 'Renew Plan',
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          elevation: 0,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: Text(
+                        'Maybe Later',
+                        style: GoogleFonts.inter(
+                          color: AppTheme.text3,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _toggleOnline() async {
     final provider = context.read<DriverProvider>();
     final uid = FirebaseAuth.instance.currentUser!.uid;
@@ -545,15 +690,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     if (goingOnline) {
       if (!provider.isSubscriptionActive) {
         if (mounted) {
-          CustomToast.show(
-            context: context,
-            message: 'Your subscription is expired. Please renew to go online.',
-            isError: true,
-          );
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
-          );
+          _showSubscriptionExpiredDialog();
         }
         return;
       }
@@ -659,7 +796,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   void _startSignalService(DriverProvider provider) {
     if (_signalService != null) return; // already running
 
-    final vehicleType = provider.profile?['vehicleType'] as String? ?? 'auto';
+    final vehicleType = (provider.profile?['vehicleType'] as String?)?.toLowerCase() ?? 'auto';
     _signalService = RideSignalService(
       vehicleType: vehicleType,
       onErrorCallback: (errorMsg) {
@@ -829,7 +966,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           'price': bidPrice,
           'driverName': provider.profile?['name'] ?? 'Driver',
           'driverPhone': provider.profile?['phone'] ?? '',
-          'vehicleType': provider.profile?['vehicleType'] ?? 'auto',
+          'vehicleType': (provider.profile?['vehicleType'] as String?)?.toLowerCase() ?? 'auto',
           'vehicleNumber': provider.profile?['vehicleNumber'] ?? '',
           'driverImageUrl': provider.profile?['documents']?['selfieUrl'] ?? '',
           'vehicleImageUrl': provider.profile?['documents']?['vehicleUrl'] ?? '',
@@ -1090,6 +1227,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   Widget build(BuildContext context) {
     final provider = context.watch<DriverProvider>();
 
+    // Calculate dynamic bottom padding so native Google Map controls 
+    // (Zoom buttons, Location button, Google logo) stay above the bottom sheet
+    final double mapBottomPadding = !provider.isOnline
+        ? 120.0
+        : (_nearbyRides.isEmpty ? 160.0 : 380.0);
+
     return Scaffold(
       drawer: _buildDrawer(context, provider),
       body: Stack(
@@ -1097,8 +1240,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           // Map
           GoogleMap(
             style: lightMapStyle,
-            // Top padding keeps the compass/north-reset button below the status bar
-            padding: const EdgeInsets.only(top: 90),
+            // Top padding keeps compass below status bar, bottom padding keeps controls above sheet
+            padding: EdgeInsets.only(top: 90, bottom: mapBottomPadding),
+            myLocationEnabled: false, // Turn off blue dot as we have our own marker
+            myLocationButtonEnabled: false, // Disable native location button since we use a custom one
+            zoomControlsEnabled: true, // Keep zoom buttons
             initialCameraPosition: CameraPosition(
               target: provider.lat != null
                   ? LatLng(provider.lat!, provider.lng!)
@@ -1114,7 +1260,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   markerId: const MarkerId('driver'),
                   position: _driverAnimator.currentPos!,
                   rotation: _driverAnimator.currentHeading,
-                  icon: _getVehicleIcon(provider.profile?['vehicleType']),
+                  anchor: const Offset(0.5, 0.5), // Forces rotation exactly around the center of the image
+                  icon: _getVehicleIcon((provider.profile?['vehicleType'] as String?)?.toLowerCase()),
                 ),
               ..._buildRideMarkers(),
             },
@@ -1150,7 +1297,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                 child: Row(
                   children: [
                     Text(
-                      AppConstants.vehicleTypes[provider.profile?['vehicleType']]
+                      AppConstants.vehicleTypes[(provider.profile?['vehicleType'] as String?)?.toLowerCase()]
                               ?.icon ??
                           '🚗',
                       style: const TextStyle(fontSize: 28),
@@ -1220,6 +1367,41 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                 ),
               );
             },
+          ),
+
+          // Custom Location Button
+          Positioned(
+            bottom: mapBottomPadding + 115, // Places it right above the native zoom controls
+            right: 12,
+            child: InkWell(
+              onTap: () {
+                if (provider.lat != null && provider.lng != null && _mapController != null) {
+                  _mapController!.animateCamera(
+                    CameraUpdate.newLatLngZoom(
+                      LatLng(provider.lat!, provider.lng!),
+                      16,
+                    ),
+                  );
+                }
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.9),
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.2),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.my_location_rounded, color: Colors.black54, size: 22),
+              ),
+            ),
           ),
 
           // Bottom panel

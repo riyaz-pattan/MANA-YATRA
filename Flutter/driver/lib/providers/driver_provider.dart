@@ -85,6 +85,8 @@ class DriverProvider extends ChangeNotifier {
 
   Future<void> _initSessionAndListen(User user) async {
     _profileLoading = true;
+    // Always start offline on fresh session
+    _driverState = DriverState.offline;
     notifyListeners();
 
     if (_tracker == null) {
@@ -98,13 +100,16 @@ class DriverProvider extends ChangeNotifier {
     }
     
     _setupPresence();
+    _setPresence(false); // Start with offline presence
 
     final localDeviceId = await DeviceSessionManager.getDeviceId();
     
-    // Update Firestore with the current device ID
+    // Update Firestore with the current device ID and force offline state
     try {
       await FirebaseFirestore.instance.collection('drivers').doc(user.uid).set({
         'deviceId': localDeviceId,
+        'driverState': DriverState.offline,
+        'isOnline': false,
       }, SetOptions(merge: true));
     } catch (e) {
       debugPrint('[DriverProvider] Failed to update deviceId: $e');
@@ -152,18 +157,10 @@ class DriverProvider extends ChangeNotifier {
   void setProfile(Map<String, dynamic>? profile) {
     _profile = profile;
     _profileLoading = false; // First snapshot received — done loading
-    if (profile != null) {
-      // Read driverState, with migration fallback from old isOnline field
-      final state = profile['driverState'] as String?;
-      if (state != null) {
-        _driverState = state;
-      } else {
-        // Migration: old documents only have isOnline
-        _driverState = profile['isOnline'] == true
-            ? DriverState.onlineIdle
-            : DriverState.offline;
-      }
-    }
+    // NOTE: We do NOT restore driverState from Firestore here.
+    // The driver always starts OFFLINE on a fresh app session.
+    // The state is only changed when the driver explicitly toggles online.
+    // _driverState stays as whatever it was set to (OFFLINE from init).
     notifyListeners();
   }
 

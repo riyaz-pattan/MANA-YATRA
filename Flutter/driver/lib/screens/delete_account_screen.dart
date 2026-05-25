@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import '../utils/custom_toast.dart';
@@ -25,26 +26,46 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       return;
     }
 
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: AppTheme.danger),
+            const SizedBox(width: 8),
+            Text('Warning', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Text(
+          'This action is irreversible. All your earnings, trips, and personal data will be wiped out completely. You cannot get your account back.',
+          style: GoogleFonts.inter(height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.inter(color: AppTheme.text2)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.danger),
+            child: Text('Delete My Account', style: GoogleFonts.inter(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
     setState(() => _isLoading = true);
 
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception('No user logged in');
 
-      // Check if driver document exists to get phone/name details
-      final userDoc = await FirebaseFirestore.instance.collection('drivers').doc(user.uid).get();
-      final phone = user.phoneNumber ?? userDoc.data()?['phone'] ?? 'Unknown';
-      final name = userDoc.data()?['name'] ?? 'Unknown Driver';
-
-      // Save delete request
-      await FirebaseFirestore.instance.collection('account_deletion_requests').add({
-        'uid': user.uid,
-        'phone': phone,
-        'name': name,
-        'reason': reason,
+      // Call the cloud function to delete account
+      await FirebaseFunctions.instance.httpsCallable('deleteMyAccount').call({
         'role': 'driver',
-        'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
+        'reason': reason,
       });
 
       await FirebaseAuth.instance.signOut();
@@ -52,7 +73,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       if (mounted) {
         CustomToast.show(
           context: context, 
-          message: 'Account deletion request submitted successfully. You will be logged out.',
+          message: 'Account deleted successfully.',
         );
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -62,7 +83,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
-        CustomToast.show(context: context, message: 'Failed to submit request: $e', isError: true);
+        CustomToast.show(context: context, message: 'Failed to delete account: $e', isError: true);
       }
     }
   }
@@ -90,7 +111,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
             const SizedBox(height: 16),
             Text(
               'If you delete your driver account, you will lose access to all your earnings history, trips, and personal data. '
-              'This action is irreversible once approved by the admin.',
+              'This action is irreversible and your data will be completely wiped out immediately.',
               style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2, height: 1.5),
             ),
             const SizedBox(height: 32),
@@ -135,7 +156,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                 child: _isLoading
                     ? const CircularProgressIndicator(color: Colors.white)
                     : Text(
-                        'Submit Deletion Request',
+                        'Delete My Account',
                         style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
                       ),
               ),

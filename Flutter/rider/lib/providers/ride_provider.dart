@@ -21,6 +21,7 @@ class RideProvider extends ChangeNotifier {
   // Ride config
   String _vehicleType = '';
   int _bidPrice = 80;
+  String _paymentMethod = 'Cash';
 
   // Active ride
   Map<String, dynamic>? _activeRide;
@@ -39,6 +40,7 @@ class RideProvider extends ChangeNotifier {
   RouteInfo? get route => _route;
   String get vehicleType => _vehicleType;
   int get bidPrice => _bidPrice;
+  String get paymentMethod => _paymentMethod;
   Map<String, dynamic>? get activeRide => _activeRide;
   Map<String, dynamic>? get selectedBid => _selectedBid;
   /// Non-null when we recovered a ride ID from local storage on cold start.
@@ -131,6 +133,11 @@ class RideProvider extends ChangeNotifier {
 
   void setBidPrice(int price) {
     _bidPrice = price;
+    notifyListeners();
+  }
+
+  void setPaymentMethod(String method) {
+    _paymentMethod = method;
     notifyListeners();
   }
 

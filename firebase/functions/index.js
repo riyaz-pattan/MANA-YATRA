@@ -2,6 +2,8 @@ const functions = require("firebase-functions"); // Trigger redeployment
 const admin = require("firebase-admin");
 const cors = require("cors")({ origin: true });
 const ngeohash = require("ngeohash");
+const crypto = require("crypto");
+const Razorpay = require("razorpay");
 
 admin.initializeApp();
 
@@ -566,6 +568,67 @@ exports.placeBid = functions.https.onCall(async (data, context) => {
 });
 
 /**
+ * startFreeTrial
+ *
+ * Activates a 7-day free trial for a driver.
+ */
+exports.startFreeTrial = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "Only authenticated users can call this function."
+    );
+  }
+
+  const uid = context.auth.uid;
+  const db = admin.firestore();
+
+  try {
+    const driverRef = db.collection("drivers").doc(uid);
+    const driverSnap = await driverRef.get();
+
+    if (!driverSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "Driver not found.");
+    }
+
+    const driverData = driverSnap.data();
+    if (driverData.hasFreeTrialUsed) {
+      throw new functions.https.HttpsError("already-exists", "Free trial already used.");
+    }
+
+    const now = new Date();
+    const until = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
+
+    const batch = db.batch();
+    
+    // Update driver
+    batch.update(driverRef, {
+      subscriptionActiveUntil: admin.firestore.Timestamp.fromDate(until),
+      hasFreeTrialUsed: true,
+    });
+
+    // Record payment
+    const paymentRef = db.collection("payments").doc();
+    batch.set(paymentRef, {
+      driverId: uid,
+      amount: 0,
+      days: 7,
+      type: "free_trial",
+      method: "free",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
+
+    return { success: true, validUntil: until.toISOString() };
+  } catch (error) {
+    console.error("Error activating free trial:", error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", error.message);
+  }
+});
+
+/**
  * sendBroadcastNotification
  *
  * Sends a push notification to all users or all drivers.
@@ -622,14 +685,13 @@ exports.sendBroadcastNotification = functions.https.onRequest((req, res) => {
 });
 
 /**
- * approveAccountDeletion
+ * deleteMyAccount
  *
- * An HTTPS callable function to approve a user's account deletion request.
- * It takes the requestId and uid.
- * Deletes the user from Firebase Auth and deletes their Firestore document.
+ * An HTTPS callable function for users to delete their own account.
+ * It takes role ('driver' or 'rider') and an optional reason.
+ * Deletes the user from Firebase Auth (if no other roles exist), Firestore, and Storage.
  */
-exports.approveAccountDeletion = functions.https.onCall(async (data, context) => {
-  // Ensure the user calling this is authenticated (optionally check if they are admin)
+exports.deleteMyAccount = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError(
       "unauthenticated",
@@ -637,30 +699,41 @@ exports.approveAccountDeletion = functions.https.onCall(async (data, context) =>
     );
   }
 
-  const uid = data.uid;
-  const requestId = data.requestId;
-  const role = data.role || "user";
+  const uid = context.auth.uid;
+  const role = data.role; // 'driver' or 'rider'
+  const reason = data.reason || "No reason provided";
 
-  if (!uid || !requestId) {
+  if (!role || !['driver', 'rider'].includes(role)) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "Missing uid or requestId."
+      "Valid role ('driver' or 'rider') is required."
     );
   }
 
   try {
     let shouldDeleteAuth = false;
 
-    // 1. Delete user's document from Firestore and Storage (if driver) based on role
+    // Log the reason for analytics (optional)
+    console.log(`User ${uid} deleting ${role} account. Reason: ${reason}`);
+
     if (role === "driver") {
+      // Delete driver from Firestore
       await admin.firestore().collection("drivers").doc(uid).delete();
+      
+      // Delete driver from RTDB liveLocations
+      try {
+        await admin.database().ref(`liveLocations/${uid}`).remove();
+      } catch (e) {
+        console.log(`Failed to delete RTDB liveLocation for ${uid}:`, e);
+      }
       
       // Delete images from Firebase Storage
       const bucket = admin.storage().bucket();
       const filesToDelete = [
         `drivers/${uid}/selfie.jpg`,
         `drivers/${uid}/aadhar.jpg`,
-        `drivers/${uid}/license.jpg`
+        `drivers/${uid}/license.jpg`,
+        `drivers/${uid}/vehicle.jpg`
       ];
       
       for (const filePath of filesToDelete) {
@@ -677,21 +750,8 @@ exports.approveAccountDeletion = functions.https.onCall(async (data, context) =>
       if (!userDoc.exists) {
         shouldDeleteAuth = true;
       }
-      
-      // Notify driver via FCM
-      try {
-        await admin.messaging().send({
-          topic: `driver_${uid}`,
-          notification: {
-            title: "Account Deleted",
-            body: "Your driver account and all associated data have been permanently deleted.",
-          },
-          data: { type: "account_deleted" },
-        });
-      } catch (e) {
-        console.log("Failed to send FCM to driver:", e);
-      }
     } else {
+      // Delete rider from Firestore
       await admin.firestore().collection("users").doc(uid).delete();
       
       // Check if user has a driver profile
@@ -699,23 +759,9 @@ exports.approveAccountDeletion = functions.https.onCall(async (data, context) =>
       if (!driverDoc.exists) {
         shouldDeleteAuth = true;
       }
-
-      // Notify rider via FCM
-      try {
-        await admin.messaging().send({
-          topic: `rider_${uid}`,
-          notification: {
-            title: "Account Deleted",
-            body: "Your account and all associated data have been permanently deleted.",
-          },
-          data: { type: "account_deleted" },
-        });
-      } catch (e) {
-        console.log("Failed to send FCM to rider:", e);
-      }
     }
 
-    // 2. Delete user from Firebase Auth if no other profiles exist
+    // Delete user from Firebase Auth if no other profiles exist
     if (shouldDeleteAuth) {
       try {
         await admin.auth().deleteUser(uid);
@@ -724,16 +770,6 @@ exports.approveAccountDeletion = functions.https.onCall(async (data, context) =>
         console.log(`Failed to delete auth user ${uid}:`, e);
       }
     }
-
-    // 3. Mark the deletion request as approved
-    await admin.firestore()
-      .collection("account_deletion_requests")
-      .doc(requestId)
-      .update({
-        status: "approved",
-        approvedAt: admin.firestore.FieldValue.serverTimestamp(),
-        approvedBy: context.auth.uid,
-      });
 
     return { success: true, message: "Account deleted successfully." };
   } catch (error) {
@@ -1797,3 +1833,240 @@ exports.createAdminUser = functions.https.onCall(async (data, context) => {
   }
 });
 
+// ============================================================
+// RAZORPAY PAYMENT FUNCTIONS
+// ============================================================
+
+// Server-side subscription plan pricing (source of truth — never trust client)
+const SUBSCRIPTION_PLANS = [
+  { days: 1, label: "1 Day", amount: 20, amountPaise: 2000 },
+  { days: 7, label: "7 Days", amount: 133, amountPaise: 13300 },
+  { days: 30, label: "30 Days", amount: 540, amountPaise: 54000 },
+];
+
+// Razorpay credentials — swap to live keys for production
+const RAZORPAY_KEY_ID = "rzp_test_StTUBd9Fsqxj8F";
+const RAZORPAY_KEY_SECRET = "K0U2rHZExjyKSfhOGGzI7nzj";
+
+/**
+ * createRazorpayOrder (Callable)
+ *
+ * Called by the driver app when they select a plan and tap "Pay".
+ * Creates a Razorpay Order server-side with the correct amount
+ * (prevents price tampering from the client).
+ *
+ * Input:  { planIndex: 0|1|2 }
+ * Output: { orderId, amount, currency }
+ */
+exports.createRazorpayOrder = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "You must be logged in."
+    );
+  }
+
+  const uid = context.auth.uid;
+  const { planIndex } = data;
+
+  if (planIndex === undefined || planIndex === null || planIndex < 0 || planIndex > 2) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Invalid plan selection. planIndex must be 0, 1, or 2."
+    );
+  }
+
+  const db = admin.firestore();
+
+  // Rate limit: max 5 order creations per minute per user
+  await checkRateLimit(db, uid, "createOrder", 5, 60000);
+
+  const plan = SUBSCRIPTION_PLANS[planIndex];
+
+  try {
+    const rzp = new Razorpay({
+      key_id: RAZORPAY_KEY_ID,
+      key_secret: RAZORPAY_KEY_SECRET,
+    });
+
+    const order = await rzp.orders.create({
+      amount: plan.amountPaise,
+      currency: "INR",
+      receipt: `sub_${uid.slice(-8)}_${Date.now().toString(36)}`,
+      notes: {
+        driverId: uid,
+        planDays: String(plan.days),
+        planAmount: String(plan.amount),
+      },
+    });
+
+    console.log(`Razorpay order created: ${order.id} for driver ${uid}, plan: ${plan.label}`);
+
+    return {
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+    };
+  } catch (error) {
+    console.error("createRazorpayOrder error:", error);
+    throw new functions.https.HttpsError(
+      "internal",
+      "Failed to create payment order. Please try again."
+    );
+  }
+});
+
+/**
+ * verifyRazorpayPayment (Callable)
+ *
+ * Called by the driver app after a successful Razorpay checkout.
+ * Verifies the payment signature (HMAC SHA256) to ensure it hasn't
+ * been tampered with, then extends the driver's subscription.
+ *
+ * Input:  { razorpay_order_id, razorpay_payment_id, razorpay_signature, planIndex, operationId }
+ * Output: { success, validUntil }
+ */
+exports.verifyRazorpayPayment = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "You must be logged in."
+    );
+  }
+
+  const uid = context.auth.uid;
+  const {
+    razorpay_order_id,
+    razorpay_payment_id,
+    razorpay_signature,
+    planIndex,
+    operationId,
+  } = data;
+
+  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Missing payment verification data."
+    );
+  }
+
+  if (planIndex === undefined || planIndex === null || planIndex < 0 || planIndex > 2) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Invalid plan selection."
+    );
+  }
+
+  const db = admin.firestore();
+
+  // Rate limit: max 10 verify calls per minute per user
+  await checkRateLimit(db, uid, "verifyPayment", 10, 60000);
+
+  // Idempotency check
+  await checkIdempotency(db, operationId);
+
+  // Step 1: Verify HMAC SHA256 signature
+  const expectedSignature = crypto
+    .createHmac("sha256", RAZORPAY_KEY_SECRET)
+    .update(razorpay_order_id + "|" + razorpay_payment_id)
+    .digest("hex");
+
+  if (expectedSignature !== razorpay_signature) {
+    console.error(
+      `Payment signature mismatch for driver ${uid}. ` +
+      `Order: ${razorpay_order_id}, Payment: ${razorpay_payment_id}`
+    );
+    throw new functions.https.HttpsError(
+      "permission-denied",
+      "Payment verification failed. Signature mismatch."
+    );
+  }
+
+  const plan = SUBSCRIPTION_PLANS[planIndex];
+
+  // Fetch payment details to get the payment method
+  let paymentMethod = "online";
+  try {
+    const Razorpay = require("razorpay");
+    const rzp = new Razorpay({
+      key_id: RAZORPAY_KEY_ID,
+      key_secret: RAZORPAY_KEY_SECRET,
+    });
+    const paymentDetails = await rzp.payments.fetch(razorpay_payment_id);
+    if (paymentDetails && paymentDetails.method) {
+      paymentMethod = paymentDetails.method; // e.g. "upi", "card", "netbanking"
+    }
+  } catch (error) {
+    console.error("Failed to fetch payment method from Razorpay:", error);
+  }
+
+  try {
+    const driverRef = db.collection("drivers").doc(uid);
+
+    let newExpiry;
+
+    await db.runTransaction(async (txn) => {
+      const driverSnap = await txn.get(driverRef);
+
+      if (!driverSnap.exists) {
+        throw new functions.https.HttpsError("not-found", "Driver not found.");
+      }
+
+      const driverData = driverSnap.data();
+      const now = new Date();
+
+      // Determine base date: extend from current expiry if still active, otherwise from now
+      let baseDate = now;
+      if (driverData.subscriptionActiveUntil) {
+        const currentExpiry = driverData.subscriptionActiveUntil.toDate
+          ? driverData.subscriptionActiveUntil.toDate()
+          : new Date(driverData.subscriptionActiveUntil);
+        if (currentExpiry > now) {
+          baseDate = currentExpiry;
+        }
+      }
+
+      // Add plan days
+      newExpiry = new Date(baseDate);
+      newExpiry.setDate(newExpiry.getDate() + plan.days);
+
+      // Update driver subscription
+      txn.update(driverRef, {
+        subscriptionActiveUntil: admin.firestore.Timestamp.fromDate(newExpiry),
+      });
+
+      // Create payment record
+      const paymentRef = db.collection("payments").doc();
+      txn.set(paymentRef, {
+        driverId: uid,
+        amount: plan.amount,
+        days: plan.days,
+        type: "subscription",
+        method: paymentMethod,
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    // Record idempotency key after successful commit
+    await recordOperation(db, operationId, "verifyRazorpayPayment");
+
+    console.log(
+      `Payment verified for driver ${uid}. ` +
+      `Plan: ${plan.label}, New expiry: ${newExpiry.toISOString()}`
+    );
+
+    return {
+      success: true,
+      validUntil: newExpiry.toISOString(),
+    };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error("verifyRazorpayPayment error:", error);
+    throw new functions.https.HttpsError(
+      "internal",
+      "Failed to verify payment. Please contact support."
+    );
+  }
+});

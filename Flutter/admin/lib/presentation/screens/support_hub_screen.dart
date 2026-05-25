@@ -6,7 +6,6 @@ import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
 import 'support_tickets_screen.dart';
 import 'document_management_screen.dart';
-import 'account_handling_screen.dart';
 
 class SupportHubScreen extends ConsumerWidget {
   const SupportHubScreen({super.key});
@@ -21,7 +20,7 @@ class SupportHubScreen extends ConsumerWidget {
     final text3Color = isDark ? AppTheme.darkText3 : AppTheme.lightText3;
 
     return DefaultTabController(
-      length: 3,
+      length: 2,
       child: Scaffold(
         backgroundColor: bg,
         appBar: AppBar(
@@ -40,7 +39,6 @@ class SupportHubScreen extends ConsumerWidget {
                 tabs: const [
                   Tab(text: 'Support Tickets'),
                   Tab(text: 'Document Reviews'),
-                  Tab(text: 'Account Deletions'),
                 ],
               ),
             ),
@@ -50,7 +48,6 @@ class SupportHubScreen extends ConsumerWidget {
           children: [
             SupportTicketsScreen(),
             DocumentManagementScreen(),
-            AccountHandlingScreen(),
           ],
         ),
       ),

@@ -161,7 +161,7 @@ class SmartTracker {
           .set({'lat': lat, 'lng': lng, 'heading': heading, 'updatedAt': ServerValue.timestamp});
 
       // 2. Firestore with geohash
-      final geohash = GeoHasher().encode(lat, lng, precision: 6);
+      final geohash = GeoHasher().encode(lng, lat, precision: 6);
       await FirebaseFirestore.instance
           .collection('drivers')
           .doc(driverId)
@@ -174,7 +174,7 @@ class SmartTracker {
       });
 
       // 3. Update FCM zone topics if geohash-5 changed
-      final newHash5 = GeoHasher().encode(lat, lng, precision: 5);
+      final newHash5 = GeoHasher().encode(lng, lat, precision: 5);
       if (newHash5 != _currentGeohash5 && _mode == TrackingMode.discovery) {
         _currentGeohash5 = newHash5;
         await _updateZoneTopics(newHash5);
