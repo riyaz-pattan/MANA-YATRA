@@ -22,6 +22,7 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final _nameController = TextEditingController();
   final _vehicleNumberController = TextEditingController();
+  final _upiIdController = TextEditingController();
   String _vehicleType = 'auto';
   File? _selfieFile;
   File? _aadharFile;
@@ -59,6 +60,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         final data = doc.data()!;
         _nameController.text = data['name'] ?? '';
         _vehicleNumberController.text = data['vehicleNumber'] ?? '';
+        _upiIdController.text = data['upiId'] ?? '';
         if (data['vehicleType'] != null &&
             AppConstants.vehicleTypes.containsKey(data['vehicleType'])) {
           _vehicleType = data['vehicleType'];
@@ -80,6 +82,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void dispose() {
     _nameController.dispose();
     _vehicleNumberController.dispose();
+    _upiIdController.dispose();
     super.dispose();
   }
 
@@ -304,6 +307,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       setState(() => _error = 'Please enter your vehicle number');
       return;
     }
+    
+    final upiId = _upiIdController.text.trim();
+    if (upiId.isEmpty) {
+      setState(() => _error = 'Please enter your UPI ID');
+      return;
+    }
+    final upiRegex = RegExp(r'^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$');
+    if (!upiRegex.hasMatch(upiId)) {
+      setState(() => _error = 'Please enter a valid UPI ID (e.g. 9876543210@ybl)');
+      return;
+    }
+
     if (_selfieFile == null && _existingSelfieUrl == null) {
       setState(() => _error = 'Please take a selfie');
       return;
@@ -353,6 +368,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         'phone': phone,
         'vehicleType': _vehicleType,
         'vehicleNumber': _vehicleNumberController.text.trim().toUpperCase(),
+        'upiId': upiId,
         'documents': {
           'selfieUrl': selfieUrl,
           'aadharUrl': aadharUrl,
@@ -590,6 +606,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   style: GoogleFonts.inter(fontSize: 15),
                   decoration: const InputDecoration(
                     hintText: 'e.g. TS 09 AB 1234',
+                  ),
+                ),
+                const SizedBox(height: 28),
+
+                // UPI ID
+                _label('Payment UPI ID'),
+                _hintNote(
+                  Icons.payments_outlined,
+                  'Passengers will pay directly to this UPI ID. Ensure it is correct.',
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _upiIdController,
+                  keyboardType: TextInputType.emailAddress,
+                  style: GoogleFonts.inter(fontSize: 15),
+                  decoration: const InputDecoration(
+                    hintText: 'e.g. 9876543210@ybl',
                   ),
                 ),
                 const SizedBox(height: 28),

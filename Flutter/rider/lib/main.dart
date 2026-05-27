@@ -1,5 +1,6 @@
 // lib/main.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -53,7 +54,9 @@ void main() async {
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
 
   await FirebaseAppCheck.instance.activate(
-    androidProvider: AndroidProvider.playIntegrity,
+    androidProvider: kDebugMode
+        ? AndroidProvider.debug
+        : AndroidProvider.playIntegrity,
   );
 
   // Initialize Crashlytics and Global Error Handling
@@ -164,12 +167,11 @@ class AuthGate extends StatelessWidget {
           FirebaseMessaging.instance.subscribeToTopic('rider_${user.uid}');
 
           // Check for a persisted active ride (offline startup recovery)
-          return Consumer<RideProvider>(
-            builder: (context, rideProvider, _) {
-              if (rideProvider.persistedRideId != null) {
-                return ActiveRideScreen(
-                  rideId: rideProvider.persistedRideId!,
-                );
+          return Selector<RideProvider, String?>(
+            selector: (context, provider) => provider.persistedRideId,
+            builder: (context, persistedRideId, _) {
+              if (persistedRideId != null) {
+                return ActiveRideScreen(rideId: persistedRideId);
               }
               return _NameCheckGate(user: user);
             },
@@ -181,8 +183,6 @@ class AuthGate extends StatelessWidget {
   }
 }
 
-/// Checks if the user has a name in Firestore; if not, routes to ProfileSetupScreen.
-/// StatefulWidget so the future is created once and not re-fired on parent rebuilds.
 class _NameCheckGate extends StatefulWidget {
   final User user;
   const _NameCheckGate({required this.user});
@@ -192,21 +192,21 @@ class _NameCheckGate extends StatefulWidget {
 }
 
 class _NameCheckGateState extends State<_NameCheckGate> {
-  late Future<DocumentSnapshot> _future;
+  late final Stream<DocumentSnapshot> _userStream;
 
   @override
   void initState() {
     super.initState();
-    _future = FirebaseFirestore.instance
+    _userStream = FirebaseFirestore.instance
         .collection('users')
         .doc(widget.user.uid)
-        .get();
+        .snapshots();
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<DocumentSnapshot>(
-      future: _future,
+    return StreamBuilder<DocumentSnapshot>(
+      stream: _userStream,
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Scaffold(
@@ -216,16 +216,27 @@ class _NameCheckGateState extends State<_NameCheckGate> {
           );
         }
 
-        // Handle errors gracefully — don't loop to ProfileSetup on network errors
         if (snap.hasError) {
           return const MainScreen();
         }
 
-        final data = snap.data?.data() as Map<String, dynamic>?;
+        final doc = snap.data;
+        final data = doc?.data() as Map<String, dynamic>?;
         final hasName =
             data != null &&
             data.containsKey('name') &&
             (data['name']?.toString() ?? '').trim().isNotEmpty;
+            
+        // If we have data, but it's from cache AND we don't have a name yet,
+        // it might be because the server hasn't sent the real document yet.
+        // So we show loading until we hear from the server to prevent a flash.
+        if (doc != null && doc.metadata.isFromCache && !hasName) {
+           return const Scaffold(
+             body: Center(
+               child: CircularProgressIndicator(color: AppTheme.primary),
+             ),
+           );
+        }
 
         if (hasName) {
           return const MainScreen();
@@ -235,3 +246,4 @@ class _NameCheckGateState extends State<_NameCheckGate> {
     );
   }
 }
+

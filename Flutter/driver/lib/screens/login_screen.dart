@@ -2,7 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:pin_code_fields/pin_code_fields.dart';
+import 'package:pinput/pinput.dart';
+import 'package:smart_auth/smart_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/theme.dart';
 
@@ -23,6 +24,7 @@ class _LoginScreenState extends State<LoginScreen>
   int? _resendToken;
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
+  late final _smsRetriever = _SmsRetrieverImpl(SmartAuth.instance);
 
   @override
   void initState() {
@@ -53,6 +55,7 @@ class _LoginScreenState extends State<LoginScreen>
     _phoneController.dispose();
     _otpController.dispose();
     _animController.dispose();
+    _smsRetriever.dispose();
     super.dispose();
   }
 
@@ -271,32 +274,68 @@ class _LoginScreenState extends State<LoginScreen>
                                   10,
                             ),
                           ] else ...[
-                            PinCodeTextField(
-                              appContext: context,
+                            Pinput(
                               length: 6,
                               controller: _otpController,
-                              autoDisposeControllers: false,
-                              animationType: AnimationType.fade,
-                              keyboardType: TextInputType.number,
-                              autoFocus: true,
+                              autofocus: true,
+                              smsRetriever: _smsRetriever,
                               onChanged: (_) => setState(() {}),
                               onCompleted: (_) => _verifyOtp(),
-                              pinTheme: PinTheme(
-                                shape: PinCodeFieldShape.box,
-                                borderRadius: BorderRadius.circular(12),
-                                fieldHeight: 52,
-                                fieldWidth: 44,
-                                activeColor: AppTheme.primary,
-                                selectedColor: AppTheme.primary,
-                                inactiveColor: AppTheme.border,
-                                activeFillColor: AppTheme.bg,
-                                selectedFillColor: AppTheme.bg,
-                                inactiveFillColor: AppTheme.bg,
+                              defaultPinTheme: PinTheme(
+                                width: 44,
+                                height: 52,
+                                textStyle: GoogleFonts.inter(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.text,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.bg,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: AppTheme.border),
+                                ),
                               ),
-                              enableActiveFill: true,
-                              textStyle: GoogleFonts.inter(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w700,
+                              focusedPinTheme: PinTheme(
+                                width: 44,
+                                height: 52,
+                                textStyle: GoogleFonts.inter(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.text,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.bg,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: AppTheme.primary,
+                                    width: 2,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: AppTheme.primary.withValues(
+                                        alpha: 0.2,
+                                      ),
+                                      blurRadius: 8,
+                                      spreadRadius: 1,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              submittedPinTheme: PinTheme(
+                                width: 44,
+                                height: 52,
+                                textStyle: GoogleFonts.inter(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.text,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primary.withValues(
+                                    alpha: 0.1,
+                                  ),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: AppTheme.primary),
+                                ),
                               ),
                             ),
                             const SizedBox(height: 16),
@@ -378,5 +417,30 @@ class _LoginScreenState extends State<LoginScreen>
             : Text(label),
       ),
     );
+  }
+}
+
+/// Implements Pinput's [SmsRetriever] using the [SmartAuth] package
+/// to automatically read incoming OTP SMS and extract the code.
+class _SmsRetrieverImpl implements SmsRetriever {
+  const _SmsRetrieverImpl(this._smartAuth);
+
+  final SmartAuth _smartAuth;
+
+  @override
+  Future<String?> getSmsCode() async {
+    final res = await _smartAuth.getSmsWithRetrieverApi();
+    if (res.hasData) {
+      return res.requireData.code;
+    }
+    return null;
+  }
+
+  @override
+  bool get listenForMultipleSms => false;
+
+  @override
+  Future<void> dispose() async {
+    _smartAuth.removeSmsRetrieverApiListener();
   }
 }

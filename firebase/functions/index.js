@@ -221,6 +221,7 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
         vehicleNumber: bid.vehicleNumber || "",
         driverImageUrl: bid.driverImageUrl || "",
         vehicleImageUrl: bid.vehicleImageUrl || "",
+        driverUpiId: driver.upiId || "",
         finalPrice: bid.price,
         rideOtp: otp,
         matchedAt: admin.firestore.FieldValue.serverTimestamp(),

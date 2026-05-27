@@ -23,6 +23,7 @@ class DriverProvider extends ChangeNotifier {
   Map<String, dynamic>? _profile;
   String _driverState = DriverState.offline;
   SmartTracker? _tracker;
+  int _presenceReqId = 0;
   double? _lat;
   double? _lng;
   double? _heading;
@@ -271,14 +272,21 @@ class DriverProvider extends ChangeNotifier {
 
   Future<void> _setPresence(bool online) async {
     if (_user == null) return;
+    
+    _presenceReqId++;
+    final currentReqId = _presenceReqId;
+    
     final presenceRef = FirebaseDatabase.instance.ref('presence/${_user!.uid}');
     for (int attempt = 0; attempt < 2; attempt++) {
+      if (currentReqId != _presenceReqId) return; // Abort if newer request exists
       try {
         if (online) {
           await presenceRef.onDisconnect().update({'isOnline': false, 'updatedAt': ServerValue.timestamp});
+          if (currentReqId != _presenceReqId) return; // Re-check before final set
           await presenceRef.set({'isOnline': true, 'updatedAt': ServerValue.timestamp});
         } else {
           await presenceRef.onDisconnect().cancel();
+          if (currentReqId != _presenceReqId) return; // Re-check before final update
           await presenceRef.update({'isOnline': false, 'updatedAt': ServerValue.timestamp});
         }
         return; // success

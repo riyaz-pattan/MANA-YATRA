@@ -104,7 +104,8 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
             onCameraIdle: _onCameraIdle,
             myLocationEnabled: true,
             myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
+            zoomControlsEnabled: true,
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom + 260, top: 40),
           ),
 
           // ── Center Pin ──
@@ -187,7 +188,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
           // ── My Location FAB ──
           Positioned(
             right: 16,
-            bottom: 220,
+            bottom: MediaQuery.of(context).padding.bottom + 360,
             child: GestureDetector(
               onTap: _goToCurrentLocation,
               child: Container(

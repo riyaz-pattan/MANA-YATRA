@@ -61,6 +61,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen>
       // Update Firestore user document
       final updateData = <String, dynamic>{
         'name': name,
+        'phone': user.phoneNumber ?? '',
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
@@ -70,8 +71,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen>
           .set(updateData, SetOptions(merge: true));
 
       if (mounted) {
-        Navigator.of(context).pushReplacement(
+        Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const MainScreen()),
+          (route) => false,
         );
       }
     } catch (e) {

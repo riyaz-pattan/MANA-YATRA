@@ -1,5 +1,5 @@
-name: mana_yatra_driver
-description: "Mana Yatra Driver App - Earn fairly, drive freely"
+name: ashwa_saarathi
+description: "Ashwa Saarathi App - Earn fairly, drive freely"
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -23,7 +23,7 @@ dependencies:
 
   geolocator: ^13.0.2
   http: ^1.3.0
-  pin_code_fields: ^8.0.1
+  pinput: ^5.0.0
   image_picker: ^1.1.2
   image: ^4.5.3
   intl: ^0.20.2
@@ -47,6 +47,8 @@ dependencies:
   firebase_performance: ^0.10.1+10
   firebase_app_check: ^0.3.2+10
   upgrader: ^13.3.0
+  smart_auth: ^3.2.0
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   integration_test:
@@ -58,6 +60,7 @@ dev_dependencies:
   mocktail: ^1.0.5
   fake_cloud_firestore: ^3.1.0
   firebase_auth_mocks: ^0.14.2
+  change_app_package_name: ^1.5.0
 
 flutter_launcher_icons:
   android: true

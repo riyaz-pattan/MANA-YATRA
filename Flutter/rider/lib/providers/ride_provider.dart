@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:dart_geohash/dart_geohash.dart';
+import 'package:geolocator/geolocator.dart';
 import '../services/google_maps_service.dart';
 import '../utils/device_session_manager.dart';
 
@@ -19,7 +21,7 @@ class RideProvider extends ChangeNotifier {
   RouteInfo? _route;
 
   // Ride config
-  String _vehicleType = '';
+  String _vehicleType = 'auto';
   int _bidPrice = 80;
   String _paymentMethod = 'Cash';
 
@@ -30,6 +32,11 @@ class RideProvider extends ChangeNotifier {
   StreamSubscription<DocumentSnapshot>? _profileSubscription;
 
   static const _kActiveRideKey = 'rider_active_ride_id';
+
+  // Nearby Drivers Tracking
+  List<Map<String, dynamic>> _nearbyDrivers = [];
+  StreamSubscription<QuerySnapshot>? _driversSubscription;
+  Timer? _etaUpdateTimer;
 
   // Getters
   User? get user => _user;
@@ -45,6 +52,7 @@ class RideProvider extends ChangeNotifier {
   Map<String, dynamic>? get selectedBid => _selectedBid;
   /// Non-null when we recovered a ride ID from local storage on cold start.
   String? get persistedRideId => _persistedRideId;
+  List<Map<String, dynamic>> get nearbyDrivers => _nearbyDrivers;
 
   // Setters
   void setUser(User? user) {
@@ -113,6 +121,7 @@ class RideProvider extends ChangeNotifier {
 
   void setPickup(LocationResult? pickup) {
     _pickup = pickup;
+    _listenForNearbyDrivers();
     notifyListeners();
   }
 
@@ -222,14 +231,72 @@ class RideProvider extends ChangeNotifier {
     _selectedBid = null;
     _drop = null;
     _route = null;
+    _nearbyDrivers.clear();
+    _driversSubscription?.cancel();
+    _etaUpdateTimer?.cancel();
     // Also clear persisted ride ID to prevent stale recovery on next app start
     clearPersistedRideId();
     notifyListeners();
   }
 
+  void _listenForNearbyDrivers() {
+    _driversSubscription?.cancel();
+    _etaUpdateTimer?.cancel();
+    _nearbyDrivers.clear();
+
+    if (_pickup == null) return;
+
+    // Use Geohash precision 4 (approx 39km x 19km bounding box).
+    // This allows us to find all nearby drivers in one simple range query,
+    // and then filter down to a strict 5km circle locally.
+    final hash4 = GeoHasher().encode(_pickup!.lng, _pickup!.lat, precision: 4);
+
+    _driversSubscription = FirebaseFirestore.instance
+        .collection('drivers')
+        .where('isOnline', isEqualTo: true)
+        .where('geohash', isGreaterThanOrEqualTo: hash4)
+        .where('geohash', isLessThan: '$hash4~')
+        .snapshots()
+        .listen((snap) {
+      final drivers = <Map<String, dynamic>>[];
+      for (var doc in snap.docs) {
+        final data = doc.data();
+        if (data['lat'] != null && data['lng'] != null) {
+          final dist = Geolocator.distanceBetween(
+              _pickup!.lat, _pickup!.lng, data['lat'], data['lng']);
+              
+          // Strict 5km radius filter
+          if (dist <= 5000) {
+            drivers.add({
+              'id': doc.id,
+              'lat': data['lat'],
+              'lng': data['lng'],
+              'heading': data['heading'] ?? 0.0,
+              'vehicleType': data['vehicleType'] ?? 'auto',
+              'distance': dist,
+            });
+          }
+        }
+      }
+      _nearbyDrivers = drivers;
+      notifyListeners();
+    }, onError: (error) {
+      debugPrint('[RideProvider] Error fetching nearby drivers: $error');
+    });
+
+    // Update ETA every 10 seconds based on live driver coordinates
+    _etaUpdateTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (_nearbyDrivers.isNotEmpty) {
+        notifyListeners();
+      }
+    });
+  }
+
   @override
   void dispose() {
     _profileSubscription?.cancel();
+    _driversSubscription?.cancel();
+    _etaUpdateTimer?.cancel();
     super.dispose();
   }
 }

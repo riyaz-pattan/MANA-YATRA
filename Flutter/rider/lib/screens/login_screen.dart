@@ -1,13 +1,11 @@
 // lib/screens/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:pin_code_fields/pin_code_fields.dart';
+import 'package:pinput/pinput.dart';
+import 'package:smart_auth/smart_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/theme.dart';
-import 'main_screen.dart';
-import 'profile_setup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -27,6 +25,7 @@ class _LoginScreenState extends State<LoginScreen>
   int? _resendToken;
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
+  late final _smsRetriever = _SmsRetrieverImpl(SmartAuth.instance);
 
   @override
   void initState() {
@@ -57,6 +56,7 @@ class _LoginScreenState extends State<LoginScreen>
     _phoneController.dispose();
     _otpController.dispose();
     _animController.dispose();
+    _smsRetriever.dispose();
     super.dispose();
   }
 
@@ -75,34 +75,10 @@ class _LoginScreenState extends State<LoginScreen>
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: '+91$phone',
         verificationCompleted: (PhoneAuthCredential credential) async {
+          // Auto-sign-in (e.g. on Android with SMS auto-retrieval)
+          // AuthGate in main.dart will handle navigation automatically.
           try {
-            final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
-            final user = userCredential.user;
-            if (user == null || !mounted) return;
-
-            final userDoc = await FirebaseFirestore.instance
-                .collection('users')
-                .doc(user.uid)
-                .get();
-
-            if (!mounted) return;
-
-            final data = userDoc.data();
-            final hasName = data != null &&
-                data.containsKey('name') &&
-                (data['name']?.toString() ?? '').trim().isNotEmpty;
-
-            if (hasName) {
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (_) => const MainScreen()),
-                (route) => false,
-              );
-            } else {
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (_) => const ProfileSetupScreen()),
-                (route) => false,
-              );
-            }
+            await FirebaseAuth.instance.signInWithCredential(credential);
           } catch (_) {}
         },
         verificationFailed: (FirebaseAuthException e) {
@@ -144,7 +120,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
     // Guard against duplicate calls (from onCompleted + button tap)
     if (_loading) return;
-    
+
     setState(() {
       _loading = true;
       _error = '';
@@ -155,34 +131,9 @@ class _LoginScreenState extends State<LoginScreen>
         verificationId: _verificationId!,
         smsCode: otp,
       );
-      final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
-      final user = userCredential.user;
-      if (user == null || !mounted) return;
-
-      // Explicitly check if user has a profile name set
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
-      if (!mounted) return;
-
-      final data = userDoc.data();
-      final hasName = data != null &&
-          data.containsKey('name') &&
-          (data['name']?.toString() ?? '').trim().isNotEmpty;
-
-      if (hasName) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const MainScreen()),
-          (route) => false,
-        );
-      } else {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const ProfileSetupScreen()),
-          (route) => false,
-        );
-      }
+      // Sign in — AuthGate in main.dart will detect the auth state change
+      // and navigate to MainScreen or ProfileSetupScreen automatically.
+      await FirebaseAuth.instance.signInWithCredential(credential);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -295,7 +246,8 @@ class _LoginScreenState extends State<LoginScreen>
                             _buildPrimaryButton(
                               'Send OTP →',
                               _sendOtp,
-                              enabled: _phoneController.text
+                              enabled:
+                                  _phoneController.text
                                       .replaceAll(RegExp(r'\D'), '')
                                       .length >=
                                   10,
@@ -320,12 +272,14 @@ class _LoginScreenState extends State<LoginScreen>
                                   });
                                 },
                                 style: TextButton.styleFrom(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 14),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12),
-                                    side:
-                                        const BorderSide(color: AppTheme.border),
+                                    side: const BorderSide(
+                                      color: AppTheme.border,
+                                    ),
                                   ),
                                 ),
                                 child: Text(
@@ -409,38 +363,70 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Widget _buildOtpInput() {
-    return PinCodeTextField(
-      appContext: context,
+    return Pinput(
       length: 6,
       controller: _otpController,
-      autoDisposeControllers: false,
-      animationType: AnimationType.fade,
-      keyboardType: TextInputType.number,
-      autoFocus: true,
+      autofocus: true,
+      smsRetriever: _smsRetriever,
       onChanged: (_) => setState(() {}),
       onCompleted: (_) => _verifyOtp(),
-      pinTheme: PinTheme(
-        shape: PinCodeFieldShape.box,
-        borderRadius: BorderRadius.circular(12),
-        fieldHeight: 52,
-        fieldWidth: 44,
-        activeColor: AppTheme.primary,
-        selectedColor: AppTheme.primary,
-        inactiveColor: AppTheme.border,
-        activeFillColor: AppTheme.bg,
-        selectedFillColor: AppTheme.bg,
-        inactiveFillColor: AppTheme.bg,
+      defaultPinTheme: PinTheme(
+        width: 44,
+        height: 52,
+        textStyle: GoogleFonts.inter(
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.text,
+        ),
+        decoration: BoxDecoration(
+          color: AppTheme.bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.border),
+        ),
       ),
-      enableActiveFill: true,
-      textStyle: GoogleFonts.inter(
-        fontSize: 22,
-        fontWeight: FontWeight.w700,
+      focusedPinTheme: PinTheme(
+        width: 44,
+        height: 52,
+        textStyle: GoogleFonts.inter(
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.text,
+        ),
+        decoration: BoxDecoration(
+          color: AppTheme.bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.primary, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.primary.withValues(alpha: 0.2),
+              blurRadius: 8,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+      ),
+      submittedPinTheme: PinTheme(
+        width: 44,
+        height: 52,
+        textStyle: GoogleFonts.inter(
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.text,
+        ),
+        decoration: BoxDecoration(
+          color: AppTheme.primary.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.primary),
+        ),
       ),
     );
   }
 
-  Widget _buildPrimaryButton(String label, VoidCallback onPressed,
-      {bool enabled = true}) {
+  Widget _buildPrimaryButton(
+    String label,
+    VoidCallback onPressed, {
+    bool enabled = true,
+  }) {
     return SizedBox(
       width: double.infinity,
       height: 54,
@@ -458,5 +444,30 @@ class _LoginScreenState extends State<LoginScreen>
             : Text(label),
       ),
     );
+  }
+}
+
+/// Implements Pinput's [SmsRetriever] using the [SmartAuth] package
+/// to automatically read incoming OTP SMS and extract the code.
+class _SmsRetrieverImpl implements SmsRetriever {
+  const _SmsRetrieverImpl(this._smartAuth);
+
+  final SmartAuth _smartAuth;
+
+  @override
+  Future<String?> getSmsCode() async {
+    final res = await _smartAuth.getSmsWithRetrieverApi();
+    if (res.hasData) {
+      return res.requireData.code;
+    }
+    return null;
+  }
+
+  @override
+  bool get listenForMultipleSms => false;
+
+  @override
+  Future<void> dispose() async {
+    _smartAuth.removeSmsRetrieverApiListener();
   }
 }

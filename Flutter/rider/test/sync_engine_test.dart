@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:mana_yatra_rider/services/sync_engine.dart';
-import 'package:mana_yatra_rider/services/action_queue_service.dart';
-import 'package:mana_yatra_rider/models/queue_item.dart';
+import 'package:Ashwa/services/sync_engine.dart';
+import 'package:Ashwa/services/action_queue_service.dart';
+import 'package:Ashwa/models/queue_item.dart';
 
 class MockActionQueueService extends Mock implements ActionQueueService {}
 
@@ -34,7 +34,7 @@ void main() {
       // Assert
       verify(() => mockQueue.enqueue(item)).called(1);
     });
-    
+
     test('pendingCount returns value from queue', () {
       // Arrange
       when(() => mockQueue.pendingCount).thenReturn(3);

@@ -8,6 +8,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:confetti/confetti.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../utils/custom_toast.dart';
 import 'package:geolocator/geolocator.dart';
 import '../config/theme.dart';
@@ -390,32 +391,73 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
   }
 
   void _showCompleteConfirmation() {
+    final paymentMethod = _ride!['paymentMethod'] as String? ?? 'Cash';
+    final isUpi = paymentMethod.toUpperCase() == 'UPI';
+    final finalPrice = _ride!['finalPrice'] ?? _ride!['riderBid'] ?? 0;
+    
+    final provider = context.read<DriverProvider>();
+    final upiId = provider.profile?['upiId'] as String? ?? '';
+    final driverName = provider.profile?['name'] as String? ?? 'Driver';
+    
+    // NPCI standard UPI intent link
+    final upiLink = 'upi://pay?pa=$upiId&pn=${Uri.encodeComponent(driverName)}&am=$finalPrice&cu=INR';
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetContext) {
         return Padding(
           padding: EdgeInsets.only(
-            left: 20, right: 20, top: 24, bottom: MediaQuery.of(context).padding.bottom + 20,
+            left: 20, right: 20, top: 16, bottom: MediaQuery.of(context).padding.bottom + 20,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
               const SizedBox(height: 24),
-              const Icon(Icons.check_circle_outline, color: AppTheme.success, size: 60),
-              const SizedBox(height: 16),
-              Text('Complete Ride?', style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.text)),
-              const SizedBox(height: 8),
-              Text(
-                'Are you sure you have reached the destination and dropped off the rider?',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.inter(fontSize: 15, color: Colors.grey[600]),
-              ),
+              
+              if (isUpi && upiId.isNotEmpty) ...[
+                Text('Scan to Pay', style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.text)),
+                const SizedBox(height: 4),
+                Text('₹$finalPrice via UPI', style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.w900, color: AppTheme.success)),
+                const SizedBox(height: 20),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 20, spreadRadius: -5),
+                    ],
+                  ),
+                  child: QrImageView(
+                    data: upiLink,
+                    version: QrVersions.auto,
+                    size: 200.0,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Show this to the rider. Wait for payment confirmation on your bank app before completing.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(fontSize: 14, color: AppTheme.warning, fontWeight: FontWeight.w600),
+                ),
+              ] else ...[
+                const Icon(Icons.payments_rounded, color: AppTheme.success, size: 60),
+                const SizedBox(height: 16),
+                Text('Collect Cash', style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.text)),
+                const SizedBox(height: 8),
+                Text(
+                  'Please collect ₹$finalPrice from the rider.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(fontSize: 18, color: AppTheme.success, fontWeight: FontWeight.w700),
+                ),
+              ],
+              
               const SizedBox(height: 32),
               SizedBox(
                 width: double.infinity,
@@ -429,7 +471,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   child: Text(
-                    '✅ Complete & Collect Cash',
+                    isUpi ? '✅ Payment Received & Complete' : '✅ Cash Received & Complete',
                     style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 15),
                   ),
                 ),

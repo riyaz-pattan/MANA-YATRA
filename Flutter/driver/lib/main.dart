@@ -1,5 +1,6 @@
 // lib/main.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -64,7 +65,9 @@ void main() async {
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
 
   await FirebaseAppCheck.instance.activate(
-    androidProvider: AndroidProvider.playIntegrity,
+    androidProvider: kDebugMode
+        ? AndroidProvider.debug
+        : AndroidProvider.playIntegrity,
   );
 
   // Initialize Crashlytics and Global Error Handling
@@ -200,41 +203,41 @@ class AuthGate extends StatelessWidget {
               );
             }
 
-                // Handle Profile states from Provider
-                if (!provider.hasProfile) {
-                  return const OnboardingScreen();
+            // Handle Profile states from Provider
+            if (!provider.hasProfile) {
+              return const OnboardingScreen();
+            }
+
+            if (provider.isBlocked) {
+              return _buildBlockedScreen();
+            }
+
+            // Rejected — show reason and allow resubmission
+            final isRejected = provider.profile?['isRejected'];
+            if (isRejected == true || isRejected == 'true') {
+              final reason =
+                  provider.profile?['rejectionReason'] as String? ??
+                  'Your documents did not meet our requirements.';
+              return RejectedScreen(rejectionReason: reason);
+            }
+
+            if (!provider.isApproved) {
+              return const PendingScreen();
+            }
+
+            // NOTE: Subscription check removed — drivers can access dashboard
+            // even with expired subscription. They'll be kept offline and prompted
+            // to renew when trying to go online.
+
+            // All clear — check for persisted active ride first
+            return Consumer<DriverProvider>(
+              builder: (context, dp, _) {
+                if (dp.persistedRideId != null) {
+                  return ActiveRideScreen(rideId: dp.persistedRideId!);
                 }
-
-                if (provider.isBlocked) {
-                  return _buildBlockedScreen();
-                }
-
-                // Rejected — show reason and allow resubmission
-                final isRejected = provider.profile?['isRejected'];
-                if (isRejected == true || isRejected == 'true') {
-                  final reason =
-                      provider.profile?['rejectionReason'] as String? ??
-                      'Your documents did not meet our requirements.';
-                  return RejectedScreen(rejectionReason: reason);
-                }
-
-                if (!provider.isApproved) {
-                  return const PendingScreen();
-                }
-
-                // NOTE: Subscription check removed — drivers can access dashboard
-                // even with expired subscription. They'll be kept offline and prompted
-                // to renew when trying to go online.
-
-                // All clear — check for persisted active ride first
-                return Consumer<DriverProvider>(
-                  builder: (context, dp, _) {
-                    if (dp.persistedRideId != null) {
-                      return ActiveRideScreen(rideId: dp.persistedRideId!);
-                    }
-                    return const DashboardScreen();
-                  },
-                );
+                return const DashboardScreen();
+              },
+            );
           },
         );
       },

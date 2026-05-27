@@ -1,4 +1,4 @@
-package com.manayatra.mana_yatra_rider
+package com.manayatra.rider
 
 import io.flutter.embedding.android.FlutterActivity
 

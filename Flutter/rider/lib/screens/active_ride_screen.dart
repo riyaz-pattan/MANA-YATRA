@@ -280,6 +280,10 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     final distanceKm = _ride?['distanceKm'];
     // Prefer the actual elapsed time; fall back to the estimated duration
     final durationMin = _ride?['actualDurationMin'] ?? _ride?['durationMin'];
+    
+    final paymentMethod = _ride?['paymentMethod'] as String? ?? 'Cash';
+    final isUpi = paymentMethod.toUpperCase() == 'UPI';
+    final driverUpiId = _ride?['driverUpiId'] as String? ?? '';
 
     final cancelledBy = _ride?['cancelledBy'];
     String cancelReason = 'The ride was cancelled.';
@@ -392,7 +396,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              'Total Fare — Paid via Cash',
+                              isUpi ? 'Total Fare — Pay directly via UPI' : 'Total Fare — Paid via Cash',
                               style: GoogleFonts.inter(
                                 fontSize: 13,
                                 color: AppTheme.text2,
@@ -426,6 +430,58 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                           ],
                         ),
                       ),
+                      
+                      if (isUpi && isCompleted) ...[
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () async {
+                              final driverName = _ride!['driverName'] ?? 'Driver';
+                              final upiLink = 'upi://pay?pa=$driverUpiId&pn=${Uri.encodeComponent(driverName)}&am=$finalPrice&cu=INR';
+                              final uri = Uri.parse(upiLink);
+                              try {
+                                if (await canLaunchUrl(uri)) {
+                                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                } else {
+                                  if (mounted) {
+                                    CustomToast.show(
+                                      context: context,
+                                      message: 'No UPI apps found on your device.',
+                                      isError: true,
+                                    );
+                                  }
+                                }
+                              } catch (e) {
+                                if (mounted) {
+                                  CustomToast.show(
+                                    context: context,
+                                    message: 'Failed to open UPI app.',
+                                    isError: true,
+                                  );
+                                }
+                              }
+                            },
+                            icon: const Icon(Icons.payments_rounded, color: Colors.white),
+                            label: Text(
+                              'Pay ₹$finalPrice via UPI App',
+                              style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              backgroundColor: AppTheme.success,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                      
                       const SizedBox(height: 16),
                       // Zero commission banner
                       Container(

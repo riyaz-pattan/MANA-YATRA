@@ -1,4 +1,4 @@
-package com.manayatra.mana_yatra_driver
+package com.manayatra.driver
 
 import io.flutter.embedding.android.FlutterActivity
 
