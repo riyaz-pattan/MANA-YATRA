@@ -224,7 +224,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
               const SizedBox(height: 10),
               Text(
-                'Your device location (GPS) is turned off. Please enable it to use Mana Yatra.',
+                'Your device location (GPS) is turned off. Please enable it to use Gaman.',
                 style: GoogleFonts.inter(
                   fontSize: 14,
                   color: AppTheme.text2,
@@ -690,7 +690,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showInvalidRouteDialog(
         title: 'Locations Too Far Apart',
         message:
-            'Your pickup and drop locations are ${straightLineKm.toStringAsFixed(0)} km apart in a straight line.\n\nAshwa operates for local rides. Please set a nearby drop location.',
+            'Your pickup and drop locations are ${straightLineKm.toStringAsFixed(0)} km apart in a straight line.\n\nGaman operates for local rides. Please set a nearby drop location.',
         hint: 'Tip: Both locations should be in the same city or region.',
       );
       return;

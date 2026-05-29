@@ -279,7 +279,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         'key': AppConstants.razorpayKeyId,
         'amount': amount,
         'order_id': orderId,
-        'name': 'Mana Yatra',
+        'name': 'Gaman',
         'description': '$_selectedDays Day Subscription',
         'prefill': {
           'contact': driverPhone,

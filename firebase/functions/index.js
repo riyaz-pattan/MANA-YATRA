@@ -379,7 +379,7 @@ exports.completeRide = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError("permission-denied", "Not assigned to this ride.");
       }
 
-      if (ride.status !== "started") {
+      if (ride.status !== "started" && ride.status !== "payment_pending") {
         throw new functions.https.HttpsError(
           "failed-precondition",
           `Cannot complete ride from status: ${ride.status}`
@@ -398,8 +398,14 @@ exports.completeRide = functions.https.onCall(async (data, context) => {
         ...(actualDurationMin !== null && { actualDurationMin }),
       });
 
+      const driverSnap = await txn.get(driverRef);
+      const driverData = driverSnap.data() || {};
+      const subActiveUntil = driverData.subscriptionActiveUntil ? driverData.subscriptionActiveUntil.toDate() : new Date(0);
+      const isExpired = subActiveUntil <= completedAtDate;
+
       txn.update(driverRef, {
-        driverState: "ONLINE_IDLE",
+        driverState: isExpired ? "OFFLINE" : "ONLINE_IDLE",
+        isOnline: !isExpired,
         activeRideId: null,
         activeBidCount: 0,
       });
@@ -585,6 +591,28 @@ exports.startFreeTrial = functions.https.onCall(async (data, context) => {
   const db = admin.firestore();
 
   try {
+    // 1. Fetch user's phone number from Firebase Auth
+    const userRecord = await admin.auth().getUser(uid);
+    const phoneNumber = userRecord.phoneNumber;
+
+    if (!phoneNumber) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Driver does not have a verified phone number."
+      );
+    }
+
+    // 2. Check if this phone number has already used a free trial
+    const usedTrialRef = db.collection("used_free_trials").doc(phoneNumber);
+    const usedTrialSnap = await usedTrialRef.get();
+
+    if (usedTrialSnap.exists) {
+      throw new functions.https.HttpsError(
+        "already-exists",
+        "Free trial already used on this phone number."
+      );
+    }
+
     const driverRef = db.collection("drivers").doc(uid);
     const driverSnap = await driverRef.get();
 
@@ -617,6 +645,12 @@ exports.startFreeTrial = functions.https.onCall(async (data, context) => {
       type: "free_trial",
       method: "free",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Record the phone number in used_free_trials
+    batch.set(usedTrialRef, {
+      uid: uid,
+      activatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
     await batch.commit();
@@ -1362,30 +1396,60 @@ exports.dailyEarningsSummary = functions.pubsub
   });
 
 /**
- * onDriverPresenceChanged
- * Triggers when a driver's RTDB presence changes. If they disconnect,
- * mirror this state to Firestore by setting them offline.
+ * autoOfflineIdleDrivers
+ * Scheduled Cron Job (Runs every 5 minutes)
+ * Finds drivers who are marked ONLINE in Firestore but have been disconnected
+ * from the Realtime Database (WebSocket closed) for more than 2 hours, and safely
+ * sets them to OFFLINE. This allows drivers to briefly close the app without dropping offline.
  */
-exports.onDriverPresenceChanged = functions.database
-  .ref("/presence/{driverId}")
-  .onUpdate(async (change, context) => {
-    const isOnline = change.after.val().isOnline;
-    const driverId = context.params.driverId;
+exports.autoOfflineIdleDrivers = functions.pubsub
+  .schedule("every 5 minutes")
+  .onRun(async (context) => {
+    const db = admin.firestore();
+    const rtdb = admin.database();
 
-    if (isOnline === false) {
-      // Driver disconnected or intentionally went offline
-      try {
-        await admin.firestore().collection("drivers").doc(driverId).update({
-          driverState: "OFFLINE",
-          isOnline: false,
-          activeBidCount: 0,
-          activeRideId: null,
-        });
-        console.log(`Driver ${driverId} marked OFFLINE via Presence disconnect.`);
-      } catch (e) {
-        console.error(`Failed to update offline status for driver ${driverId}:`, e);
+    try {
+      const onlineDriversSnap = await db.collection("drivers")
+        .where("isOnline", "==", true)
+        .get();
+
+      if (onlineDriversSnap.empty) return null;
+
+      const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+      const batch = db.batch();
+      let count = 0;
+
+      for (const doc of onlineDriversSnap.docs) {
+        const driverId = doc.id;
+        const data = doc.data();
+        
+        // Don't auto-offline drivers who are actively on a ride
+        if (data.driverState === "ON_RIDE") continue;
+
+        // Check their Realtime Database presence node
+        const presenceSnap = await rtdb.ref(`presence/${driverId}`).once("value");
+        const presence = presenceSnap.val();
+
+        // If the socket has been disconnected for more than 2 hours
+        if (presence && presence.isOnline === false && presence.updatedAt) {
+          if (presence.updatedAt < twoHoursAgo) {
+            batch.update(doc.ref, {
+              isOnline: false,
+              driverState: "OFFLINE",
+            });
+            count++;
+          }
+        }
       }
+
+      if (count > 0) {
+        await batch.commit();
+        console.log(`Auto-offlined ${count} idle drivers who were disconnected for > 2 hours.`);
+      }
+    } catch (e) {
+      console.error("Error in autoOfflineIdleDrivers:", e);
     }
+    return null;
   });
 
 /**
@@ -2071,3 +2135,78 @@ exports.verifyRazorpayPayment = functions.https.onCall(async (data, context) => 
     );
   }
 });
+
+/**
+ * checkSubscriptions
+ * Runs every 5 minutes to check for expired subscriptions and upcoming expirations.
+ */
+exports.checkSubscriptions = functions.pubsub
+  .schedule("every 5 minutes")
+  .onRun(async (context) => {
+    const db = admin.firestore();
+    const now = new Date();
+    
+    // 1. Force offline drivers whose subscriptions have expired
+    try {
+      const expiredDriversSnap = await db.collection("drivers")
+        .where("isOnline", "==", true)
+        .where("subscriptionActiveUntil", "<=", now)
+        .get();
+
+      if (!expiredDriversSnap.empty) {
+        const batch = db.batch();
+        let count = 0;
+        for (const doc of expiredDriversSnap.docs) {
+          batch.update(doc.ref, {
+            isOnline: false,
+            driverState: "OFFLINE",
+          });
+          count++;
+        }
+        await batch.commit();
+        console.log(`checkSubscriptions: forced ${count} expired drivers offline.`);
+      }
+    } catch (e) {
+      console.error("Error setting expired drivers offline:", e);
+    }
+
+    // 2. Send FCM alerts for subscriptions expiring in ~1 hour (55 to 60 mins from now)
+    try {
+      const minExpiry = new Date(now.getTime() + 55 * 60000);
+      const maxExpiry = new Date(now.getTime() + 60 * 60000);
+
+      const warningDriversSnap = await db.collection("drivers")
+        .where("subscriptionActiveUntil", ">=", minExpiry)
+        .where("subscriptionActiveUntil", "<=", maxExpiry)
+        .get();
+
+      if (!warningDriversSnap.empty) {
+        let alertCount = 0;
+        const messaging = admin.messaging();
+        for (const doc of warningDriversSnap.docs) {
+          const driverId = doc.id;
+          const payload = {
+            notification: {
+              title: "Subscription Expiring Soon",
+              body: "Your subscription is going to end in 1 hour. Please renew to stay online.",
+            },
+            data: {
+              type: "subscription_alert",
+            },
+            topic: `driver_${driverId}`,
+          };
+          try {
+            await messaging.send(payload);
+            alertCount++;
+          } catch (err) {
+            console.error(`Error sending subscription alert to driver_${driverId}:`, err);
+          }
+        }
+        console.log(`checkSubscriptions: sent ${alertCount} expiry alerts.`);
+      }
+    } catch (e) {
+      console.error("Error sending subscription alerts:", e);
+    }
+
+    return null;
+  });

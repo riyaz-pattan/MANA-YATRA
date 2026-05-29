@@ -187,7 +187,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
               ),
               const SizedBox(height: 10),
               Text(
-                'Your device location (GPS) is turned off. Please enable it to use Mana Yatra Driver.',
+                'Your device location (GPS) is turned off. Please enable it to use Gaman Driver.',
                 style: GoogleFonts.inter(
                   fontSize: 14,
                   color: AppTheme.text2,
@@ -1433,6 +1433,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         markerId: MarkerId(rideId),
         position: LatLng(lat, lng),
         icon: icon,
+        anchor: const Offset(0.5, 54/62),
         onTap: () {
           _ridePageController.animateToPage(
             i,

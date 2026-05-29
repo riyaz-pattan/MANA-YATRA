@@ -50,7 +50,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   _buildSettingTile(
                     icon: Icons.info_outline,
-                    title: 'About Mana Yatra',
+                    title: 'About Gaman',
                     onTap: () {
                       Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutScreen()));
                     },

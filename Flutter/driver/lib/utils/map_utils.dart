@@ -188,14 +188,19 @@ class MapUtils {
 
     final double pillWidth = labelTP.width + pillPadding * 2;
     const double effectivePad = 8.0;
-    final double canvasW = (pinRadius * 2 + pillWidth + 8 + effectivePad * 2) * scale;
+    
+    // Balance the canvas so the pin tip is exactly in the horizontal center
+    final double rightSideWidth = pinRadius + 6 + pillWidth + effectivePad;
+    final double leftSideWidth = rightSideWidth; // Symmetric to right side
+    
+    final double canvasW = (leftSideWidth + rightSideWidth) * scale;
     final double canvasH = (pinHeight + effectivePad * 2) * scale;
 
     final ui.PictureRecorder recorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(recorder);
     canvas.scale(scale);
 
-    final double cx = effectivePad + pinRadius;
+    final double cx = leftSideWidth;
     final double cy = effectivePad + pinRadius;
 
     final Paint shadowPaint = Paint()
@@ -314,14 +319,19 @@ class MapUtils {
 
     // ── Canvas setup ──────────────────────────────────────────────────
     final double effectivePad = 8.0; // padding for drop shadow
-    final double canvasW = (pinRadius * 2 + pillWidth + 8 + effectivePad * 2) * scale;
+    
+    // Balance the canvas so the pin tip is exactly in the horizontal center
+    final double rightSideWidth = pinRadius + 6 + pillWidth + effectivePad;
+    final double leftSideWidth = rightSideWidth; // Symmetric to right side
+    
+    final double canvasW = (leftSideWidth + rightSideWidth) * scale;
     final double canvasH = (pinHeight + effectivePad * 2) * scale;
 
     final ui.PictureRecorder recorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(recorder);
     canvas.scale(scale);
 
-    final double cx = effectivePad + pinRadius;
+    final double cx = leftSideWidth;
     final double cy = effectivePad + pinRadius;
 
     // ── Drop shadow ───────────────────────────────────────────────────

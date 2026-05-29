@@ -1,7 +1,7 @@
-name: Ashwa
-description: "Ashwa App - Zero commission rides, fair prices"
+name: gaman
+description: "Gaman App - Zero commission rides, fair prices"
 publish_to: 'none'
-version: 1.0.0+1
+version: 0.0.0+2
 
 environment:
   sdk: ^3.9.2

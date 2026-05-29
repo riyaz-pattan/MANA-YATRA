@@ -1,10 +1,10 @@
 1 # Introduction
 2
-3This folder is used to build and test the MANA YATRA Flutter Rider App. 
+3This folder is used to build and test the Gaman Flutter Rider App. 
 4
 5## Project Overview
 6
-7The MANA YATRA Flutter Rider App is a mobile application designed to provide a seamless user experience for riders. The app allows users to easily book rides, track their journey, and access various features such as driver information, fare estimates, and more. 
+7The Gaman Flutter Rider App is a mobile application designed to provide a seamless user experience for riders. The app allows users to easily book rides, track their journey, and access various features such as driver information, fare estimates, and more. 
 8
 9## Getting Started
 10
@@ -12,7 +12,7 @@
 12
 13### Step 1: Clone the Repository
 14
-15Clone the MANA YATRA Flutter Rider App repository using the following command:
+15Clone the Gaman Flutter Rider App repository using the following command:
 16
 17```
 18git clone https://github.com/username/mana_yatra_rider.git
@@ -32,7 +32,7 @@
 32
 33## Project Structure
 34
-35The MANA YATRA Flutter Rider App project is structured into the following directories:
+35The Gaman Flutter Rider App project is structured into the following directories:
 36
 37* `lib`: This directory contains the main application code, including the widgets, screens, and utilities.
 38* `test`: This directory contains the unit tests and widget tests for the application.
@@ -40,7 +40,7 @@
 40
 41## Contributing
 42
-43To contribute to the MANA YATRA Flutter Rider App project, follow these steps:
+43To contribute to the Gaman Flutter Rider App project, follow these steps:
 44
 45### Step 1: Create a New Branch
 46
@@ -69,15 +69,15 @@
 69
 70## Conclusion
 71
-72The MANA YATRA Flutter Rider App is a complex project that requires careful planning, execution, and testing. By following the steps outlined in this guide, you can get started with the project and contribute to its development. 
+72The Gaman Flutter Rider App is a complex project that requires careful planning, execution, and testing. By following the steps outlined in this guide, you can get started with the project and contribute to its development. 
 73
 74## License
 75
-76The MANA YATRA Flutter Rider App is licensed under the MIT License. See the LICENSE file for details. 
+76The Gaman Flutter Rider App is licensed under the MIT License. See the LICENSE file for details. 
 77
 78## Acknowledgments
 79
-80The MANA YATRA Flutter Rider App is built using the following open-source libraries and frameworks:
+80The Gaman Flutter Rider App is built using the following open-source libraries and frameworks:
 81
 82* Flutter: A mobile app development framework created by Google.
 83* Dart: A programming language used for developing Flutter apps.
@@ -86,7 +86,7 @@
 86
 87## Contact
 88
-89For more information about the MANA YATRA Flutter Rider App, please contact us at [your-email@example.com](mailto:your-email@example.com). 
+89For more information about the Gaman Flutter Rider App, please contact us at [your-email@example.com](mailto:your-email@example.com). 
 90
 91## Documentation
 92

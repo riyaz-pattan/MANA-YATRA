@@ -3,10 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:Ashwa/providers/ride_provider.dart';
-import 'package:Ashwa/providers/connectivity_provider.dart';
-import 'package:Ashwa/screens/home_screen.dart';
-import 'package:Ashwa/config/theme.dart';
+import 'package:gaman/providers/ride_provider.dart';
+import 'package:gaman/providers/connectivity_provider.dart';
+import 'package:gaman/screens/home_screen.dart';
+import 'package:gaman/config/theme.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'mock_firebase.dart';
 

@@ -240,33 +240,46 @@ class RideProvider extends ChangeNotifier {
   }
 
   void _listenForNearbyDrivers() {
+    debugPrint('[RideProvider] _listenForNearbyDrivers called.');
     _driversSubscription?.cancel();
     _etaUpdateTimer?.cancel();
     _nearbyDrivers.clear();
 
-    if (_pickup == null) return;
+    if (_pickup == null) {
+      debugPrint('[RideProvider] _pickup is null, aborting driver search.');
+      return;
+    }
+
+    debugPrint('[RideProvider] Pickup Location: ${_pickup!.lat}, ${_pickup!.lng}');
 
     // Use Geohash precision 4 (approx 39km x 19km bounding box).
     // This allows us to find all nearby drivers in one simple range query,
     // and then filter down to a strict 5km circle locally.
     final hash4 = GeoHasher().encode(_pickup!.lng, _pickup!.lat, precision: 4);
+    debugPrint('[RideProvider] Generated hash4 for query: $hash4');
 
     _driversSubscription = FirebaseFirestore.instance
         .collection('drivers')
-        .where('isOnline', isEqualTo: true)
         .where('geohash', isGreaterThanOrEqualTo: hash4)
         .where('geohash', isLessThan: '$hash4~')
         .snapshots()
         .listen((snap) {
+      debugPrint('[RideProvider] Firestore snapshot received. Total docs returned by geohash query: ${snap.docs.length}');
+      
       final drivers = <Map<String, dynamic>>[];
       for (var doc in snap.docs) {
         final data = doc.data();
-        if (data['lat'] != null && data['lng'] != null) {
+        debugPrint('[RideProvider] Evaluating driver doc: ${doc.id} | isOnline: ${data['isOnline']} | lat: ${data['lat']} | lng: ${data['lng']} | geohash: ${data['geohash']} | type: ${data['vehicleType']}');
+        
+        if (data['isOnline'] == true && data['lat'] != null && data['lng'] != null) {
           final dist = Geolocator.distanceBetween(
               _pickup!.lat, _pickup!.lng, data['lat'], data['lng']);
               
+          debugPrint('[RideProvider] Driver ${doc.id} distance to pickup: $dist meters');
+          
           // Strict 5km radius filter
           if (dist <= 5000) {
+            debugPrint('[RideProvider] Driver ${doc.id} added to nearby list!');
             drivers.add({
               'id': doc.id,
               'lat': data['lat'],
@@ -275,10 +288,15 @@ class RideProvider extends ChangeNotifier {
               'vehicleType': data['vehicleType'] ?? 'auto',
               'distance': dist,
             });
+          } else {
+            debugPrint('[RideProvider] Driver ${doc.id} rejected (too far).');
           }
+        } else {
+          debugPrint('[RideProvider] Driver ${doc.id} rejected (offline or missing GPS).');
         }
       }
       _nearbyDrivers = drivers;
+      debugPrint('[RideProvider] Final nearby drivers count: ${_nearbyDrivers.length}');
       notifyListeners();
     }, onError: (error) {
       debugPrint('[RideProvider] Error fetching nearby drivers: $error');

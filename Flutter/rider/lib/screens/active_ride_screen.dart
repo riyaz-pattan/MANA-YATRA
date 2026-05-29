@@ -115,7 +115,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
   Future<void> _loadIcon(String type) async {
     final path = 'assets/images/map_icons/$type.png';
     try {
-      _vehicleIcon = await MapUtils.getBytesFromAsset(path, 80);
+      const config = ImageConfiguration(size: Size(48, 48));
+      _vehicleIcon = await BitmapDescriptor.asset(config, path);
       _driverLabelIcon = await MapUtils.createLabelMarker('Driver is here');
       _dropDot = await MarkerGenerator.createDotMarker(color: AppTheme.danger);
       if (mounted) setState(() {});
@@ -268,6 +269,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
 
   Widget _buildEndScreen(String status) {
     final isCompleted = status == 'completed';
+    final isPaymentPending = status == 'payment_pending';
+    final isCancelled = status == 'cancelled';
 
     _confettiController ??= ConfettiController(duration: const Duration(seconds: 4));
     if (isCompleted) {
@@ -346,18 +349,18 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                       height: 90,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: (isCompleted ? AppTheme.success : AppTheme.danger)
+                        color: (isCompleted ? AppTheme.success : isPaymentPending ? AppTheme.warning : AppTheme.danger)
                             .withValues(alpha: 0.12),
                       ),
                       child: Icon(
-                        isCompleted ? Icons.check_circle_rounded : Icons.cancel_rounded,
-                        color: isCompleted ? AppTheme.success : AppTheme.danger,
+                        isCompleted ? Icons.check_circle_rounded : isPaymentPending ? Icons.payments_rounded : Icons.cancel_rounded,
+                        color: isCompleted ? AppTheme.success : isPaymentPending ? AppTheme.warning : AppTheme.danger,
                         size: 60,
                       ),
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      isCompleted ? 'Ride Completed! 🎉' : 'Ride Cancelled',
+                      isCompleted ? 'Ride Completed! 🎉' : isPaymentPending ? 'Destination Reached' : 'Ride Cancelled',
                       style: GoogleFonts.inter(
                         fontSize: 22,
                         fontWeight: FontWeight.w800,
@@ -367,13 +370,13 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                     const SizedBox(height: 4),
                     Text(
                       isCompleted
-                          ? 'Thank you for riding with Ashwa!'
-                          : cancelReason,
+                          ? 'Thank you for riding with Gaman!'
+                          : isPaymentPending ? 'Please complete your payment.' : cancelReason,
                       style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2),
                       textAlign: TextAlign.center,
                     ),
 
-                    if (isCompleted) ...[
+                    if (isCompleted || isPaymentPending) ...[
                       const SizedBox(height: 24),
                       // Fare card
                       Container(
@@ -391,12 +394,14 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                               style: GoogleFonts.inter(
                                 fontSize: 42,
                                 fontWeight: FontWeight.w900,
-                                color: AppTheme.success,
+                                color: isPaymentPending ? AppTheme.warning : AppTheme.success,
                               ),
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              isUpi ? 'Total Fare — Pay directly via UPI' : 'Total Fare — Paid via Cash',
+                              isUpi 
+                                  ? (isPaymentPending ? 'Total Fare — Pay directly via UPI' : 'Total Fare — Paid via UPI')
+                                  : (isPaymentPending ? 'Total Fare — Please pay cash' : 'Total Fare — Paid via Cash'),
                               style: GoogleFonts.inter(
                                 fontSize: 13,
                                 color: AppTheme.text2,
@@ -431,7 +436,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                         ),
                       ),
                       
-                      if (isUpi && isCompleted) ...[
+                      if (isUpi && isPaymentPending) ...[
                         const SizedBox(height: 16),
                         SizedBox(
                           width: double.infinity,
@@ -499,7 +504,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                'Ashwa takes ZERO commission. 100% of the fare goes directly to your driver!',
+                                'Gaman takes ZERO commission. 100% of the fare goes directly to your driver!',
                                 style: GoogleFonts.inter(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
@@ -512,35 +517,60 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                       ),
                     ],
 
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          _confettiController?.stop();
-                          context.read<RideProvider>().resetRide();
-                          Navigator.of(context).pushAndRemoveUntil(
-                            MaterialPageRoute(builder: (_) => const MainScreen()),
-                            (_) => false,
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          backgroundColor: AppTheme.primary,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16)),
-                          elevation: 0,
-                        ),
-                        child: Text(
-                          'Back to Home',
-                          style: GoogleFonts.inter(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
+                    if (isCompleted || isCancelled) ...[
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            _confettiController?.stop();
+                            context.read<RideProvider>().resetRide();
+                            Navigator.of(context).pushAndRemoveUntil(
+                              MaterialPageRoute(builder: (_) => const MainScreen()),
+                              (_) => false,
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            backgroundColor: AppTheme.primary,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
+                            elevation: 0,
+                          ),
+                          child: Text(
+                            'Back to Home',
+                            style: GoogleFonts.inter(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ] else if (isPaymentPending) ...[
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: null, // Disabled, waiting for driver
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            backgroundColor: Colors.grey[200],
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
+                            elevation: 0,
+                          ),
+                          child: Text(
+                            'Waiting for driver confirmation...',
+                            style: GoogleFonts.inter(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ]
                   ],
                 ),
               ),
@@ -692,6 +722,63 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     }
   }
 
+  Set<Polyline> _buildPolylines(String status, List<LatLng> routeCoords) {
+    if (routeCoords.isEmpty) return {};
+
+    if (status != 'started' || _driverAnimator.currentPos == null) {
+      return {
+        Polyline(
+          polylineId: const PolylineId('route'),
+          points: routeCoords,
+          color: status == 'started' ? AppTheme.primary.withValues(alpha: 0.3) : AppTheme.primary,
+          width: 4,
+        )
+      };
+    }
+
+    final LatLng driverPos = _driverAnimator.currentPos!;
+    int closestIndex = 0;
+    double minDistance = double.infinity;
+
+    for (int i = 0; i < routeCoords.length; i++) {
+      final double dist = Geolocator.distanceBetween(
+        driverPos.latitude, driverPos.longitude,
+        routeCoords[i].latitude, routeCoords[i].longitude,
+      );
+      if (dist < minDistance) {
+        minDistance = dist;
+        closestIndex = i;
+      }
+    }
+
+    final List<LatLng> traveledPoints = routeCoords.sublist(0, closestIndex + 1);
+    final List<LatLng> remainingPoints = routeCoords.sublist(closestIndex);
+
+    if (traveledPoints.isNotEmpty) {
+      traveledPoints.add(driverPos);
+    }
+    if (remainingPoints.isNotEmpty) {
+      remainingPoints.insert(0, driverPos);
+    }
+
+    return {
+      if (traveledPoints.isNotEmpty)
+        Polyline(
+          polylineId: const PolylineId('route_traveled'),
+          points: traveledPoints,
+          color: AppTheme.primary.withValues(alpha: 0.3), // Gray for traveled
+          width: 4,
+        ),
+      if (remainingPoints.isNotEmpty)
+        Polyline(
+          polylineId: const PolylineId('route_remaining'),
+          points: remainingPoints,
+          color: AppTheme.primary, // Black for remaining
+          width: 4,
+        ),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_ride == null) {
@@ -737,7 +824,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     }
 
     final status = _ride!['status'] ?? 'matched';
-    final isEndState = status == 'completed' || status == 'cancelled';
+    final isEndState = status == 'completed' || status == 'cancelled' || status == 'payment_pending';
 
     // Build route coordinates based on status
     final routeCoords = <LatLng>[];
@@ -783,16 +870,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                 });
               }
             },
-            polylines: routeCoords.isNotEmpty
-                ? {
-                    Polyline(
-                      polylineId: const PolylineId('route'),
-                      points: routeCoords,
-                      color: status == 'started' ? AppTheme.primary.withValues(alpha: 0.3) : AppTheme.primary,
-                      width: 4,
-                    )
-                  }
-                : {},
+            polylines: _buildPolylines(status, routeCoords),
             markers: {
               // Rider's own location is shown by the native blue dot (myLocationEnabled: true).
               // No custom pickup marker needed — avoids the green icon confusion.
@@ -820,7 +898,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                   markerId: const MarkerId('driver_label'),
                   position: _driverAnimator.currentPos!,
                   icon: _driverLabelIcon!,
-                  anchor: const Offset(0.5, 1.8),
+                  anchor: const Offset(0.5, 1.2), // Adjusted anchor to reduce gap
                   zIndexInt: 2,
                 ),
             },
@@ -1172,7 +1250,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                       final lat = _driverPos?.latitude ?? _ride!['pickup']['lat'];
                       final lng = _driverPos?.longitude ?? _ride!['pickup']['lng'];
                       final message = "🚨 SOS EMERGENCY ALERT! 🚨\n"
-                          "I am in an emergency during my Mana Yatra ride.\n\n"
+                          "I am in an emergency during my Gaman ride.\n\n"
                           "📍 My Live Location: https://maps.google.com/?q=$lat,$lng\n\n"
                           "🚗 Ride Details:\n"
                           "- Driver: ${_ride!['driverName']}\n"

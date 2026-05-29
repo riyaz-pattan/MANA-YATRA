@@ -122,7 +122,7 @@ class ManaYatraRiderApp extends StatelessWidget {
       child: MaterialApp(
         scaffoldMessengerKey: rootScaffoldMessengerKey,
         navigatorKey: navigatorKey,
-        title: 'Mana Yatra - Rider',
+        title: 'Gaman - Rider',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
         home: UpgradeAlert(

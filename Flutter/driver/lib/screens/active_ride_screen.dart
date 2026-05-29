@@ -38,6 +38,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
   bool _updating = false;
   bool _cameraFitted = false;
   BitmapDescriptor? _riderPinIcon;
+  BitmapDescriptor? _riderLabelIcon;
   BitmapDescriptor? _vehicleIcon;
   BitmapDescriptor? _dropDot;
   List<LatLng> _approachRouteCoords = [];
@@ -178,8 +179,9 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
 
   Future<void> _loadCustomIcons() async {
     try {
-      // Use combined pin and label marker so driver can visually identify where rider is standing
-      _riderPinIcon = await MapUtils.createRiderLocationMarker();
+      const config = ImageConfiguration(size: Size(48, 48));
+      _riderPinIcon = await BitmapDescriptor.asset(config, 'assets/images/map_icons/person.png');
+      _riderLabelIcon = await MapUtils.createLabelMarker('Rider is here');
       _dropDot = await MapUtils.createDotMarker(color: const Color(0xFFEA4335));
       if (mounted) setState(() {});
     } catch (_) {}
@@ -188,7 +190,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
   Future<void> _loadVehicleIcon(String type) async {
     final path = 'assets/images/map_icons/$type.png';
     try {
-      _vehicleIcon = await MapUtils.getBytesFromAsset(path, 80);
+      const config = ImageConfiguration(size: Size(48, 48));
+      _vehicleIcon = await BitmapDescriptor.asset(config, path);
       if (mounted) setState(() {});
     } catch (_) {}
   }
@@ -390,7 +393,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     }
   }
 
-  void _showCompleteConfirmation() {
+  Future<void> _showCompleteConfirmation() async {
     final paymentMethod = _ride!['paymentMethod'] as String? ?? 'Cash';
     final isUpi = paymentMethod.toUpperCase() == 'UPI';
     final finalPrice = _ride!['finalPrice'] ?? _ride!['riderBid'] ?? 0;
@@ -402,7 +405,19 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     // NPCI standard UPI intent link
     final upiLink = 'upi://pay?pa=$upiId&pn=${Uri.encodeComponent(driverName)}&am=$finalPrice&cu=INR';
 
-    showModalBottomSheet(
+    setState(() => _updating = true);
+    try {
+      await FirebaseFirestore.instance.collection('rides').doc(_ride!['id']).update({
+        'status': 'payment_pending',
+      });
+    } catch (e) {
+      debugPrint('Error updating to payment_pending: $e');
+    }
+    if (mounted) setState(() => _updating = false);
+
+    if (!mounted) return;
+
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
@@ -803,7 +818,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'Ashwa takes ZERO commission. Every rupee goes to you!',
+                              'Gaman takes ZERO commission. Every rupee goes to you!',
                               style: GoogleFonts.inter(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
@@ -1018,6 +1033,17 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                   icon: _riderPinIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
                   anchor: const Offset(0.5, 0.5),
                   zIndexInt: 1,
+                ),
+              if (_ride!['pickup'] != null && _riderLabelIcon != null && status == 'matched')
+                Marker(
+                  markerId: const MarkerId('pickup_label'),
+                  position: LatLng(
+                    (_ride!['pickup']['lat'] as num).toDouble(),
+                    (_ride!['pickup']['lng'] as num).toDouble(),
+                  ),
+                  icon: _riderLabelIcon!,
+                  anchor: const Offset(0.5, 1.6), // Increased anchor to push label higher up
+                  zIndexInt: 2,
                 ),
               if (_ride!['drop'] != null && status == 'started')
                 Marker(

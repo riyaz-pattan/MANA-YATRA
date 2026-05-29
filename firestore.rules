@@ -120,10 +120,13 @@ service cloud.firestore {
         && request.resource.data.pickup.lng is number
         && request.resource.data.drop.lat is number
         && request.resource.data.drop.lng is number;
-      // Existing: rider or driver can update (except status)
+      // Existing: rider or driver can update (driver can toggle payment_pending)
       allow update: if (request.auth.uid == resource.data.riderId ||
                         request.auth.uid == resource.data.driverId)
-                    && request.resource.data.status == resource.data.status;
+                    && (request.resource.data.status == resource.data.status || 
+                       (request.auth.uid == resource.data.driverId && 
+                        (resource.data.status == 'started' || resource.data.status == 'payment_pending') &&
+                        (request.resource.data.status == 'payment_pending' || request.resource.data.status == 'started')));
     }
 
     // ============================================================

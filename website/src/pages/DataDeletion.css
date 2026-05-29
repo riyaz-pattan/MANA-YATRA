@@ -1,0 +1,142 @@
+/* ===== Data Deletion Page ===== */
+.data-deletion-page {
+  padding-top: calc(var(--navbar-height) + var(--space-3xl));
+  min-height: 100vh;
+}
+
+.data-deletion-hero {
+  text-align: center;
+  margin-bottom: var(--space-4xl);
+}
+
+.data-deletion-hero .section-subtitle {
+  margin: var(--space-md) auto 0;
+}
+
+.data-deletion-content {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.deletion-steps-list {
+  margin-bottom: var(--space-3xl);
+}
+
+.deletion-step {
+  display: flex;
+  gap: var(--space-lg);
+  padding: var(--space-xl) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.deletion-step:first-child {
+  padding-top: 0;
+}
+
+.deletion-step:last-child {
+  border-bottom: none;
+}
+
+.deletion-step-num {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border-radius: 50%;
+  background: var(--color-accent-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: var(--font-size-base);
+  color: #fff;
+}
+
+.deletion-step-content h3 {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  margin-bottom: var(--space-xs);
+}
+
+.deletion-step-content p {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.8;
+}
+
+/* Info boxes */
+.deletion-info-box {
+  padding: var(--space-xl);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-xl);
+}
+
+.deletion-info-box.warning {
+  background: rgba(255, 179, 71, 0.08);
+  border: 1px solid rgba(255, 179, 71, 0.2);
+}
+
+.deletion-info-box.info {
+  background: rgba(108, 99, 255, 0.08);
+  border: 1px solid rgba(108, 99, 255, 0.2);
+}
+
+.deletion-info-box h4 {
+  font-size: var(--font-size-base);
+  font-weight: 700;
+  margin-bottom: var(--space-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.deletion-info-box p {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.8;
+}
+
+.deletion-info-box ul {
+  margin-top: var(--space-sm);
+  padding-left: var(--space-lg);
+}
+
+.deletion-info-box ul li {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 2;
+  list-style: disc;
+}
+
+/* Alternative method */
+.deletion-alternative {
+  padding: var(--space-2xl);
+  margin-top: var(--space-xl);
+}
+
+.deletion-alternative h3 {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  margin-bottom: var(--space-md);
+}
+
+.deletion-alternative p {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.8;
+}
+
+.deletion-alternative a {
+  color: var(--color-accent-primary);
+  font-weight: 600;
+}
+
+.deletion-alternative a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+  .deletion-step {
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+}

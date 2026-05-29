@@ -32,7 +32,7 @@ class AboutScreen extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             Text(
-              'Mana Yatra',
+              'Gaman',
               style: GoogleFonts.inter(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
@@ -49,7 +49,7 @@ class AboutScreen extends StatelessWidget {
             ),
             const SizedBox(height: 32),
             Text(
-              'Mana Yatra is your reliable partner for daily commutes. '
+              'Gaman is your reliable partner for daily commutes. '
               'We are committed to providing safe, affordable, and comfortable rides.',
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
@@ -59,7 +59,7 @@ class AboutScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 48),
-            _buildInfoRow('Developed By', 'Mana Yatra Team'),
+            _buildInfoRow('Developed By', 'Gaman Team'),
             const Divider(height: 32),
             _buildInfoRow('Contact', 'support@manayatra.com'),
           ],

@@ -113,7 +113,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen>
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'Welcome to Mana Yatra',
+                      'Welcome to Gaman',
                       style: GoogleFonts.inter(
                         fontSize: 28,
                         fontWeight: FontWeight.w800,

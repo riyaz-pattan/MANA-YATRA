@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:Ashwa/services/sync_engine.dart';
-import 'package:Ashwa/services/action_queue_service.dart';
-import 'package:Ashwa/models/queue_item.dart';
+import 'package:gaman/services/sync_engine.dart';
+import 'package:gaman/services/action_queue_service.dart';
+import 'package:gaman/models/queue_item.dart';
 
 class MockActionQueueService extends Mock implements ActionQueueService {}
 

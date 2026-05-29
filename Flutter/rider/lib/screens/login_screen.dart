@@ -182,7 +182,7 @@ class _LoginScreenState extends State<LoginScreen>
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'Mana Yatra',
+                      'Gaman',
                       style: GoogleFonts.inter(
                         fontSize: 32,
                         fontWeight: FontWeight.w800,

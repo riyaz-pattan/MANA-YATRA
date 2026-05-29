@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:ashwa_saarathi/repositories/ride_repository.dart';
-import 'package:ashwa_saarathi/services/sync_engine.dart';
-import 'package:ashwa_saarathi/models/queue_item.dart';
+import 'package:gaman_driver/repositories/ride_repository.dart';
+import 'package:gaman_driver/services/sync_engine.dart';
+import 'package:gaman_driver/models/queue_item.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MockSyncEngine extends Mock implements SyncEngine {}

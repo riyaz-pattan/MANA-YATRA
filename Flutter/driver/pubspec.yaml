@@ -1,7 +1,7 @@
-name: ashwa_saarathi
-description: "Ashwa Saarathi App - Earn fairly, drive freely"
+name: gaman_driver
+description: "Gaman Driver App - Earn fairly, drive freely"
 publish_to: 'none'
-version: 1.0.0+1
+version: 0.0.0+2
 
 environment:
   sdk: ^3.9.2
@@ -85,3 +85,4 @@ flutter:
     - .env
     - assets/images/map_icons/auto.png
     - assets/images/map_icons/bike.png
+    - assets/images/map_icons/person.png

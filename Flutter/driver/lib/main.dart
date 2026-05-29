@@ -20,6 +20,7 @@ import 'screens/account_deletion_pending_screen.dart';
 
 import 'screens/dashboard_screen.dart';
 import 'screens/active_ride_screen.dart';
+import 'screens/subscription_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'utils/custom_toast.dart';
@@ -122,6 +123,17 @@ void _initFCM() {
       }
     }
   });
+
+  // Handle clicks on notifications when app is in background
+  FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+    final type = message.data['type'];
+    if (type == 'subscription_alert') {
+      final ctx = navigatorKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        Navigator.push(ctx, MaterialPageRoute(builder: (_) => const SubscriptionScreen()));
+      }
+    }
+  });
 }
 
 class ManaYatraDriverApp extends StatelessWidget {
@@ -140,7 +152,7 @@ class ManaYatraDriverApp extends StatelessWidget {
       child: MaterialApp(
         scaffoldMessengerKey: rootScaffoldMessengerKey,
         navigatorKey: navigatorKey,
-        title: 'Mana Yatra - Driver',
+        title: 'Gaman - Driver',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
         home: UpgradeAlert(
