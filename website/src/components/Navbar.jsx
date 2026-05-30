@@ -8,14 +8,20 @@ export default function Navbar() {
   const location = useLocation();
 
   useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 40);
+    const handleScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
   useEffect(() => {
     setMobileOpen(false);
+    document.body.style.overflow = '';
   }, [location]);
+
+  const toggleMobile = () => {
+    setMobileOpen(!mobileOpen);
+    document.body.style.overflow = !mobileOpen ? 'hidden' : '';
+  };
 
   const isActive = (path) => location.pathname === path ? 'active' : '';
 
@@ -25,30 +31,35 @@ export default function Navbar() {
         <div className="navbar-inner">
           <Link to="/" className="navbar-logo">
             <div className="logo-icon">G</div>
-            <span>Gaman</span>
+            <span className="logo-text">Gaman</span>
           </Link>
 
           <div className="navbar-links">
-            <Link to="/" className={isActive('/')}>Home</Link>
             <a href="/#how-it-works">How It Works</a>
-            <a href="/#faq">FAQ</a>
-            <Link to="/support" className={isActive('/support')}>Support</Link>
+            <Link to="/for-drivers" className={isActive('/for-drivers')}>For Drivers</Link>
+            <Link to="/for-riders" className={isActive('/for-riders')}>For Riders</Link>
+            <Link to="/pricing" className={isActive('/pricing')}>Pricing</Link>
           </div>
 
-          <div className="navbar-cta">
-            <a
-              href="https://play.google.com/store"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-primary"
-            >
-              Download App
-            </a>
+          <div className="navbar-right">
+            <span className="lang-toggle">
+              <span className="lang-active">EN</span> | తె
+            </span>
+            <div className="navbar-cta">
+              <a
+                href="https://play.google.com/store"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-primary"
+              >
+                Download App
+              </a>
+            </div>
           </div>
 
           <div
             className={`navbar-mobile-toggle ${mobileOpen ? 'open' : ''}`}
-            onClick={() => setMobileOpen(!mobileOpen)}
+            onClick={toggleMobile}
             aria-label="Toggle menu"
           >
             <span />
@@ -59,20 +70,23 @@ export default function Navbar() {
       </nav>
 
       <div className={`navbar-mobile-menu ${mobileOpen ? 'open' : ''}`}>
-        <Link to="/" className={isActive('/')}>Home</Link>
-        <a href="/#how-it-works" onClick={() => setMobileOpen(false)}>How It Works</a>
-        <a href="/#faq" onClick={() => setMobileOpen(false)}>FAQ</a>
-        <Link to="/support" className={isActive('/support')}>Support</Link>
-        <Link to="/data-deletion">Data Deletion</Link>
-        <a
-          href="https://play.google.com/store"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="btn btn-primary"
-          style={{ marginTop: '1rem', textAlign: 'center' }}
-        >
-          Download App
-        </a>
+        <Link to="/">Home</Link>
+        <a href="/#how-it-works" onClick={() => { setMobileOpen(false); document.body.style.overflow = ''; }}>How It Works</a>
+        <Link to="/for-drivers">For Drivers</Link>
+        <Link to="/for-riders">For Riders</Link>
+        <Link to="/pricing">Pricing</Link>
+        <Link to="/about">About</Link>
+        <Link to="/support">Support</Link>
+        <div className="mobile-cta">
+          <a
+            href="https://play.google.com/store"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-primary"
+          >
+            Download App
+          </a>
+        </div>
       </div>
     </>
   );

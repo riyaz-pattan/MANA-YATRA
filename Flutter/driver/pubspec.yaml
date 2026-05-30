@@ -1,7 +1,7 @@
 name: gaman_driver
 description: "Gaman Driver App - Earn fairly, drive freely"
 publish_to: 'none'
-version: 0.0.0+2
+version: 0.0.0+3
 
 environment:
   sdk: ^3.9.2
@@ -49,6 +49,9 @@ dependencies:
   upgrader: ^13.3.0
   smart_auth: ^3.2.0
   qr_flutter: ^4.1.0
+  share_plus: ^10.1.4
+  app_links: ^6.3.3
+  fl_chart: ^0.70.2
 
 dev_dependencies:
   integration_test:

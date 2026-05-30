@@ -1,0 +1,274 @@
+/* ===== HowItWorks Page ===== */
+
+.how-it-works-page {
+  padding-top: var(--navbar-height);
+}
+
+/* --- Shared Utilities --- */
+.hiw-gradient-text {
+  background: linear-gradient(135deg, var(--accent), #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hiw-section-title {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.hiw-section-subtitle {
+  text-align: center;
+  max-width: 620px;
+  margin: 0 auto 56px;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+.hiw-title-dark {
+  color: var(--dark);
+}
+
+.hiw-subtitle-dark {
+  color: var(--muted);
+}
+
+.hiw-title-white {
+  color: var(--white);
+}
+
+.hiw-subtitle-white {
+  color: var(--text-grey);
+}
+
+/* --- Hero Section (bg: #000) --- */
+.hiw-hero {
+  background: var(--black);
+  text-align: center;
+  padding-top: 100px;
+  padding-bottom: 100px;
+}
+
+.hiw-hero .badge-purple {
+  margin-bottom: 24px;
+}
+
+.hiw-hero h1 {
+  color: var(--white);
+  margin-bottom: 24px;
+  font-size: 72px;
+  letter-spacing: -0.03em;
+}
+
+.hiw-hero-sub {
+  color: var(--text-grey);
+  font-size: 18px;
+  line-height: 1.7;
+  max-width: 600px;
+  margin: 0 auto 48px;
+}
+
+.hiw-hero-highlights {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+
+.hiw-highlight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--white);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.hiw-highlight-icon {
+  font-size: 20px;
+}
+
+/* --- Rider Flow Section (bg: #F3F4F6) --- */
+.hiw-rider-flow {
+  background: var(--light-grey);
+  text-align: center;
+}
+
+.hiw-rider-flow .badge-purple {
+  margin-bottom: 20px;
+}
+
+.hiw-rider-flow .hiw-section-title {
+  color: var(--dark);
+}
+
+.hiw-rider-flow .hiw-section-subtitle {
+  color: var(--muted);
+}
+
+.hiw-flow-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  text-align: left;
+}
+
+.hiw-flow-card {
+  background: var(--white);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 28px 22px;
+  position: relative;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hiw-flow-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 28px rgba(108, 99, 255, 0.08);
+}
+
+.hiw-flow-card-white {
+  background: var(--light-grey);
+  border-color: var(--border-light);
+}
+
+.hiw-flow-card-white:hover {
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.06);
+}
+
+.hiw-flow-number {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--white);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hiw-flow-number-green {
+  background: var(--success);
+}
+
+.hiw-flow-icon {
+  font-size: 28px;
+  margin-bottom: 12px;
+}
+
+.hiw-flow-card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--dark);
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+
+.hiw-flow-card p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* --- Driver Flow Section (bg: #FFF) --- */
+.hiw-driver-flow {
+  background: var(--white);
+  text-align: center;
+}
+
+.hiw-driver-flow .badge-green {
+  margin-bottom: 20px;
+}
+
+/* --- Comparison Section (bg: #000) --- */
+.hiw-comparison {
+  background: var(--black);
+}
+
+/* --- CTA Section (bg: #6C63FF) --- */
+.hiw-cta {
+  background: var(--accent);
+  text-align: center;
+}
+
+.hiw-cta h2 {
+  color: var(--white);
+  margin-bottom: 16px;
+}
+
+.hiw-cta p {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 18px;
+  max-width: 520px;
+  margin: 0 auto 32px;
+  line-height: 1.7;
+}
+
+.hiw-cta-buttons {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .hiw-hero {
+    padding-top: 80px;
+    padding-bottom: 72px;
+  }
+
+  .hiw-hero h1 {
+    font-size: 40px;
+  }
+
+  .hiw-hero-sub {
+    font-size: 16px;
+  }
+
+  .hiw-flow-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+
+  .hiw-hero-highlights {
+    gap: 20px;
+  }
+
+  .hiw-section-subtitle {
+    font-size: 15px;
+    margin-bottom: 40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .hiw-hero h1 {
+    font-size: 36px;
+  }
+
+  .hiw-flow-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hiw-flow-card {
+    padding: 24px 20px;
+  }
+
+  .hiw-hero-highlights {
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .hiw-cta-buttons {
+    flex-direction: column;
+    align-items: center;
+  }
+}

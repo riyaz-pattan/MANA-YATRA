@@ -146,7 +146,16 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
     }
     _debounce = Timer(const Duration(milliseconds: 1000), () async {
       setState(() => _searching = true);
-      final results = await GoogleMapsService.getPlacePredictions(query);
+      
+      final provider = context.read<RideProvider>();
+      final searchLat = provider.pickup?.lat ?? widget.currentPosition.latitude;
+      final searchLng = provider.pickup?.lng ?? widget.currentPosition.longitude;
+
+      final results = await GoogleMapsService.getPlacePredictions(
+        query,
+        lat: searchLat,
+        lng: searchLng,
+      );
       if (mounted) {
         setState(() {
           _searchResults = results;
@@ -591,17 +600,29 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
               const Divider(height: 1, indent: 68, color: AppTheme.border),
             ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
-              leading: Container(
-                width: 40, height: 40,
-                decoration: BoxDecoration(
-                  color: AppTheme.bg2,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.location_on_rounded,
-                  size: 20,
-                  color: AppTheme.text2,
-                ),
+              leading: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.location_on_rounded,
+                    size: 22,
+                    color: AppTheme.text2,
+                  ),
+                  if (r.distanceMeters != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      r.distanceMeters! >= 1000
+                          ? '${(r.distanceMeters! / 1000).toStringAsFixed(0)} km'
+                          : '${(r.distanceMeters! / 1000).toStringAsFixed(1)} km',
+                      style: GoogleFonts.inter(
+                        fontSize: 10,
+                        color: AppTheme.text3,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ],
               ),
               title: Text(
                 r.primaryText,

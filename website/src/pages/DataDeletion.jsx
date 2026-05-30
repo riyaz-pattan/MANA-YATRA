@@ -23,87 +23,92 @@ const deletionSteps = [
   },
 ];
 
+const deletedData = [
+  'Personal profile information (name, email, phone number)',
+  'Ride history and trip details',
+  'Payment and transaction records',
+  'Saved locations and preferences',
+  'KYC documents (Aadhaar, Driving License, Profile Photo) — for driver accounts',
+  'All associated Firebase Authentication credentials',
+];
+
 export default function DataDeletion() {
   return (
     <div className="data-deletion-page">
-      <div className="container section">
-        {/* Hero */}
-        <div className="data-deletion-hero">
-          <h1 className="section-title">
-            Data <span className="gradient-text">Deletion</span>
-          </h1>
-          <p className="section-subtitle">
-            We respect your privacy. Here's how you can delete your account and
-            all associated data from Gaman.
+      {/* Hero Section */}
+      <section className="deletion-hero">
+        <div className="container">
+          <span className="badge-purple">🔒 Your Privacy Matters</span>
+          <h1>Data Deletion</h1>
+          <p className="deletion-hero-subtitle">
+            We respect your privacy. Here's how you can delete your account and all associated data from Gaman.
           </p>
         </div>
+      </section>
 
-        <div className="data-deletion-content">
-          {/* Warning */}
-          <div className="deletion-info-box warning">
-            <h4>⚠️ Important</h4>
-            <p>
-              Account deletion is permanent and cannot be undone. Please make
-              sure you have no pending rides or outstanding payments before
-              proceeding. Once deleted, all your data will be permanently
-              removed within 30 days.
-            </p>
-          </div>
-
-          {/* Steps */}
-          <h2
-            className="section-title"
-            style={{ fontSize: 'var(--font-size-2xl)', marginBottom: 'var(--space-xl)' }}
-          >
-            How to Delete Your Account
-          </h2>
-
-          <div className="deletion-steps-list">
-            {deletionSteps.map((step, i) => (
-              <div className="deletion-step" key={i}>
-                <div className="deletion-step-num">{i + 1}</div>
-                <div className="deletion-step-content">
-                  <h3>{step.title}</h3>
-                  <p>{step.desc}</p>
-                </div>
+      {/* Content Section */}
+      <section className="section deletion-content-section">
+        <div className="container">
+          <div className="deletion-content">
+            {/* Warning Box */}
+            <div className="deletion-warning-box">
+              <div className="deletion-warning-icon">⚠️</div>
+              <div>
+                <h4>Important — This Action is Permanent</h4>
+                <p>
+                  Account deletion cannot be undone. Please make sure you have no pending rides or outstanding payments before proceeding. Once deleted, all your data will be permanently removed from our servers within 30 days.
+                </p>
               </div>
-            ))}
-          </div>
+            </div>
 
-          {/* Data info */}
-          <div className="deletion-info-box info">
-            <h4>📋 What Data Gets Deleted</h4>
-            <p>
-              When you delete your account, the following data is permanently
-              removed from our servers:
-            </p>
-            <ul>
-              <li>Personal profile information (name, email, phone number)</li>
-              <li>Ride history and trip details</li>
-              <li>Payment and transaction records</li>
-              <li>Saved locations and preferences</li>
-              <li>
-                KYC documents (Aadhaar, Driving License, Profile Photo) — for
-                driver accounts
-              </li>
-              <li>All associated Firebase Authentication credentials</li>
-            </ul>
-          </div>
+            {/* Steps */}
+            <div className="deletion-steps-block">
+              <h2>How to Delete Your Account</h2>
+              <div className="deletion-steps-list">
+                {deletionSteps.map((step, i) => (
+                  <div className="deletion-step" key={i}>
+                    <div className="deletion-step-num">{i + 1}</div>
+                    <div className="deletion-step-content">
+                      <h3>{step.title}</h3>
+                      <p>{step.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-          {/* Alternative */}
-          <div className="glass-card deletion-alternative">
-            <h3>Can't Access the App?</h3>
-            <p>
-              If you are unable to access the app or your account, you can
-              request account deletion by emailing us at{' '}
-              <a href="mailto:support@manayatra.com">support@manayatra.com</a>{' '}
-              with the subject line "Account Deletion Request". Please include
-              your registered phone number and name for verification. We will
-              process your request within 7 business days.
-            </p>
+            {/* Data Inventory */}
+            <div className="deletion-data-block">
+              <h2>What Data Gets Deleted</h2>
+              <p className="deletion-data-intro">
+                When you delete your account, the following data is permanently removed from our servers:
+              </p>
+              <ul className="deletion-data-list">
+                {deletedData.map((item, i) => (
+                  <li key={i}>
+                    <span className="deletion-check">✕</span>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Alternative Contact */}
+            <div className="deletion-alternative card-light">
+              <div className="deletion-alt-icon">📧</div>
+              <h3>Can't Access the App?</h3>
+              <p>
+                If you are unable to access the app or your account, you can request account deletion by emailing us at{' '}
+                <a href="mailto:support@manayatra.com">support@manayatra.com</a>{' '}
+                with the subject line "Account Deletion Request". Please include your registered phone number and name for verification.
+              </p>
+              <p className="deletion-alt-timeline">
+                We will process your request within <strong>7 business days</strong>.
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

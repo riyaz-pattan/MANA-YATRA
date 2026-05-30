@@ -45,6 +45,8 @@ dependencies:
   upgrader: ^13.3.0
   smart_auth: ^3.2.0
   dart_geohash: ^2.1.0
+  pdf: ^3.12.0
+  printing: ^5.14.3
 
 dev_dependencies:
   integration_test:
@@ -61,17 +63,22 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/images/logo/ashvo_logo.png"
+  image_path: "assets/images/logo/gaman_logo.png"
+  adaptive_icon_foreground: "assets/images/logo/foreground.png"
+  adaptive_icon_background: "assets/images/logo/background.png"
 
 flutter_native_splash:
-  color: "#000000"
-  image: "assets/images/logo/ashvo_splash.png"
   android: true
   ios: true
+
+  color: "#FFcc00"
+  image: "assets/images/logo/splashscreen.png"
+  
   fullscreen: true
   android_12:
-    image: "assets/images/logo/ashvo_splash.png"
-    color: "#000000"
+    color: "#FFcc00"
+    image: "assets/images/logo/android12splash.png"
+    
 
 flutter:
   uses-material-design: true

@@ -26,6 +26,7 @@ class _LoginScreenState extends State<LoginScreen>
   late Animation<double> _fadeAnim;
   late final _smsRetriever = _SmsRetrieverImpl(SmartAuth.instance);
 
+
   @override
   void initState() {
     super.initState();
@@ -49,6 +50,7 @@ class _LoginScreenState extends State<LoginScreen>
       await prefs.remove('kicked_out');
     }
   }
+
 
   @override
   void dispose() {
@@ -118,6 +120,7 @@ class _LoginScreenState extends State<LoginScreen>
         verificationId: _verificationId!,
         smsCode: _otpController.text,
       );
+
       await FirebaseAuth.instance.signInWithCredential(cred);
     } catch (e) {
       if (!mounted) return;
@@ -263,7 +266,7 @@ class _LoginScreenState extends State<LoginScreen>
                               ),
                               onSubmitted: (_) => _sendOtp(),
                             ),
-                            const SizedBox(height: 16),
+                            const SizedBox(height: 24),
                             _btn(
                               'Send OTP →',
                               _sendOtp,
@@ -389,6 +392,8 @@ class _LoginScreenState extends State<LoginScreen>
                         ],
                       ),
                     ),
+
+                    // (Referral field moved inside the card)
                   ],
                 ),
               ),

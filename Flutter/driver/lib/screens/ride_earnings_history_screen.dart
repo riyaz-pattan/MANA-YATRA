@@ -3,12 +3,18 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../config/theme.dart';
 import '../utils/skeleton.dart';
 
-class RideEarningsHistoryScreen extends StatelessWidget {
+class RideEarningsHistoryScreen extends StatefulWidget {
   const RideEarningsHistoryScreen({super.key});
 
+  @override
+  State<RideEarningsHistoryScreen> createState() => _RideEarningsHistoryScreenState();
+}
+
+class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -88,31 +94,141 @@ class RideEarningsHistoryScreen extends StatelessWidget {
   }
 
   Widget _buildEarningsSummary(double total, int rides) {
+    final double commissionSaved = total * 0.25; // Approximate 25% zero commission savings
+    final double dailyGoal = 2000.0;
+    final double progress = (total / dailyGoal).clamp(0.0, 1.0);
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: const BoxDecoration(
-        color: AppTheme.surface,
-        border: Border(bottom: BorderSide(color: AppTheme.border)),
-      ),
+      color: AppTheme.surface,
       child: Column(
         children: [
-          Text(
-            'Total Earnings',
-            style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2),
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Total Earnings', style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2)),
+                    const SizedBox(height: 4),
+                    Text('₹${total.toStringAsFixed(0)}', style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: AppTheme.success)),
+                    const SizedBox(height: 4),
+                    Text('$rides Rides Completed', style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2)),
+                  ],
+                ),
+                SizedBox(
+                  width: 80,
+                  height: 80,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CircularProgressIndicator(
+                        value: progress,
+                        strokeWidth: 8,
+                        backgroundColor: AppTheme.border,
+                        color: AppTheme.primary,
+                      ),
+                      Center(
+                        child: Text(
+                          '${(progress * 100).toInt()}%',
+                          style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.text),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            '₹${total.toStringAsFixed(0)}',
-            style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: AppTheme.success),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [AppTheme.success.withValues(alpha: 0.1), AppTheme.success.withValues(alpha: 0.05)]),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppTheme.success.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.savings_outlined, color: AppTheme.success, size: 28),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Zero Commission Savings', style: GoogleFonts.inter(fontSize: 13, color: AppTheme.success, fontWeight: FontWeight.w600)),
+                      Text('You saved ~₹${commissionSaved.toStringAsFixed(0)} on commissions!', style: GoogleFonts.inter(fontSize: 12, color: AppTheme.text2)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            '$rides Rides Completed',
-            style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2),
-          ),
+          const SizedBox(height: 16),
+          _buildChart(total),
+          const Divider(color: AppTheme.border, height: 1),
         ],
       ),
+    );
+  }
+
+  Widget _buildChart(double total) {
+    // A placeholder static chart representing the week's earnings
+    return Container(
+      height: 150,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      child: BarChart(
+        BarChartData(
+          alignment: BarChartAlignment.spaceAround,
+          maxY: (total > 2000 ? total : 2000) * 1.2,
+          barTouchData: BarTouchData(enabled: false),
+          titlesData: FlTitlesData(
+            show: true,
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (value, meta) {
+                  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                  if (value.toInt() >= 0 && value.toInt() < 7) {
+                    return Text(days[value.toInt()], style: GoogleFonts.inter(fontSize: 10, color: AppTheme.text3));
+                  }
+                  return const Text('');
+                },
+              ),
+            ),
+            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          ),
+          gridData: const FlGridData(show: false),
+          borderData: FlBorderData(show: false),
+          barGroups: [
+            _makeBar(0, total * 0.1),
+            _makeBar(1, total * 0.15),
+            _makeBar(2, total * 0.05),
+            _makeBar(3, total * 0.3),
+            _makeBar(4, total * 0.2),
+            _makeBar(5, total * 0.1),
+            _makeBar(6, total * 0.1, isToday: true),
+          ],
+        ),
+      ),
+    );
+  }
+
+  BarChartGroupData _makeBar(int x, double y, {bool isToday = false}) {
+    return BarChartGroupData(
+      x: x,
+      barRods: [
+        BarChartRodData(
+          toY: y,
+          color: isToday ? AppTheme.primary : AppTheme.border,
+          width: 16,
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ],
     );
   }
 

@@ -3,8 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:provider/provider.dart';
+import '../utils/pdf_generator.dart';
 import '../config/theme.dart';
 import '../utils/skeleton.dart';
+import '../providers/ride_provider.dart';
+import '../services/google_maps_service.dart';
+import 'main_screen.dart';
 
 class RideHistoryScreen extends StatefulWidget {
   const RideHistoryScreen({super.key});
@@ -191,6 +197,11 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
     final bool isCancelled = status == 'cancelled' || status == 'declined';
     final Color statusColor = isCancelled ? AppTheme.danger : AppTheme.success;
 
+    final pLat = (ride['pickup']?['lat'] as num?)?.toDouble() ?? 0.0;
+    final pLng = (ride['pickup']?['lng'] as num?)?.toDouble() ?? 0.0;
+    final dLat = (ride['drop']?['lat'] as num?)?.toDouble() ?? 0.0;
+    final dLng = (ride['drop']?['lng'] as num?)?.toDouble() ?? 0.0;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -264,6 +275,126 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
           _buildLocationRow(Icons.my_location, AppTheme.primary, pickup.toString()),
           const SizedBox(height: 16),
           _buildLocationRow(Icons.location_on, AppTheme.danger, dropoff.toString()),
+          const SizedBox(height: 16),
+          if (ride['pickup'] != null && ride['drop'] != null && pLat != 0.0 && dLat != 0.0)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                height: 120,
+                width: double.infinity,
+                child: IgnorePointer(
+                  child: GoogleMap(
+                    initialCameraPosition: CameraPosition(
+                      target: LatLng(
+                        (pLat + dLat) / 2,
+                        (pLng + dLng) / 2,
+                      ),
+                      zoom: 12,
+                    ),
+                    liteModeEnabled: true,
+                    zoomControlsEnabled: false,
+                    myLocationButtonEnabled: false,
+                    mapToolbarEnabled: false,
+                    markers: {
+                      Marker(markerId: const MarkerId('pickup'), position: LatLng(pLat, pLng)),
+                      Marker(markerId: const MarkerId('drop'), position: LatLng(dLat, dLng)),
+                    },
+                    polylines: {
+                      Polyline(
+                        polylineId: const PolylineId('route'),
+                        points: [LatLng(pLat, pLng), LatLng(dLat, dLng)],
+                        color: AppTheme.primary,
+                        width: 4,
+                      ),
+                    },
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 16),
+          const Divider(color: AppTheme.border, height: 1),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.start,
+            children: [
+              _buildActionButton(Icons.refresh, 'Ride Again', () => _rideAgain(ride)),
+              if (!isCancelled) _buildActionButton(Icons.receipt_long, 'Receipt', () => PdfGenerator.generateAndPrintReceipt(ride)),
+              _buildActionButton(Icons.support_agent, 'Support', () => _reportIssue(ride)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton(IconData icon, String label, VoidCallback onTap) {
+    return ActionChip(
+      backgroundColor: AppTheme.bg2,
+      side: const BorderSide(color: AppTheme.border),
+      avatar: Icon(icon, size: 16, color: AppTheme.text2),
+      label: Text(label, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.text2)),
+      onPressed: onTap,
+    );
+  }
+
+  void _rideAgain(Map<String, dynamic> ride) {
+    if (ride['pickup'] == null || ride['drop'] == null) return;
+    
+    final provider = context.read<RideProvider>();
+    final pLat = (ride['pickup']['lat'] as num).toDouble();
+    final pLng = (ride['pickup']['lng'] as num).toDouble();
+    final dLat = (ride['drop']['lat'] as num).toDouble();
+    final dLng = (ride['drop']['lng'] as num).toDouble();
+    final pName = ride['pickup']['display_name'] ?? ride['pickup']['short_name'] ?? '';
+    final dName = ride['drop']['display_name'] ?? ride['drop']['short_name'] ?? '';
+    
+    provider.setPickup(LocationResult(
+      lat: pLat, 
+      lng: pLng, 
+      displayName: pName,
+      shortName: pName,
+      placeId: ride['pickup']['place_id'] ?? 'unknown',
+    ));
+    provider.setDrop(LocationResult(
+      lat: dLat, 
+      lng: dLng, 
+      displayName: dName,
+      shortName: dName,
+      placeId: ride['drop']['place_id'] ?? 'unknown',
+    ));
+    
+    // Switch to Home tab
+    mainScreenKey.currentState?.switchTab(0);
+    
+    // If we're pushed on top (e.g., from ProfileScreen), pop until we see MainScreen
+    if (Navigator.canPop(context)) {
+      Navigator.popUntil(context, (route) => route.isFirst);
+    }
+  }
+
+  void _reportIssue(Map<String, dynamic> ride) {
+    final rideId = ride['id'] ?? 'Unknown';
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: Text('Report an Issue', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+        content: Text('Do you need help with ride $rideId?', style: GoogleFonts.inter(color: AppTheme.text2)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: GoogleFonts.inter(color: AppTheme.text3)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              // Open support modal/screen
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
+            child: Text('Contact Support', style: GoogleFonts.inter(color: Colors.black)),
+          ),
         ],
       ),
     );

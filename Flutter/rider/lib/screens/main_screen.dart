@@ -8,21 +8,27 @@ import 'package:provider/provider.dart';
 import '../services/sync_engine.dart';
 import '../widgets/premium_retry_button.dart';
 
+final GlobalKey<MainScreenState> mainScreenKey = GlobalKey<MainScreenState>();
+
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
 
   @override
-  State<MainScreen> createState() => _MainScreenState();
+  State<MainScreen> createState() => MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   bool _isBooking = false;
 
-  void _onTabTapped(int index) {
+  void switchTab(int index) {
     setState(() {
       _currentIndex = index;
     });
+  }
+
+  void _onTabTapped(int index) {
+    switchTab(index);
   }
 
   void _handleBookingState(bool isBooking) {

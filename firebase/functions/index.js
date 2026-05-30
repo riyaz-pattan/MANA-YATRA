@@ -663,6 +663,239 @@ exports.startFreeTrial = functions.https.onCall(async (data, context) => {
   }
 });
 
+// ============================================================
+// REFERRAL PROGRAM
+// ============================================================
+
+/**
+ * generateReferralCode
+ *
+ * Generates a unique referral code (G-XXXXXX) for the authenticated driver.
+ * If the driver already has a referral code, returns it.
+ * Stores the code in the `referral_codes` collection for lookup.
+ */
+exports.generateReferralCode = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "You must be logged in."
+    );
+  }
+
+  const uid = context.auth.uid;
+  const db = admin.firestore();
+
+  // Rate Limiting: 5 calls/min
+  await checkRateLimit(db, uid, "generateReferralCode", 5, 60000);
+
+  try {
+    // Check if driver already has a referral code
+    const driverRef = db.collection("drivers").doc(uid);
+    const driverSnap = await driverRef.get();
+
+    if (!driverSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "Driver not found.");
+    }
+
+    const driverData = driverSnap.data();
+    if (driverData.referralCode) {
+      return { success: true, code: driverData.referralCode };
+    }
+
+    // Generate unique code: G-XXXXXX (6 uppercase alphanumeric chars)
+    const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let code;
+    let collision = true;
+    let attempts = 0;
+
+    while (collision && attempts < 10) {
+      const bytes = crypto.randomBytes(6);
+      let generated = "G-";
+      for (let i = 0; i < 6; i++) {
+        generated += CHARS[bytes[i] % CHARS.length];
+      }
+      code = generated;
+
+      // Check for collision
+      const codeSnap = await db.collection("referral_codes").doc(code).get();
+      if (!codeSnap.exists) {
+        collision = false;
+      }
+      attempts++;
+    }
+
+    if (collision) {
+      throw new functions.https.HttpsError(
+        "internal",
+        "Failed to generate unique referral code. Please try again."
+      );
+    }
+
+    // Store code in referral_codes collection
+    const batch = db.batch();
+    batch.set(db.collection("referral_codes").doc(code), {
+      driverId: uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Update driver doc with referral code
+    batch.update(driverRef, {
+      referralCode: code,
+    });
+
+    await batch.commit();
+
+    return { success: true, code };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error("generateReferralCode error:", error);
+    throw new functions.https.HttpsError("internal", error.message);
+  }
+});
+
+/**
+ * registerReferral
+ *
+ * Registers a referral for the authenticated driver using a referral code.
+ * Validates the code, performs anti-fraud checks (different phone numbers,
+ * different UIDs), and creates a pending referral record.
+ */
+exports.registerReferral = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "You must be logged in."
+    );
+  }
+
+  const uid = context.auth.uid;
+  const { referralCode } = data;
+
+  console.log(`[REFERRAL] registerReferral called by uid=${uid}, referralCode=${referralCode}, raw data=`, JSON.stringify(data));
+
+  if (!referralCode) {
+    console.log(`[REFERRAL] ERROR: Missing referral code. data keys:`, Object.keys(data || {}));
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Missing referral code."
+    );
+  }
+
+  const db = admin.firestore();
+
+  // Rate Limiting: 5 calls/min
+  await checkRateLimit(db, uid, "registerReferral", 5, 60000);
+
+  try {
+    // Validate code exists
+    console.log(`[REFERRAL] Looking up code: "${referralCode}" in referral_codes collection`);
+    const codeSnap = await db.collection("referral_codes").doc(referralCode).get();
+    if (!codeSnap.exists) {
+      console.log(`[REFERRAL] ERROR: Code "${referralCode}" not found in referral_codes`);
+      throw new functions.https.HttpsError(
+        "not-found",
+        "Invalid referral code."
+      );
+    }
+
+    const referrerDriverId = codeSnap.data().driverId;
+    console.log(`[REFERRAL] Code found. Referrer driverId: ${referrerDriverId}`);
+
+    // Anti-fraud: ensure driver isn't referring themselves (uid check)
+    if (referrerDriverId === uid) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "You cannot use your own referral code."
+      );
+    }
+
+    // Anti-fraud: get both phone numbers from Firebase Auth, ensure they differ
+    const [referredUser, referrerUser] = await Promise.all([
+      admin.auth().getUser(uid),
+      admin.auth().getUser(referrerDriverId),
+    ]);
+
+    if (
+      referredUser.phoneNumber &&
+      referrerUser.phoneNumber &&
+      referredUser.phoneNumber === referrerUser.phoneNumber
+    ) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Referral not allowed between accounts with the same phone number."
+      );
+    }
+
+    // Anti-fraud: Check if this phone number has already used a referral code
+    const phoneNumber = referredUser.phoneNumber;
+    if (phoneNumber) {
+      const usedReferralRef = db.collection("used_referral_phones").doc(phoneNumber);
+      const usedReferralSnap = await usedReferralRef.get();
+      if (usedReferralSnap.exists) {
+        console.log(`[REFERRAL] Phone ${phoneNumber} already used a referral code`);
+        throw new functions.https.HttpsError(
+          "already-exists",
+          "This phone number has already used a referral code."
+        );
+      }
+    }
+
+    // Check if the referred driver already has a referral
+    const referredDriverRef = db.collection("drivers").doc(uid);
+    const referredDriverSnap = await referredDriverRef.get();
+
+    if (!referredDriverSnap.exists) {
+      console.log(`[REFERRAL] ERROR: Driver doc not found for uid=${uid}`);
+      throw new functions.https.HttpsError("not-found", "Driver not found.");
+    }
+
+    if (referredDriverSnap.data().referredBy) {
+      console.log(`[REFERRAL] Driver ${uid} already has referredBy=${referredDriverSnap.data().referredBy}`);
+      throw new functions.https.HttpsError(
+        "already-exists",
+        "You have already used a referral code."
+      );
+    }
+
+    // Create referral record
+    const referralRef = db.collection("referrals").doc();
+    const batch = db.batch();
+
+    batch.set(referralRef, {
+      referrerDriverId,
+      referredDriverId: uid,
+      referralCode,
+      status: "pending",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Update referred driver doc
+    batch.update(referredDriverRef, {
+      referredBy: referrerDriverId,
+      referredByCode: referralCode,
+    });
+
+    // Record phone number to prevent reuse after account deletion
+    if (phoneNumber) {
+      const usedReferralRef = db.collection("used_referral_phones").doc(phoneNumber);
+      batch.set(usedReferralRef, {
+        uid: uid,
+        referralCode: referralCode,
+        usedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
+    console.log(`[REFERRAL] SUCCESS: Referral registered. referralId=${referralRef.id}, referrer=${referrerDriverId}, referred=${uid}`);
+
+    return { success: true };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error("[REFERRAL] registerReferral error:", error);
+    throw new functions.https.HttpsError("internal", error.message);
+  }
+});
+
 /**
  * sendBroadcastNotification
  *
@@ -855,6 +1088,100 @@ exports.onDriverApproved = functions.firestore
         },
         data: { type: "driver_approved" },
       });
+
+      // ── REFERRAL REWARD PROCESSING ──
+      try {
+        const approvedDriverId = context.params.driverId;
+        const referrerDriverId = after.referredBy;
+
+        console.log(`[REFERRAL-REWARD] Driver ${approvedDriverId} approved. referredBy=${referrerDriverId || 'NONE'}`);
+
+        if (referrerDriverId) {
+          const db = admin.firestore();
+
+          // Find the pending referral document
+          console.log(`[REFERRAL-REWARD] Querying referrals for referredDriverId=${approvedDriverId}, status=pending`);
+          const referralsQuery = await db.collection("referrals")
+            .where("referredDriverId", "==", approvedDriverId)
+            .where("status", "==", "pending")
+            .limit(1)
+            .get();
+
+          console.log(`[REFERRAL-REWARD] Found ${referralsQuery.size} pending referral docs`);
+
+          if (!referralsQuery.empty) {
+            const referralDoc = referralsQuery.docs[0];
+            const referralId = referralDoc.id;
+
+            // a. Update referral doc status
+            await db.collection("referrals").doc(referralId).update({
+              status: "rewarded",
+              approvedAt: admin.firestore.FieldValue.serverTimestamp(),
+              rewardedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            console.log(`[REFERRAL-REWARD] Referral ${referralId} marked as rewarded`);
+
+            // b. Extend referrer's subscription by 7 days
+            const referrerRef = db.collection("drivers").doc(referrerDriverId);
+            const referrerSnap = await referrerRef.get();
+
+            if (referrerSnap.exists) {
+              const referrerData = referrerSnap.data();
+              const now = new Date();
+              let baseDate = now;
+
+              if (referrerData.subscriptionActiveUntil) {
+                const currentExpiry = referrerData.subscriptionActiveUntil.toDate
+                  ? referrerData.subscriptionActiveUntil.toDate()
+                  : new Date(referrerData.subscriptionActiveUntil);
+                if (currentExpiry > now) {
+                  baseDate = currentExpiry;
+                }
+              }
+
+              const newExpiry = new Date(baseDate);
+              newExpiry.setDate(newExpiry.getDate() + 7);
+
+              await referrerRef.update({
+                subscriptionActiveUntil: admin.firestore.Timestamp.fromDate(newExpiry),
+                totalReferrals: admin.firestore.FieldValue.increment(1),
+              });
+              console.log(`[REFERRAL-REWARD] Extended referrer ${referrerDriverId} subscription to ${newExpiry.toISOString()}`);
+
+              // c. Create payment record
+              await db.collection("payments").add({
+                driverId: referrerDriverId,
+                amount: 0,
+                days: 7,
+                type: "referral_reward",
+                method: "referral",
+                referralId,
+                referredDriverName: after.name || "Driver",
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+              console.log(`[REFERRAL-REWARD] Payment record created for referrer ${referrerDriverId}`);
+
+              // e. Send FCM notification to referrer
+              await admin.messaging().send({
+                topic: `driver_${referrerDriverId}`,
+                notification: {
+                  title: "🎉 Referral Reward!",
+                  body: `Your referred driver ${after.name || "a driver"} was approved. You earned 7 days free!`,
+                },
+                data: { type: "referral_reward" },
+              });
+              console.log(`[REFERRAL-REWARD] FCM notification sent to referrer ${referrerDriverId}`);
+            } else {
+              console.log(`[REFERRAL-REWARD] ERROR: Referrer driver doc ${referrerDriverId} not found`);
+            }
+          } else {
+            console.log(`[REFERRAL-REWARD] No pending referral found for driver ${approvedDriverId}`);
+          }
+        }
+      } catch (referralError) {
+        console.error("[REFERRAL-REWARD] Error processing referral reward:", referralError);
+        // Don't throw — referral processing failure should not break the approval notification
+      }
     }
   });
 
@@ -2206,6 +2533,69 @@ exports.checkSubscriptions = functions.pubsub
       }
     } catch (e) {
       console.error("Error sending subscription alerts:", e);
+    }
+
+    return null;
+  });
+
+/**
+ * onRideReviewed
+ * Triggers when a new review is created.
+ * Updates the driver's average rating, total ratings, and compliments map.
+ */
+exports.onRideReviewed = functions.firestore
+  .document("reviews/{reviewId}")
+  .onCreate(async (snap, context) => {
+    const reviewData = snap.data();
+    const { driverId, rating, tags } = reviewData;
+
+    if (!driverId || typeof rating !== "number") {
+      console.log("Missing driverId or rating in review, skipping.");
+      return null;
+    }
+
+    const db = admin.firestore();
+    const driverRef = db.collection("drivers").doc(driverId);
+
+    try {
+      await db.runTransaction(async (txn) => {
+        const driverSnap = await txn.get(driverRef);
+        if (!driverSnap.exists) {
+          console.log(`Driver ${driverId} not found, skipping review update.`);
+          return;
+        }
+
+        const driverData = driverSnap.data();
+        const oldRating = driverData.rating || 0;
+        const oldTotalRatings = driverData.totalRatings || 0;
+
+        const newTotalRatings = oldTotalRatings + 1;
+        const newTotalRatingSum = (oldRating * oldTotalRatings) + rating;
+        const newRating = newTotalRatingSum / newTotalRatings;
+
+        const updates = {
+          rating: newRating,
+          totalRatings: admin.firestore.FieldValue.increment(1),
+        };
+
+        if (Array.isArray(tags) && tags.length > 0) {
+          const oldCompliments = driverData.compliments || {};
+          const newCompliments = { ...oldCompliments };
+          
+          tags.forEach((tag) => {
+            if (typeof tag === "string") {
+              newCompliments[tag] = (newCompliments[tag] || 0) + 1;
+            }
+          });
+          
+          updates.compliments = newCompliments;
+        }
+
+        txn.update(driverRef, updates);
+      });
+      console.log(`Successfully updated driver ${driverId} rating based on review ${context.params.reviewId}`);
+    } catch (error) {
+      console.error(`Error updating driver ${driverId} for review ${context.params.reviewId}:`, error);
     }
 
     return null;

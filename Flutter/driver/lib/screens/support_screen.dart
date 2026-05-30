@@ -61,13 +61,26 @@ class SupportScreen extends StatelessWidget {
             },
           ),
           const SizedBox(height: 32),
+          const SizedBox(height: 32),
           Text(
-            'FAQs',
+            'Smart Help Topics',
             style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 16),
-          _buildFaqItem('How does the subscription work?', 'You pay a daily fee to receive ride requests without any commission deducted per ride.'),
-          _buildFaqItem('How do I withdraw earnings?', 'Riders pay you directly in cash or UPI. There is no in-app wallet to withdraw from.'),
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 2,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 1.1,
+            children: [
+              _buildSmartFaqCard(context, Icons.account_balance_wallet_outlined, 'Earnings & Payments', 'Learn about 0% commission'),
+              _buildSmartFaqCard(context, Icons.electric_rickshaw_outlined, 'Ride Issues', 'Disputes, cancellations'),
+              _buildSmartFaqCard(context, Icons.person_outline, 'Account Details', 'Update phone or vehicle'),
+              _buildSmartFaqCard(context, Icons.security_outlined, 'Safety & Rules', 'Community guidelines'),
+            ],
+          ),
         ],
       ),
     );
@@ -111,13 +124,57 @@ class SupportScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildFaqItem(String question, String answer) {
-    return ExpansionTile(
-      title: Text(question, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w500)),
-      childrenPadding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
-      children: [
-        Text(answer, style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2, height: 1.5)),
-      ],
+  Widget _buildSmartFaqCard(BuildContext context, IconData icon, String title, String subtitle) {
+    return InkWell(
+      onTap: () {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppTheme.surface,
+            title: Row(
+              children: [
+                Icon(icon, color: AppTheme.primary),
+                const SizedBox(width: 8),
+                Expanded(child: Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16))),
+              ],
+            ),
+            content: Text(
+              'Detailed help articles and guided flows for "$title" will be integrated here.',
+              style: GoogleFonts.inter(color: AppTheme.text2),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text('Close', style: GoogleFonts.inter(color: AppTheme.primary, fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.bg2,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.1), shape: BoxShape.circle),
+              child: Icon(icon, color: AppTheme.primary, size: 20),
+            ),
+            const SizedBox(height: 12),
+            Text(title, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.text), maxLines: 1, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 4),
+            Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: AppTheme.text3), maxLines: 2, overflow: TextOverflow.ellipsis),
+          ],
+        ),
+      ),
     );
   }
 }

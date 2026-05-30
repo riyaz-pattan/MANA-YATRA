@@ -1,259 +1,287 @@
-import { useState } from 'react';
-import ScrollVideoBackground from '../components/ScrollVideoBackground';
 import './Home.css';
+import heroMockup from '../assets/hero-mockup.png';
+import ComparisonTable from '../components/ComparisonTable';
+import EarningsCalculator from '../components/EarningsCalculator';
+import PricingCards from '../components/PricingCards';
+
+const stats = [
+  { number: '0%', label: 'Commission on every ride' },
+  { number: '₹20/day', label: 'Flat driver subscription' },
+  { number: '7 days', label: 'Free trial — no card needed' },
+  { number: '100%', label: 'Fare goes to your driver' },
+];
 
 const riderSteps = [
-  { title: 'Set Your Location', desc: 'Enter your pickup and drop-off location. Our smart search makes it quick and easy.' },
-  { title: 'View Driver Bids', desc: 'Nearby drivers compete by offering you their best price. No surge pricing, ever.' },
-  { title: 'Accept & Ride', desc: 'Pick the bid that works for you. Track your driver in real-time as they approach.' },
-  { title: 'Pay & Rate', desc: 'Complete your ride with cashless payment. Rate your driver to help the community.' },
+  'Enter your pickup and drop location',
+  'Set your own bid price (or use the estimate)',
+  'Watch drivers compete for your ride in real time',
+  'Pick the best offer — by price, ETA, or driver rating',
+  'Pay directly to your driver by cash or UPI',
 ];
 
 const driverSteps = [
-  { title: 'Go Online', desc: 'Toggle your status to online from the dashboard. Smart Tracker starts automatically.' },
-  { title: 'Get Ride Requests', desc: 'Receive nearby ride requests instantly. See pickup, drop-off, and distance details.' },
-  { title: 'Place Your Bid', desc: 'Set your own fair price for the ride. You decide what you earn — zero commission taken.' },
-  { title: 'Navigate & Earn', desc: 'Use built-in navigation to pick up the rider and complete the trip. 100% of the fare is yours.' },
+  'Download the Gaman Driver app',
+  'Complete KYC — Aadhaar, Licence, Vehicle photo',
+  'Choose your subscription (or start your 7-day free trial)',
+  'Go online — see nearby ride requests on your map',
+  'Place your bid and start earning 100% of every fare',
 ];
 
-const faqs = [
+const riderFeatures = [
   {
-    q: 'How is Gaman different from Ola and Uber?',
-    a: 'Gaman charges ZERO commission from drivers. 100% of the fare goes directly to the driver. For riders, this means fair prices without hidden surge charges — drivers bid their own prices, creating healthy competition.',
+    icon: '🎯',
+    title: 'You set the price',
+    desc: 'Enter your bid — drivers compete to give you the best fare.',
   },
   {
-    q: 'How does the bidding system work?',
-    a: 'When you request a ride, nearby drivers can see your trip details and offer their price. You see all the bids in real-time and can choose the one that works best for you based on price, driver rating, and estimated arrival time.',
+    icon: '👀',
+    title: 'Full transparency',
+    desc: 'See driver name, photo, vehicle, ETA, and bid price before you accept.',
   },
   {
-    q: 'Is Gaman safe to use?',
-    a: 'Absolutely. All drivers go through KYC verification (Aadhaar, Driving License, Photo). Real-time ride tracking is shared with your emergency contacts via SOS. Your live location is visible throughout the ride.',
+    icon: '💸',
+    title: 'No surge — ever',
+    desc: 'Rain, peak hours, late night — the price is always market-driven, never algorithm-spiked.',
   },
   {
-    q: 'How do I become a Gaman Driver?',
-    a: 'Download the Gaman Driver app from the Play Store. Register with your phone number, upload your documents (Aadhaar, Driving License, Profile Photo), and wait for verification. Once approved, you can start earning immediately!',
+    icon: '📲',
+    title: 'Pay your driver directly',
+    desc: 'Cash or UPI straight to the driver. Gaman never touches your money.',
   },
   {
-    q: 'What payment methods are supported?',
-    a: 'Currently, Gaman supports UPI and cash payments for riders. Drivers can manage their subscription plans through integrated Razorpay payments.',
+    icon: '🛡️',
+    title: 'Ride-start OTP',
+    desc: 'Your trip starts only after your 4-digit OTP is verified by the driver.',
   },
   {
-    q: 'What are the subscription plans for drivers?',
-    a: 'Gaman offers flexible subscription plans instead of per-ride commissions. New drivers get a 7-day free trial. After that, affordable daily/weekly plans keep you on the road without any per-ride deductions.',
-  },
-  {
-    q: 'How can I delete my account and data?',
-    a: 'You can request account deletion directly from the app under Settings. For more details, visit our Data Deletion page. All your personal data will be permanently removed from our servers within 30 days.',
+    icon: '🗺️',
+    title: 'Live tracking',
+    desc: "Track your driver's approach and your entire trip in real time.",
   },
 ];
 
-const features = [
-  { icon: '🏷️', title: 'Zero Commission', desc: 'Unlike other platforms, we take absolutely no cut from the driver\'s earnings. Every rupee of the fare goes to the driver.' },
-  { icon: '📍', title: 'Real-Time Tracking', desc: 'Track your driver live on the map from the moment they accept your ride until you reach your destination safely.' },
-  { icon: '🛡️', title: 'Verified Drivers', desc: 'Every driver undergoes thorough KYC verification including Aadhaar, Driving License, and photo verification before they can accept rides.' },
-  { icon: '⚡', title: 'Smart Matching', desc: 'Our geohash-based matching system connects you with the nearest available drivers in seconds, not minutes.' },
-  { icon: '🚨', title: 'SOS Emergency', desc: 'One-tap SOS button shares your live location and ride details with emergency contacts instantly during any ride.' },
-  { icon: '📊', title: 'Transparent Pricing', desc: 'No hidden charges, no surge pricing. Drivers bid their own fare and riders choose. Complete transparency for everyone.' },
+const testimonials = [
+  {
+    quote:
+      'ఒక్క రోజు 18 rides chesanu. ₹1,800 earn chesanu. Gaman కి ₹20 pay chesanu. Balance full naaduye.',
+    author: 'Raju K., Auto Driver, Secunderabad',
+  },
+  {
+    quote:
+      'Commission ledu, tension ledu. Daily ₹20 pay chesi, baaki antha naa pocket lo.',
+    author: 'Suresh M., Bike Taxi, Kukatpally',
+  },
+  {
+    quote:
+      'First time aa app lo naa price nene fix chesanu. Very happy with Gaman.',
+    author: 'Venkat R., Auto Driver, Dilsukhnagar',
+  },
 ];
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState('rider');
-  const [openFaq, setOpenFaq] = useState(null);
-  const steps = activeTab === 'rider' ? riderSteps : driverSteps;
-
   return (
-    <div id="home-page">
-      {/* Hero with scroll video */}
-      <ScrollVideoBackground videoSrc={null} />
-
-      {/* Mission Section */}
-      <section className="section mission-section" id="mission">
+    <>
+      {/* ===== Section 1: Hero ===== */}
+      <section className="hero">
         <div className="container">
-          <h2 className="section-title">
-            Our <span className="gradient-text">Mission</span>
-          </h2>
-          <p className="section-subtitle">
-            We believe mobility should be fair for everyone — riders and drivers
-            alike. Gaman is built on three core pillars.
-          </p>
-          <div className="mission-cards">
-            <div className="glass-card mission-card">
-              <div className="mission-card-icon">💰</div>
-              <h3>Zero Commission</h3>
-              <p>
-                Drivers keep 100% of every fare. No hidden deductions, no
-                per-ride cuts. Just a simple, affordable subscription to stay
-                active on the platform.
-              </p>
+          <div className="hero-text">
+            <div className="hero-badge">
+              <span className="badge-purple">Now live in Hyderabad 🛺</span>
             </div>
-            <div className="glass-card mission-card">
-              <div className="mission-card-icon">⚖️</div>
-              <h3>Fair Pricing</h3>
-              <p>
-                Our bidding system eliminates surge pricing. Multiple drivers
-                compete to offer you the best price, ensuring you always get a
-                fair deal.
-              </p>
+
+            <h1>
+              The ride that pays
+              <br />
+              your driver — not
+              <br />
+              the platform.
+            </h1>
+
+            <p className="hero-sub">
+              Zero commission. Transparent bidding.
+              <br />
+              100% of every fare goes directly to your driver.
+            </p>
+
+            <p className="hero-telugu telugu">
+              మీ ride, మీ driver కి 100% చెల్లిస్తుంది.
+            </p>
+
+            <div className="hero-ctas">
+              <a
+                href="https://play.google.com/store"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-success"
+              >
+                Download for Android
+              </a>
             </div>
-            <div className="glass-card mission-card">
-              <div className="mission-card-icon">🤝</div>
-              <h3>Driver First</h3>
-              <p>
-                We call our drivers "Partners" because that's what they are.
-                Gaman is designed to empower drivers with dignity, respect, and
-                financial freedom.
-              </p>
+
+            <div className="hero-trust">
+              <span>✓ 7-day free trial for drivers</span>
+              <span>✓ Zero commission — forever</span>
+              <span>✓ Direct UPI payments</span>
             </div>
+          </div>
+
+          <div className="hero-image">
+            <img
+              src={heroMockup}
+              alt="Gaman app screenshot"
+            />
           </div>
         </div>
       </section>
 
-      {/* How It Works */}
-      <section className="section how-it-works-section" id="how-it-works">
-        <div className="container">
-          <h2 className="section-title">
-            How <span className="gradient-text">It Works</span>
-          </h2>
-          <p className="section-subtitle">
-            Whether you're a rider booking a trip or a driver earning a living,
-            Gaman keeps it simple.
-          </p>
-          <div className="how-tabs">
-            <button
-              className={`how-tab ${activeTab === 'rider' ? 'active' : ''}`}
-              onClick={() => setActiveTab('rider')}
-            >
-              🚶 For Riders
-            </button>
-            <button
-              className={`how-tab ${activeTab === 'driver' ? 'active' : ''}`}
-              onClick={() => setActiveTab('driver')}
-            >
-              🚗 For Drivers
-            </button>
-          </div>
-          <div className="how-steps">
-            {steps.map((step, i) => (
-              <div className="glass-card how-step" key={i}>
-                <div className="how-step-number">{i + 1}</div>
-                <h3>{step.title}</h3>
-                <p>{step.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Stats */}
-      <section className="section stats-section">
+      {/* ===== Section 2: Stats Bar ===== */}
+      <section className="stats-bar">
         <div className="container">
           <div className="stats-grid">
-            <div className="stat-item">
-              <h3 className="gradient-text">0%</h3>
-              <p>Commission Charged</p>
-            </div>
-            <div className="stat-item">
-              <h3 className="gradient-text">100%</h3>
-              <p>Earnings to Drivers</p>
-            </div>
-            <div className="stat-item">
-              <h3 className="gradient-text">Real-Time</h3>
-              <p>Bid Based Pricing</p>
-            </div>
-            <div className="stat-item">
-              <h3 className="gradient-text">24/7</h3>
-              <p>Support Available</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Features */}
-      <section className="section features-section" id="features">
-        <div className="container">
-          <h2 className="section-title">
-            Why Choose <span className="gradient-text">Gaman</span>
-          </h2>
-          <p className="section-subtitle">
-            Built from the ground up to be fair, fast, and safe for everyone.
-          </p>
-          <div className="features-grid">
-            {features.map((f, i) => (
-              <div className="glass-card feature-card" key={i}>
-                <div className="feature-card-icon">{f.icon}</div>
-                <div>
-                  <h3>{f.title}</h3>
-                  <p>{f.desc}</p>
-                </div>
+            {stats.map((stat, i) => (
+              <div className="stat-item" key={i}>
+                <div className="stat-number">{stat.number}</div>
+                <div className="stat-label">{stat.label}</div>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* FAQ */}
-      <section className="section faq-section" id="faq">
+      {/* ===== Section 3: How It Works ===== */}
+      <section className="how-it-works section" id="how-it-works">
         <div className="container">
-          <h2 className="section-title">
-            Frequently Asked <span className="gradient-text">Questions</span>
-          </h2>
-          <p className="section-subtitle">
-            Got questions? We've got answers.
-          </p>
-          <div className="faq-list">
-            {faqs.map((faq, i) => (
-              <div
-                className={`faq-item ${openFaq === i ? 'open' : ''}`}
-                key={i}
-              >
-                <button
-                  className="faq-question"
-                  onClick={() => setOpenFaq(openFaq === i ? null : i)}
-                >
-                  <span>{faq.q}</span>
-                  <span className="faq-toggle">+</span>
-                </button>
-                <div className="faq-answer">
-                  <p>{faq.a}</p>
-                </div>
+          <div className="section-header">
+            <h2>How it works</h2>
+          </div>
+
+          <div className="how-columns">
+            {/* For Riders */}
+            <div className="how-column">
+              <h3>
+                <span className="emoji">🧑‍💼</span> For Riders
+              </h3>
+              <div className="how-steps">
+                {riderSteps.map((step, i) => (
+                  <div className="how-step" key={i}>
+                    <div className="step-number">{i + 1}</div>
+                    <div className="step-text">{step}</div>
+                  </div>
+                ))}
               </div>
-            ))}
+              <p className="how-tagline">
+                No surge. No algorithm. Just fair market pricing.
+              </p>
+            </div>
+
+            {/* For Drivers */}
+            <div className="how-column">
+              <h3>
+                <span className="emoji">🚗</span> For Drivers
+              </h3>
+              <div className="how-steps">
+                {driverSteps.map((step, i) => (
+                  <div className="how-step" key={i}>
+                    <div className="step-number">{i + 1}</div>
+                    <div className="step-text">{step}</div>
+                  </div>
+                ))}
+              </div>
+              <p className="how-tagline">
+                No commission ever. Just ₹20 a day.
+              </p>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* CTA */}
-      <section className="section cta-section">
+      {/* ===== Section 4: Driver Benefits ===== */}
+      <section className="driver-benefits section" id="driver-benefits">
         <div className="container">
-          <div className="cta-content">
-            <h2>
-              Ready to <span className="gradient-text">Ride?</span>
-            </h2>
-            <p>
-              Download Gaman today and experience rides the way they should be
-              — fair, transparent, and rewarding.
+          <div className="section-header">
+            <h2>Why drivers are switching to Gaman</h2>
+            <p className="section-sub-telugu telugu">
+              ఒక్కసారి numbers చూడండి.
             </p>
-            <div className="cta-buttons">
-              <a
-                href="https://play.google.com/store"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-primary"
-              >
-                📱 Get Gaman for Riders
-              </a>
-              <a
-                href="https://play.google.com/store"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-secondary"
-              >
-                🚗 Get Gaman for Drivers
-              </a>
-            </div>
+          </div>
+
+          <div className="driver-benefits-content">
+            <ComparisonTable />
+            <EarningsCalculator />
           </div>
         </div>
       </section>
-    </div>
+
+      {/* ===== Section 5: Rider Features ===== */}
+      <section className="rider-features section" id="rider-features">
+        <div className="container">
+          <div className="section-header">
+            <h2>Finally — a ride app that's fair to everyone</h2>
+          </div>
+
+          <div className="features-grid">
+            {riderFeatures.map((feat, i) => (
+              <div className="feature-card card-light" key={i}>
+                <div className="feature-icon">{feat.icon}</div>
+                <h3>{feat.title}</h3>
+                <p>{feat.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ===== Section 6: Testimonials ===== */}
+      <section className="testimonials section" id="testimonials">
+        <div className="container">
+          <div className="section-header">
+            <h2>Early drivers are already talking</h2>
+          </div>
+
+          <div className="testimonials-grid">
+            {testimonials.map((t, i) => (
+              <div className="testimonial-card" key={i}>
+                <div className="testimonial-stars">⭐⭐⭐⭐⭐</div>
+                <p className="testimonial-quote telugu">"{t.quote}"</p>
+                <p className="testimonial-author">— {t.author}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ===== Section 7: Pricing ===== */}
+      <section className="pricing-section section" id="pricing">
+        <div className="container">
+          <div className="section-header">
+            <h2>Simple, honest pricing for drivers</h2>
+            <p>No hidden fees. No per-ride cuts. Ever.</p>
+          </div>
+
+          <PricingCards />
+        </div>
+      </section>
+
+      {/* ===== Section 8: Download CTA ===== */}
+      <section className="download-cta section">
+        <div className="container">
+          <h2>Download Gaman today</h2>
+          <p className="cta-sub">
+            Available on Android. Free to ride. Free to try for drivers.
+          </p>
+          <a
+            href="https://play.google.com/store"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-dark"
+          >
+            Get it on Google Play
+          </a>
+          <p className="cta-telugu telugu">
+            మన Hyderabad కి మన app. ఇప్పుడే download చేయండి.
+          </p>
+        </div>
+      </section>
+    </>
   );
 }

@@ -1,0 +1,240 @@
+/* ===== About Page ===== */
+
+.about-page {
+  padding-top: var(--navbar-height);
+}
+
+/* --- Hero --- */
+.about-hero {
+  background: var(--black);
+  padding: 96px 0 80px;
+  text-align: center;
+}
+
+.about-hero .badge-purple {
+  margin-bottom: 24px;
+}
+
+.about-hero h1 {
+  color: var(--white);
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+
+.about-hero-telugu {
+  color: var(--accent);
+  font-size: 22px;
+  font-weight: 500;
+}
+
+/* --- Founding Story --- */
+.about-story-section {
+  background: var(--white);
+}
+
+.story-content {
+  display: grid;
+  grid-template-columns: 1.4fr 0.6fr;
+  gap: 48px;
+  align-items: start;
+}
+
+.story-text .badge-purple {
+  margin-bottom: 16px;
+}
+
+.story-text h2 {
+  color: var(--dark);
+  margin-top: 12px;
+  margin-bottom: 24px;
+}
+
+.story-text p {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.8;
+  margin-bottom: 16px;
+}
+
+.story-text strong {
+  color: var(--dark);
+  font-weight: 600;
+}
+
+.story-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: sticky;
+  top: calc(var(--navbar-height) + 32px);
+}
+
+.story-stat-card {
+  text-align: center;
+  padding: 28px 24px;
+}
+
+.story-stat-card h3 {
+  color: var(--accent);
+  font-size: 36px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.story-stat-card p {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* --- Mission --- */
+.about-mission-section {
+  background: var(--light-grey);
+}
+
+.about-mission-header {
+  text-align: center;
+  margin-bottom: 48px;
+}
+
+.about-mission-header h2 {
+  color: var(--dark);
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+
+.about-mission-subtitle {
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.about-mission-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+
+.about-mission-card {
+  text-align: left;
+}
+
+.about-mission-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  background: var(--accent-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  margin-bottom: 20px;
+}
+
+.about-mission-card h3 {
+  color: var(--dark);
+  font-size: 20px;
+  margin-bottom: 12px;
+}
+
+.about-mission-card p {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+/* --- Team --- */
+.about-team-section {
+  background: var(--white);
+}
+
+.about-team-content {
+  max-width: 680px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.about-team-content h2 {
+  color: var(--dark);
+  margin-top: 12px;
+  margin-bottom: 20px;
+}
+
+.about-team-description {
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.8;
+  margin-bottom: 40px;
+}
+
+.about-team-cta {
+  background: var(--light-grey);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+}
+
+.about-team-join {
+  color: var(--muted);
+  font-size: 15px;
+  margin-bottom: 20px;
+}
+
+/* --- CTA --- */
+.about-cta-section {
+  background: var(--accent);
+  text-align: center;
+}
+
+.about-cta-section h2 {
+  color: var(--white);
+  margin-bottom: 16px;
+}
+
+.about-cta-section > .container > p {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 18px;
+  max-width: 540px;
+  margin: 0 auto 32px;
+  line-height: 1.7;
+}
+
+.about-cta-buttons {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .about-hero {
+    padding: 64px 0 56px;
+  }
+
+  .about-hero-telugu {
+    font-size: 19px;
+  }
+
+  .story-content {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+
+  .story-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    position: static;
+  }
+
+  .about-mission-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .story-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .about-hero-telugu {
+    font-size: 17px;
+  }
+}

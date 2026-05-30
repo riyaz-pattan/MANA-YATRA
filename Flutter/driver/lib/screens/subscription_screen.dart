@@ -1013,7 +1013,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       stream: FirebaseFirestore.instance
           .collection('payments')
           .where('driverId', isEqualTo: uid)
-          .where('type', whereIn: ['subscription', 'free_trial'])
+          .where('type', whereIn: ['subscription', 'free_trial', 'referral_reward'])
           .orderBy('createdAt', descending: true)
           .limit(20)
           .snapshots(),
@@ -1047,7 +1047,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
               final amount = data['amount'] ?? 0;
               final days = data['days'] ?? 0;
               final isFreeTrial = data['type'] == 'free_trial';
+              final isReferral = data['type'] == 'referral_reward';
               final method = data['method'] ?? 'cash';
+              final referredName = data['referredDriverName'] as String?;
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -1062,17 +1064,25 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: (isFreeTrial
-                                ? AppTheme.accent
-                                : AppTheme.success)
+                        color: (isReferral
+                                ? AppTheme.info
+                                : isFreeTrial
+                                    ? AppTheme.accent
+                                    : AppTheme.success)
                             .withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Icon(
-                        isFreeTrial ? Icons.star : Icons.receipt_long,
-                        color: isFreeTrial
-                            ? AppTheme.accent
-                            : AppTheme.success,
+                        isReferral
+                            ? Icons.card_giftcard
+                            : isFreeTrial
+                                ? Icons.star
+                                : Icons.receipt_long,
+                        color: isReferral
+                            ? AppTheme.info
+                            : isFreeTrial
+                                ? AppTheme.accent
+                                : AppTheme.success,
                       ),
                     ),
                     const SizedBox(width: 16),
@@ -1086,12 +1096,31 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                             runSpacing: 4,
                             children: [
                               Text(
-                                isFreeTrial
-                                    ? '7 Days Free Trial'
-                                    : '$days Days Plan',
+                                isReferral
+                                    ? 'Referral Reward'
+                                    : isFreeTrial
+                                        ? '7 Days Free Trial'
+                                        : '$days Days Plan',
                                 style: GoogleFonts.inter(
                                     fontWeight: FontWeight.w600, fontSize: 15),
                               ),
+                              if (isReferral && referredName != null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.info
+                                        .withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    referredName,
+                                    style: GoogleFonts.inter(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppTheme.info),
+                                  ),
+                                ),
                               if (!isFreeTrial && method != 'cash')
                                 Container(
                                   padding: const EdgeInsets.symmetric(
@@ -1121,13 +1150,19 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                       ),
                     ),
                     Text(
-                      isFreeTrial ? 'FREE' : '₹$amount',
+                      isReferral
+                          ? 'FREE'
+                          : isFreeTrial
+                              ? 'FREE'
+                              : '₹$amount',
                       style: GoogleFonts.inter(
                         fontWeight: FontWeight.w800,
                         fontSize: 16,
-                        color: isFreeTrial
-                            ? AppTheme.accent
-                            : AppTheme.success,
+                        color: isReferral
+                            ? AppTheme.info
+                            : isFreeTrial
+                                ? AppTheme.accent
+                                : AppTheme.success,
                       ),
                     ),
                   ],

@@ -45,11 +45,13 @@ class PlacePrediction {
   final String placeId;
   final String primaryText;
   final String secondaryText;
+  final int? distanceMeters;
 
   PlacePrediction({
     required this.placeId,
     required this.primaryText,
     required this.secondaryText,
+    this.distanceMeters,
   });
 }
 
@@ -74,7 +76,7 @@ class GoogleMapsService {
     _sessionToken = _uuid.v4();
   }
 
-  static Future<List<PlacePrediction>> getPlacePredictions(String query) async {
+  static Future<List<PlacePrediction>> getPlacePredictions(String query, {double? lat, double? lng}) async {
     if (_apiKey.isEmpty) {
       debugPrint('[GoogleMapsService] API key is empty! Check .env file.');
       return [];
@@ -82,9 +84,14 @@ class GoogleMapsService {
     
     if (_sessionToken == null) startNewSearchSession();
 
+    String locationParam = '';
+    if (lat != null && lng != null) {
+      locationParam = '&location=$lat,$lng&radius=10000&origin=$lat,$lng';
+    }
+
     try {
       final uri = Uri.parse(
-        'https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${Uri.encodeComponent(query)}&components=country:in&sessiontoken=$_sessionToken&key=$_apiKey',
+        'https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${Uri.encodeComponent(query)}&components=country:in$locationParam&sessiontoken=$_sessionToken&key=$_apiKey',
       );
       final res = await http.get(uri);
       if (res.statusCode != 200) return [];
@@ -102,6 +109,7 @@ class GoogleMapsService {
           placeId: p['place_id'] ?? '',
           primaryText: struct['main_text'] ?? p['description'] ?? '',
           secondaryText: struct['secondary_text'] ?? '',
+          distanceMeters: p['distance_meters'] as int?,
         );
       }).toList();
     } catch (e) {

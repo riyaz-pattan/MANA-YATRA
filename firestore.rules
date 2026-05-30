@@ -260,6 +260,40 @@ service cloud.firestore {
     }
 
     // ============================================================
+    // REFERRAL CODES — lookup collection for referral program
+    // Authenticated: R | Cloud Functions: W
+    // ============================================================
+    match /referral_codes/{code} {
+      // Authenticated users can read (to validate codes)
+      allow read: if request.auth != null;
+      // Only Cloud Functions can write
+      allow write: if false;
+    }
+
+    // ============================================================
+    // REFERRALS — referral tracking records
+    // Referrer: R (own) | Admin roles: R | Cloud Functions: W
+    // ============================================================
+    match /referrals/{referralId} {
+      // Drivers can read their own referrals (as referrer)
+      allow read: if request.auth != null 
+        && resource.data.referrerDriverId == request.auth.uid;
+      // Admin roles can read all
+      allow read: if hasAnyRole(['operations_manager', 'finance_manager', 'business_analyst', 'viewer']);
+      // Only Cloud Functions can write
+      allow write: if false;
+    }
+
+    // ============================================================
+    // REVIEWS (new collection)
+    // ============================================================
+    match /reviews/{reviewId} {
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.riderId;
+      allow read: if request.auth != null && (request.auth.uid == resource.data.riderId || request.auth.uid == resource.data.driverId);
+      allow update, delete: if false;
+    }
+
+    // ============================================================
     // EXISTING COLLECTIONS (preserved as-is)
     // ============================================================
 

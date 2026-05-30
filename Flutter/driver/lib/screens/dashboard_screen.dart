@@ -20,6 +20,7 @@ import 'subscription_screen.dart';
 import 'profile_screen.dart';
 import 'support_screen.dart';
 import 'settings_screen.dart';
+import 'referral_screen.dart';
 import '../utils/custom_toast.dart';
 import '../services/sync_engine.dart';
 import '../models/queue_item.dart';
@@ -2022,6 +2023,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
             onTap: () {
               Navigator.pop(context);
               Navigator.push(context, MaterialPageRoute(builder: (_) => const SubscriptionScreen()));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.card_giftcard, color: AppTheme.text),
+            title: Text('Refer & Earn', style: GoogleFonts.inter(color: AppTheme.text)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const ReferralScreen()));
             },
           ),
           ListTile(

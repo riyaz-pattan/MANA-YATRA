@@ -33,6 +33,9 @@ import 'repositories/auth_repository.dart';
 import 'services/analytics_service.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:upgrader/upgrader.dart';
+import 'package:app_links/app_links.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'screens/referral_screen.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -91,6 +94,9 @@ void main() async {
 
   // Initialize FCM in the background (non-blocking)
   _initFCM();
+
+  // Initialize deep link handling (non-blocking)
+  _initDeepLinks();
 }
 
 /// Sets up Firebase Cloud Messaging listeners.
@@ -130,10 +136,58 @@ void _initFCM() {
     if (type == 'subscription_alert') {
       final ctx = navigatorKey.currentContext;
       if (ctx != null && ctx.mounted) {
-        Navigator.push(ctx, MaterialPageRoute(builder: (_) => const SubscriptionScreen()));
+        Navigator.push(
+          ctx,
+          MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+        );
+      }
+    } else if (type == 'referral_reward') {
+      final ctx = navigatorKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        Navigator.push(
+          ctx,
+          MaterialPageRoute(builder: (_) => const ReferralScreen()),
+        );
       }
     }
   });
+}
+
+/// Sets up deep link handling for referral codes.
+/// When the app is opened via a referral link (https://mana-yatra.web.app/refer?code=XXX),
+/// the referral code is stored in SharedPreferences for use during onboarding.
+void _initDeepLinks() {
+  final appLinks = AppLinks();
+
+  // Handle deep links when app is already running
+  appLinks.uriLinkStream.listen((Uri uri) {
+    _handleDeepLink(uri);
+  });
+
+  // Handle initial deep link (app was launched via link)
+  appLinks.getInitialLink().then((Uri? uri) {
+    if (uri != null) _handleDeepLink(uri);
+  });
+}
+
+void _handleDeepLink(Uri uri) async {
+  if (uri.host == 'mana-yatra.web.app' && uri.path == '/refer') {
+    final code = uri.queryParameters['code'];
+    if (code != null && code.isNotEmpty) {
+      // Store referral code for use during onboarding
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('pending_referral_code', code);
+
+      // If user is already logged in, show a toast
+      final ctx = navigatorKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        CustomToast.show(
+          context: ctx,
+          message: 'Referral code applied: $code',
+        );
+      }
+    }
+  }
 }
 
 class ManaYatraDriverApp extends StatelessWidget {

@@ -100,6 +100,10 @@ class ProfileScreen extends StatelessWidget {
                     style: GoogleFonts.inter(color: AppTheme.success, fontWeight: FontWeight.w600, fontSize: 13),
                   ),
                 ),
+                const SizedBox(height: 24),
+                _buildScorecard(profile),
+                const SizedBox(height: 16),
+                _buildCompliments(profile),
                 const SizedBox(height: 32),
 
                 // Details
@@ -150,6 +154,112 @@ class ProfileScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+  Widget _buildScorecard(Map<String, dynamic> profile) {
+    final rating = profile['rating']?.toString() ?? '4.9';
+    final totalRides = profile['totalRides']?.toString() ?? '0';
+
+    final wonBids = profile['wonBids'] as num? ?? 0;
+    final totalBids = profile['totalBids'] as num? ?? 0;
+    final completedRides = profile['completedRides'] as num? ?? 0;
+
+    String completionRate = '100%';
+    if (wonBids > 0) {
+      completionRate = '${(completedRides / wonBids * 100).toStringAsFixed(0)}%';
+    } else if (profile.containsKey('completionRate')) {
+      completionRate = profile['completionRate']?.toString() ?? '100%';
+    }
+
+    String winRate = '--%';
+    if (totalBids > 0) {
+      winRate = '${(wonBids / totalBids * 100).toStringAsFixed(0)}%';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          Expanded(child: _buildScoreItem(Icons.star_rounded, rating, 'Rating', AppTheme.warning)),
+          Container(height: 40, width: 1, color: AppTheme.border),
+          Expanded(child: _buildScoreItem(Icons.route, totalRides, 'Rides', AppTheme.primary)),
+          Container(height: 40, width: 1, color: AppTheme.border),
+          Expanded(child: _buildScoreItem(Icons.check_circle_outline, completionRate, 'Completion', AppTheme.success)),
+          Container(height: 40, width: 1, color: AppTheme.border),
+          Expanded(child: _buildScoreItem(Icons.emoji_events_outlined, winRate, 'Win Rate', AppTheme.text)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScoreItem(IconData icon, String value, String label, Color color) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                value,
+                style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.text),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: GoogleFonts.inter(fontSize: 11, color: AppTheme.text2),
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCompliments(Map<String, dynamic> profile) {
+    final Map<String, dynamic> complimentsMap = 
+        (profile['compliments'] as Map?)?.cast<String, dynamic>() ?? {};
+        
+    List<String> displayTags = [];
+    if (complimentsMap.isEmpty) {
+      displayTags = ['Clean Vehicle', 'Polite', 'Great Music', 'Safe Driving'];
+    } else {
+      final entries = complimentsMap.entries.toList()
+        ..sort((a, b) => (b.value as num).compareTo(a.value as num));
+      displayTags = entries.take(4).map((e) => '${e.key} (${e.value})').toList();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Compliments & Tags', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.text2)),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: displayTags.map((tag) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppTheme.bg2,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: Text(tag, style: GoogleFonts.inter(fontSize: 13, color: AppTheme.text, fontWeight: FontWeight.w500)),
+          )).toList(),
+        ),
+      ],
     );
   }
 

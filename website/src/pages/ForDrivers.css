@@ -1,0 +1,389 @@
+/* ===== ForDrivers Page ===== */
+
+.for-drivers-page {
+  padding-top: var(--navbar-height);
+}
+
+/* --- Shared Utilities --- */
+.fd-gradient-text {
+  background: linear-gradient(135deg, var(--accent), #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.fd-section-title {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.fd-section-subtitle {
+  text-align: center;
+  max-width: 600px;
+  margin: 0 auto 56px;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+.fd-title-dark {
+  color: var(--dark);
+}
+
+.fd-subtitle-dark {
+  color: var(--muted);
+}
+
+.fd-title-white {
+  color: var(--white);
+}
+
+.fd-subtitle-white {
+  color: var(--text-grey);
+}
+
+/* --- Hero Section (bg: #000) --- */
+.fd-hero {
+  background: var(--black);
+  text-align: center;
+  padding-top: 100px;
+  padding-bottom: 100px;
+}
+
+.fd-hero .badge-green {
+  margin-bottom: 24px;
+}
+
+.fd-hero h1 {
+  color: var(--white);
+  margin-bottom: 24px;
+  font-size: 72px;
+  letter-spacing: -0.03em;
+}
+
+.fd-hero-sub {
+  color: var(--text-grey);
+  font-size: 18px;
+  line-height: 1.7;
+  max-width: 560px;
+  margin: 0 auto 40px;
+}
+
+.fd-hero-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 56px;
+}
+
+.fd-hero-stats {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+}
+
+.fd-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.fd-stat strong {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--white);
+}
+
+.fd-stat span {
+  color: var(--text-grey);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.fd-stat-divider {
+  width: 1px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* --- Pricing Section (bg: #F3F4F6) --- */
+.fd-pricing {
+  background: var(--light-grey);
+}
+
+.fd-pricing .fd-section-title {
+  color: var(--dark);
+}
+
+.fd-pricing .fd-section-subtitle {
+  color: var(--muted);
+}
+
+/* --- KYC Section (bg: #FFF) --- */
+.fd-kyc {
+  background: var(--white);
+}
+
+.fd-kyc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin-bottom: 40px;
+}
+
+.fd-kyc-card {
+  background: var(--white);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 32px 24px;
+  position: relative;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.fd-kyc-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 32px rgba(108, 99, 255, 0.08);
+}
+
+.fd-kyc-number {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--white);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fd-kyc-icon {
+  font-size: 32px;
+  margin-bottom: 16px;
+}
+
+.fd-kyc-card h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--dark);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.fd-kyc-card p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.fd-kyc-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--accent-light);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.fd-kyc-note span {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.fd-kyc-note p {
+  color: #3C3489;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* --- Earnings Section (bg: #000) --- */
+.fd-earnings {
+  background: var(--black);
+}
+
+/* --- FAQ Section (bg: #F3F4F6) --- */
+.fd-faq {
+  background: var(--light-grey);
+}
+
+.fd-faq .fd-section-title {
+  color: var(--dark);
+}
+
+.fd-faq .fd-section-subtitle {
+  color: var(--muted);
+}
+
+.fd-faq-list {
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fd-faq-item {
+  background: var(--white);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.fd-faq-item.open {
+  border-color: var(--accent);
+  box-shadow: 0 4px 20px rgba(108, 99, 255, 0.08);
+}
+
+.fd-faq-question {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dark);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.fd-faq-question:hover {
+  background: var(--light-grey);
+}
+
+.fd-faq-toggle {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--muted);
+  transition: all 0.2s ease;
+}
+
+.fd-faq-item.open .fd-faq-toggle {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--white);
+  transform: rotate(45deg);
+}
+
+.fd-faq-answer {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.35s ease;
+}
+
+.fd-faq-item.open .fd-faq-answer {
+  max-height: 300px;
+}
+
+.fd-faq-answer p {
+  padding: 0 24px 20px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+/* --- CTA Section (bg: #6C63FF) --- */
+.fd-cta {
+  background: var(--accent);
+  text-align: center;
+}
+
+.fd-cta h2 {
+  color: var(--white);
+  margin-bottom: 16px;
+}
+
+.fd-cta p {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 18px;
+  max-width: 500px;
+  margin: 0 auto 32px;
+  line-height: 1.7;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .fd-hero {
+    padding-top: 80px;
+    padding-bottom: 72px;
+  }
+
+  .fd-hero h1 {
+    font-size: 40px;
+  }
+
+  .fd-hero-sub {
+    font-size: 16px;
+  }
+
+  .fd-hero-stats {
+    gap: 24px;
+  }
+
+  .fd-stat strong {
+    font-size: 22px;
+  }
+
+  .fd-kyc-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .fd-faq-question {
+    font-size: 14px;
+    padding: 16px 20px;
+  }
+
+  .fd-faq-answer p {
+    padding: 0 20px 16px;
+  }
+
+  .fd-section-subtitle {
+    font-size: 15px;
+    margin-bottom: 40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .fd-hero h1 {
+    font-size: 36px;
+  }
+
+  .fd-hero-stats {
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .fd-stat-divider {
+    width: 40px;
+    height: 1px;
+  }
+
+  .fd-kyc-card {
+    padding: 24px 20px;
+  }
+
+  .fd-hero-actions {
+    flex-direction: column;
+    align-items: center;
+  }
+}

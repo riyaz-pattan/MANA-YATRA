@@ -258,6 +258,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 final data = snapshot.data!.data() as Map<String, dynamic>?;
                 final name = data?['name'] ?? 'Rider';
                 final phone = FirebaseAuth.instance.currentUser?.phoneNumber ?? 'Unknown';
+                final createdAt = data?['createdAt'] as Timestamp?;
+                final memberSince = createdAt != null ? createdAt.toDate().year.toString() : '2026';
+                final totalRides = data?['totalRides'] ?? 0;
 
                 return ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -302,6 +305,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ],
                         ),
                       ),
+                    ),
+                    
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            decoration: BoxDecoration(
+                              color: AppTheme.surface,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: AppTheme.border),
+                            ),
+                            child: Column(
+                              children: [
+                                Text(
+                                  totalRides.toString(),
+                                  style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Total Rides',
+                                  style: GoogleFonts.inter(fontSize: 12, color: AppTheme.text2),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            decoration: BoxDecoration(
+                              color: AppTheme.surface,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: AppTheme.border),
+                            ),
+                            child: Column(
+                              children: [
+                                Text(
+                                  memberSince,
+                                  style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.text),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Member Since',
+                                  style: GoogleFonts.inter(fontSize: 12, color: AppTheme.text2),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     
                     const SizedBox(height: 24),
@@ -421,6 +477,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildSavedPlacesSection(Map<String, dynamic>? data) {
     final homePlace = data?['savedHome'] as Map<String, dynamic>?;
     final workPlace = data?['savedWork'] as Map<String, dynamic>?;
+    final customPlace = data?['savedCustom'] as Map<String, dynamic>?;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -446,6 +503,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
             label: 'Work',
             address: workPlace?['short_name'],
             firestoreKey: 'savedWork',
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Divider(color: AppTheme.border, height: 1),
+          ),
+          _buildSavedPlaceRow(
+            icon: Icons.star_rounded,
+            label: 'Custom Place',
+            address: customPlace?['short_name'],
+            firestoreKey: 'savedCustom',
           ),
         ],
       ),

@@ -226,16 +226,16 @@ class _NameCheckGateState extends State<_NameCheckGate> {
             data != null &&
             data.containsKey('name') &&
             (data['name']?.toString() ?? '').trim().isNotEmpty;
-            
+
         // If we have data, but it's from cache AND we don't have a name yet,
         // it might be because the server hasn't sent the real document yet.
         // So we show loading until we hear from the server to prevent a flash.
         if (doc != null && doc.metadata.isFromCache && !hasName) {
-           return const Scaffold(
-             body: Center(
-               child: CircularProgressIndicator(color: AppTheme.primary),
-             ),
-           );
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(color: AppTheme.primary),
+            ),
+          );
         }
 
         if (hasName) {
@@ -246,4 +246,3 @@ class _NameCheckGateState extends State<_NameCheckGate> {
     );
   }
 }
-
