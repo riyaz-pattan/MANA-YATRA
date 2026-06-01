@@ -6,14 +6,16 @@ class MarkerGenerator {
   /// Generates a professional location marker with a stem (pinpoint).
   static Future<BitmapDescriptor> createDotMarker({
     required Color color,
-    double radius = 14,
+    double radius = 12,
     double borderWidth = 2,
   }) async {
     final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(pictureRecorder);
+    final double pixelRatio = 3.0;
+    canvas.scale(pixelRatio, pixelRatio);
     
     // Canvas size needs to accommodate the circle and the stem
-    final double stemHeight = 24;
+    final double stemHeight = 12;
     final double totalWidth = radius * 2.5;
     final double totalHeight = radius * 2.5 + stemHeight;
     final Offset center = Offset(totalWidth / 2, radius * 1.25);
@@ -34,7 +36,7 @@ class MarkerGenerator {
     // 2. Draw the stem (pinpoint line)
     final Paint stemPaint = Paint()
       ..color = Colors.black
-      ..strokeWidth = 4.0
+      ..strokeWidth = 3.0
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
       
@@ -59,11 +61,11 @@ class MarkerGenerator {
     canvas.drawCircle(center, radius * 0.4, centerDotPaint);
 
     final ui.Image image = await pictureRecorder.endRecording().toImage(
-          totalWidth.toInt(),
-          totalHeight.toInt(),
+          (totalWidth * pixelRatio).toInt(),
+          (totalHeight * pixelRatio).toInt(),
         );
     final data = await image.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.bytes(data!.buffer.asUint8List());
+    return BitmapDescriptor.bytes(data!.buffer.asUint8List(), imagePixelRatio: pixelRatio);
   }
 
   /// Generates a white pill label with text and a pencil icon.
@@ -73,16 +75,19 @@ class MarkerGenerator {
   }) async {
     final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(pictureRecorder);
+    final double pixelRatio = 3.0;
+    canvas.scale(pixelRatio, pixelRatio);
 
-    const double padding = 10.0;
-    const double iconSize = 16.0;
-    const double fontSize = 14.0;
-    const double borderRadius = 20.0;
+    const double padding = 8.0;
+    const double iconSize = 14.0;
+    const double fontSize = 13.0;
+    const double borderRadius = 8.0;
+    const double iconBgRadius = 12.0;
 
     // Measure text
     final textPainter = TextPainter(
       text: TextSpan(
-        text: text.length > 25 ? '${text.substring(0, 22)}...' : text,
+        text: text.length > 15 ? '${text.substring(0, 12)}...' : text,
         style: const TextStyle(
           color: Colors.black,
           fontSize: fontSize,
@@ -94,8 +99,8 @@ class MarkerGenerator {
     );
     textPainter.layout();
 
-    final double width = textPainter.width + iconSize + (padding * 2.5);
-    final double height = textPainter.height + (padding * 1.5);
+    final double width = textPainter.width + (iconBgRadius * 2) + (padding * 2.5);
+    final double height = textPainter.height + (padding * 1.8);
 
     // Draw shadow
     final shadowPaint = Paint()
@@ -122,10 +127,12 @@ class MarkerGenerator {
     // Draw text
     textPainter.paint(canvas, const Offset(padding, padding * 0.75));
 
-    // Draw edit icon (pencil)
-    final iconX = width - padding - iconSize;
-    final iconY = height / 2 - iconSize / 2;
+    // Draw gray circle background for edit icon
+    final iconBgCenter = Offset(width - padding - iconBgRadius, height / 2);
+    final iconBgPaint = Paint()..color = const Color(0xFFF0F0F0); // light gray
+    canvas.drawCircle(iconBgCenter, iconBgRadius, iconBgPaint);
 
+    // Draw edit icon (pencil)
     final iconPainter = TextPainter(
       text: TextSpan(
         text: String.fromCharCode(Icons.edit.codePoint),
@@ -138,13 +145,19 @@ class MarkerGenerator {
       textDirection: TextDirection.ltr,
     );
     iconPainter.layout();
-    iconPainter.paint(canvas, Offset(iconX, iconY));
+    
+    // Center the icon inside the gray circle
+    final iconOffset = Offset(
+      iconBgCenter.dx - iconPainter.width / 2,
+      iconBgCenter.dy - iconPainter.height / 2,
+    );
+    iconPainter.paint(canvas, iconOffset);
 
     final ui.Image image = await pictureRecorder.endRecording().toImage(
-          (width + 4).toInt(),
-          (height + 4).toInt(),
+          ((width + 4) * pixelRatio).toInt(),
+          ((height + 4) * pixelRatio).toInt(),
         );
     final data = await image.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.bytes(data!.buffer.asUint8List());
+    return BitmapDescriptor.bytes(data!.buffer.asUint8List(), imagePixelRatio: pixelRatio);
   }
 }

@@ -19,6 +19,7 @@ class RideProvider extends ChangeNotifier {
   LocationResult? _pickup;
   LocationResult? _drop;
   RouteInfo? _route;
+  bool _shouldCalculateRoute = false;
 
   // Ride config
   String _vehicleType = 'auto';
@@ -45,6 +46,7 @@ class RideProvider extends ChangeNotifier {
   LocationResult? get pickup => _pickup;
   LocationResult? get drop => _drop;
   RouteInfo? get route => _route;
+  bool get shouldCalculateRoute => _shouldCalculateRoute;
   String get vehicleType => _vehicleType;
   int get bidPrice => _bidPrice;
   String get paymentMethod => _paymentMethod;
@@ -133,6 +135,15 @@ class RideProvider extends ChangeNotifier {
   void setRoute(RouteInfo? route) {
     _route = route;
     notifyListeners();
+  }
+
+  void triggerRouteCalculation() {
+    _shouldCalculateRoute = true;
+    notifyListeners();
+  }
+
+  void clearRouteCalculationFlag() {
+    _shouldCalculateRoute = false;
   }
 
   void setVehicleType(String type) {

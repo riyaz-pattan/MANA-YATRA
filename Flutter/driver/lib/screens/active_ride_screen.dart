@@ -1,5 +1,6 @@
 // lib/screens/active_ride_screen.dart
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -37,13 +38,16 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
   StreamSubscription? _rideListener;
   bool _updating = false;
   bool _cameraFitted = false;
-  BitmapDescriptor? _riderPinIcon;
-  BitmapDescriptor? _riderLabelIcon;
+  BitmapDescriptor? _pickupGreenPin;
+  bool _arrivedAtPickup = false;
+  // ignore: prefer_final_fields
+  int _swipeArrivedCounter = 0;
   BitmapDescriptor? _vehicleIcon;
   BitmapDescriptor? _dropDot;
   List<LatLng> _approachRouteCoords = [];
   bool _isFetchingApproach = false;
   LatLng? _lastDriverPos;
+  // ignore: unused_field
   String _driverProximity = '';
   DriverProvider? _driverProvider;
   ConfettiController? _confettiController;
@@ -179,9 +183,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
 
   Future<void> _loadCustomIcons() async {
     try {
-      const config = ImageConfiguration(size: Size(48, 48));
-      _riderPinIcon = await BitmapDescriptor.asset(config, 'assets/images/map_icons/person.png');
-      _riderLabelIcon = await MapUtils.createLabelMarker('Rider is here');
+      _pickupGreenPin = await MapUtils.createDotMarker(color: const Color(0xFF10B981));
       _dropDot = await MapUtils.createDotMarker(color: const Color(0xFFEA4335));
       if (mounted) setState(() {});
     } catch (_) {}
@@ -344,6 +346,17 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
       if (mounted) {
         setState(() => _updating = false);
       }
+    }
+  }
+
+  /// Notify rider via FCM that driver has arrived at pickup
+  Future<void> _notifyRiderDriverArrived() async {
+    try {
+      final callable = FirebaseFunctions.instance.httpsCallable('notifyDriverArrived');
+      await callable.call({'rideId': widget.rideId});
+    } catch (e) {
+      debugPrint('Error notifying rider of arrival: $e');
+      // Non-critical — rider will still see driverArrived in Firestore
     }
   }
 
@@ -894,30 +907,61 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     );
   }
 
-  void _openNavigation() async {
-    if (_ride == null) return;
-    final status = _ride!['status'];
-    double? lat;
-    double? lng;
+  void _navigateToPickup() {
+    if (_ride == null || _ride!['pickup'] == null) return;
+    final lat = (_ride!['pickup']['lat'] as num).toDouble();
+    final lng = (_ride!['pickup']['lng'] as num).toDouble();
+    _launchNavigation(lat, lng);
+  }
 
-    if (status == 'matched' && _ride!['pickup'] != null) {
-      lat = (_ride!['pickup']['lat'] as num).toDouble();
-      lng = (_ride!['pickup']['lng'] as num).toDouble();
-    } else if (status == 'started' && _ride!['drop'] != null) {
-      lat = (_ride!['drop']['lat'] as num).toDouble();
-      lng = (_ride!['drop']['lng'] as num).toDouble();
-    }
+  void _navigateToDrop() {
+    if (_ride == null || _ride!['drop'] == null) return;
+    final lat = (_ride!['drop']['lat'] as num).toDouble();
+    final lng = (_ride!['drop']['lng'] as num).toDouble();
+    _launchNavigation(lat, lng);
+  }
 
-    if (lat != null && lng != null) {
-      final url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
-      if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+  Future<void> _launchNavigation(double lat, double lng) async {
+    try {
+      if (Platform.isAndroid) {
+        final url = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
+        if (await canLaunchUrl(url)) {
+          await launchUrl(url, mode: LaunchMode.externalApplication);
+          return;
+        }
+      } else if (Platform.isIOS) {
+        final googleMapsUrl = Uri.parse('comgooglemaps://?daddr=$lat,$lng&directionsmode=driving');
+        if (await canLaunchUrl(googleMapsUrl)) {
+          await launchUrl(googleMapsUrl, mode: LaunchMode.externalApplication);
+          return;
+        }
+        // Fallback to Apple Maps
+        final appleMapsUrl = Uri.parse('https://maps.apple.com/?daddr=$lat,$lng&dirflg=d');
+        if (await canLaunchUrl(appleMapsUrl)) {
+          await launchUrl(appleMapsUrl, mode: LaunchMode.externalApplication);
+          return;
+        }
+      }
+
+      // Web fallback
+      final webUrl = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
+      if (!await launchUrl(webUrl, mode: LaunchMode.externalApplication)) {
         if (mounted) {
           CustomToast.show(
             context: context,
-            message: 'Could not open Google Maps',
+            message: 'Could not open navigation',
             isError: true,
           );
         }
+      }
+    } catch (e) {
+      debugPrint('Error launching navigation: $e');
+      if (mounted) {
+        CustomToast.show(
+          context: context,
+          message: 'Could not open navigation',
+          isError: true,
+        );
       }
     }
   }
@@ -989,8 +1033,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
           GoogleMap(
             // Push Google Maps UI elements (compass, my-location) below the top bar and above bottom sheet
             padding: EdgeInsets.only(
-              top: 90,
-              bottom: status == 'matched' ? 380 : 380, // Bump padding so zoom controls clear the OTP bottom sheet
+              top: 50,
+              bottom: status == 'matched' ? 320 : 240,
             ),
             style: lightMapStyle,
             myLocationEnabled: status != 'started',
@@ -1030,21 +1074,11 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                     (_ride!['pickup']['lat'] as num).toDouble(),
                     (_ride!['pickup']['lng'] as num).toDouble(),
                   ),
-                  icon: _riderPinIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-                  anchor: const Offset(0.5, 0.5),
+                  icon: _pickupGreenPin ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+                  anchor: const Offset(0.5, 0.9),
                   zIndexInt: 1,
                 ),
-              if (_ride!['pickup'] != null && _riderLabelIcon != null && status == 'matched')
-                Marker(
-                  markerId: const MarkerId('pickup_label'),
-                  position: LatLng(
-                    (_ride!['pickup']['lat'] as num).toDouble(),
-                    (_ride!['pickup']['lng'] as num).toDouble(),
-                  ),
-                  icon: _riderLabelIcon!,
-                  anchor: const Offset(0.5, 1.6), // Increased anchor to push label higher up
-                  zIndexInt: 2,
-                ),
+
               if (_ride!['drop'] != null && status == 'started')
                 Marker(
                   markerId: const MarkerId('drop'),
@@ -1068,72 +1102,76 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
             },
           ),
 
-          // Top bar: status chip + navigate button in same row, hidden when ride ends
-          if (!isEndState)
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: status == 'started'
-                              ? AppTheme.success.withValues(alpha: 0.15)
-                              : AppTheme.primary.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: status == 'started' ? AppTheme.success : AppTheme.primary,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              status == 'started' ? Icons.navigation : Icons.check_circle,
-                              color: status == 'started' ? AppTheme.success : AppTheme.primary,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 8),
-                            Flexible(
-                              child: Text(
-                                status == 'started'
-                                    ? '🚀 Ride in Progress'
-                                    : '🔐 Verify Rider OTP${_driverProximity.isNotEmpty ? " • $_driverProximity" : ""}',
-                                style: GoogleFonts.inter(
-                                  fontWeight: FontWeight.w700,
-                                  color: status == 'started' ? AppTheme.success : AppTheme.primary,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    // Navigate FAB — same row as status chip
-                    FloatingActionButton.small(
-                      heroTag: 'nav_fab',
-                      onPressed: _openNavigation,
-                      backgroundColor: AppTheme.primary,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      elevation: 4,
-                      child: const Icon(Icons.navigation, color: Colors.white, size: 20),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-          // Bottom panel — hidden when ride ends (end screen covers everything)
+          // Bottom panel with floating navigate button — hidden when ride ends
           if (!isEndState)
             Positioned(
               bottom: 0,
               left: 0,
               right: 0,
-              child: _buildBottomPanel(status),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Floating "Navigate to Pickup Location" button (Phase 1: navigating to pickup)
+                  if (status == 'matched' && !_arrivedAtPickup)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton.icon(
+                          onPressed: _navigateToPickup,
+                          icon: const Icon(Icons.navigation_rounded, size: 20),
+                          label: Text(
+                            'Navigate to Pickup Location',
+                            style: GoogleFonts.inter(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.success,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            elevation: 6,
+                            shadowColor: AppTheme.success.withValues(alpha: 0.4),
+                          ),
+                        ),
+                      ),
+                    ),
+                  // Floating "Navigate to Drop Location" button (Phase 3: ride started)
+                  if (status == 'started')
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton.icon(
+                          onPressed: _navigateToDrop,
+                          icon: const Icon(Icons.navigation_rounded, size: 20),
+                          label: Text(
+                            'Navigate to Drop Location',
+                            style: GoogleFonts.inter(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            elevation: 6,
+                            shadowColor: AppTheme.primary.withValues(alpha: 0.4),
+                          ),
+                        ),
+                      ),
+                    ),
+                  _buildBottomPanel(status),
+                ],
+              ),
             ),
 
           // Success / Cancellation Overlay
@@ -1177,71 +1215,60 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
               ),
             ),
 
-            // ── Compact ride info row ──
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: AppTheme.bg,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.circle, size: 7, color: AppTheme.success),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                _ride!['pickup']?['short_name'] ?? '',
-                                style: GoogleFonts.inter(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            const Icon(Icons.location_on, size: 9, color: AppTheme.danger),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                _ride!['drop']?['short_name'] ?? '',
-                                style: GoogleFonts.inter(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    '₹${_ride!['finalPrice'] ?? _ride!['riderBid']}',
-                    style: GoogleFonts.inter(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.success,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
 
-            // ── Status-specific sections ──
-            if (status == 'matched') ...[
+
+            // ── Phase 1: Navigate to Pickup ──
+            if (status == 'matched' && !_arrivedAtPickup) ...[
+
+              SwipeAction(
+                key: ValueKey('arrived_$_swipeArrivedCounter'),
+                text: 'Swipe: Arrived at Pickup',
+                onSwipe: () {
+                  setState(() => _arrivedAtPickup = true);
+                  // Write arrival to Firestore so rider app detects it
+                  FirebaseFirestore.instance.collection('rides').doc(widget.rideId).update({
+                    'driverArrived': true,
+                    'driverArrivedAt': FieldValue.serverTimestamp(),
+                  });
+                  // Send FCM notification to rider
+                  _notifyRiderDriverArrived();
+                },
+                baseColor: AppTheme.success,
+                activeColor: AppTheme.success,
+              ),
+              const SizedBox(height: 10),
+              if (_ride!['riderPhone'] != null)
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final phone = _ride!['riderPhone'];
+                      final uri = Uri.parse('tel:$phone');
+                      if (await canLaunchUrl(uri)) await launchUrl(uri);
+                    },
+                    icon: const Icon(Icons.phone, size: 16),
+                    label: Text('Call Rider', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13)),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      side: const BorderSide(color: AppTheme.border),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+              if (_ride!['riderPhone'] != null) const SizedBox(height: 8),
+              SwipeAction(
+                key: ValueKey('cancel_p1_$_swipeCancelCounter'),
+                text: 'Swipe to Cancel',
+                onSwipe: () {
+                  if (!_updating) _showCancelConfirmation();
+                },
+                baseColor: AppTheme.danger,
+                activeColor: AppTheme.danger,
+              ),
+            ]
+
+            // ── Phase 2: Verify Rider OTP ──
+            else if (status == 'matched' && _arrivedAtPickup) ...[
               // ── OTP input first ──
               Container(
                 width: double.infinity,
@@ -1363,28 +1390,38 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                   ),
                 ],
               ),
-            ] else if (status == 'started') ...[
+              const SizedBox(height: 8),
+              SwipeAction(
+                key: ValueKey('cancel_p2_$_swipeCancelCounter'),
+                text: 'Swipe to Cancel',
+                onSwipe: () {
+                  if (!_updating) _showCancelConfirmation();
+                },
+                baseColor: AppTheme.danger,
+                activeColor: AppTheme.danger,
+              ),
+            ] else if (status == 'started' || status == 'payment_pending') ...[
               SwipeAction(
                 key: ValueKey('complete_$_swipeCompleteCounter'),
-                text: 'Swipe to Complete',
+                text: status == 'payment_pending' ? 'Swipe: View Payment Details' : 'Swipe to Complete',
                 onSwipe: () {
                   if (!_updating) _showCompleteConfirmation();
                 },
                 baseColor: AppTheme.success,
                 activeColor: AppTheme.success,
               ),
+              const SizedBox(height: 8),
+              SwipeAction(
+                key: ValueKey('cancel_p3_$_swipeCancelCounter'),
+                text: 'Swipe to Cancel',
+                onSwipe: () {
+                  if (!_updating) _showCancelConfirmation();
+                },
+                baseColor: AppTheme.danger,
+                activeColor: AppTheme.danger,
+              ),
             ],
 
-            const SizedBox(height: 8),
-            SwipeAction(
-              key: ValueKey('cancel_$_swipeCancelCounter'),
-              text: 'Swipe to Cancel',
-              onSwipe: () {
-                if (!_updating) _showCancelConfirmation();
-              },
-              baseColor: AppTheme.danger,
-              activeColor: AppTheme.danger,
-            ),
           ],
         ),
       ),

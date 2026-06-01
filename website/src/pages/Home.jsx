@@ -3,6 +3,7 @@ import heroMockup from '../assets/hero-mockup.png';
 import ComparisonTable from '../components/ComparisonTable';
 import EarningsCalculator from '../components/EarningsCalculator';
 import PricingCards from '../components/PricingCards';
+import AnimatedSection from '../components/AnimatedSection';
 
 const stats = [
   { number: '0%', label: 'Commission on every ride' },
@@ -81,12 +82,11 @@ const testimonials = [
 export default function Home() {
   return (
     <>
-      {/* ===== Section 1: Hero ===== */}
       <section className="hero">
-        <div className="container">
+        <AnimatedSection animation="fade-in-up" className="container">
           <div className="hero-text">
             <div className="hero-badge">
-              <span className="badge-purple">Now live in Hyderabad 🛺</span>
+              <span className="badge-primary">Now live in Hyderabad 🛺</span>
             </div>
 
             <h1>
@@ -131,12 +131,11 @@ export default function Home() {
               alt="Gaman app screenshot"
             />
           </div>
-        </div>
+        </AnimatedSection>
       </section>
 
-      {/* ===== Section 2: Stats Bar ===== */}
       <section className="stats-bar">
-        <div className="container">
+        <AnimatedSection animation="fade-in" delay={300} className="container">
           <div className="stats-grid">
             {stats.map((stat, i) => (
               <div className="stat-item" key={i}>
@@ -145,12 +144,11 @@ export default function Home() {
               </div>
             ))}
           </div>
-        </div>
+        </AnimatedSection>
       </section>
 
-      {/* ===== Section 3: How It Works ===== */}
       <section className="how-it-works section" id="how-it-works">
-        <div className="container">
+        <AnimatedSection animation="fade-in-up" className="container">
           <div className="section-header">
             <h2>How it works</h2>
           </div>
@@ -192,12 +190,12 @@ export default function Home() {
               </p>
             </div>
           </div>
-        </div>
+        </AnimatedSection>
       </section>
 
       {/* ===== Section 4: Driver Benefits ===== */}
       <section className="driver-benefits section" id="driver-benefits">
-        <div className="container">
+        <AnimatedSection animation="fade-in-up" className="container">
           <div className="section-header">
             <h2>Why drivers are switching to Gaman</h2>
             <p className="section-sub-telugu telugu">
@@ -209,12 +207,11 @@ export default function Home() {
             <ComparisonTable />
             <EarningsCalculator />
           </div>
-        </div>
+        </AnimatedSection>
       </section>
 
-      {/* ===== Section 5: Rider Features ===== */}
       <section className="rider-features section" id="rider-features">
-        <div className="container">
+        <AnimatedSection animation="fade-in-up" className="container">
           <div className="section-header">
             <h2>Finally — a ride app that's fair to everyone</h2>
           </div>
@@ -228,12 +225,25 @@ export default function Home() {
               </div>
             ))}
           </div>
-        </div>
+        </AnimatedSection>
+      </section>
+
+      {/* ===== Section: Referral Highlights ===== */}
+      <section className="referral-highlight section" style={{ backgroundColor: 'var(--surface)', color: 'white', textAlign: 'center' }}>
+        <AnimatedSection animation="zoom-in" className="container">
+          <div className="badge-glow" style={{ marginBottom: 16 }}>🎁 New Feature</div>
+          <h2 style={{ color: 'var(--white)' }}>Refer Drivers. Earn Free Rides.</h2>
+          <p style={{ color: 'var(--text-grey)', fontSize: 18, maxWidth: 600, margin: '16px auto 32px' }}>
+            Get 7 days of free subscription for every driver you refer to MANA YATRA. 
+            No limits. More drivers = lower prices for riders and more earnings for you.
+          </p>
+          <a href="/referral" className="btn btn-primary btn-glow">Learn About Refer & Earn</a>
+        </AnimatedSection>
       </section>
 
       {/* ===== Section 6: Testimonials ===== */}
       <section className="testimonials section" id="testimonials">
-        <div className="container">
+        <AnimatedSection animation="fade-in-up" className="container">
           <div className="section-header">
             <h2>Early drivers are already talking</h2>
           </div>
@@ -247,24 +257,24 @@ export default function Home() {
               </div>
             ))}
           </div>
-        </div>
+        </AnimatedSection>
       </section>
 
       {/* ===== Section 7: Pricing ===== */}
       <section className="pricing-section section" id="pricing">
-        <div className="container">
+        <AnimatedSection animation="fade-in-up" className="container">
           <div className="section-header">
             <h2>Simple, honest pricing for drivers</h2>
             <p>No hidden fees. No per-ride cuts. Ever.</p>
           </div>
 
           <PricingCards />
-        </div>
+        </AnimatedSection>
       </section>
 
       {/* ===== Section 8: Download CTA ===== */}
       <section className="download-cta section">
-        <div className="container">
+        <AnimatedSection animation="zoom-in" className="container">
           <h2>Download Gaman today</h2>
           <p className="cta-sub">
             Available on Android. Free to ride. Free to try for drivers.
@@ -280,7 +290,7 @@ export default function Home() {
           <p className="cta-telugu telugu">
             మన Hyderabad కి మన app. ఇప్పుడే download చేయండి.
           </p>
-        </div>
+        </AnimatedSection>
       </section>
     </>
   );

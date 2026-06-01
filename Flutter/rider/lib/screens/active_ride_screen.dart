@@ -17,7 +17,7 @@ import '../config/constants.dart';
 import '../providers/ride_provider.dart';
 import '../services/google_maps_service.dart';
 import '../utils/map_style.dart';
-import '../utils/map_utils.dart';
+
 import '../utils/marker_utils.dart';
 import 'main_screen.dart';
 import '../utils/custom_toast.dart';
@@ -41,7 +41,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
   StreamSubscription? _locationListener;
   bool _cameraFitted = false;
   BitmapDescriptor? _vehicleIcon;
-  BitmapDescriptor? _driverLabelIcon;
+  BitmapDescriptor? _pickupDot;
   BitmapDescriptor? _dropDot;
   List<LatLng> _approachRouteCoords = [];
   bool _isFetchingApproach = false;
@@ -52,12 +52,20 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
   bool _isDriverSignalStale = false;
   ConfettiController? _confettiController;
   late final MarkerAnimator _driverAnimator;
+  // Distance label state
+  bool _showFullBanner = true;
+  bool _driverArrived = false;
+  Timer? _bannerTimer;
 
   @override
   void initState() {
     super.initState();
     _driverAnimator = MarkerAnimator(vsync: this);
     _listenRide();
+    // Auto-dismiss the full banner after 5 seconds
+    _bannerTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) setState(() => _showFullBanner = false);
+    });
   }
 
   @override
@@ -65,6 +73,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     _rideListener?.cancel();
     _locationListener?.cancel();
     _driverAnimator.dispose();
+    _bannerTimer?.cancel();
     super.dispose();
   }
 
@@ -101,6 +110,11 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
           _fetchApproachRoute();
         }
 
+        // Detect driver arrival
+        if (data['driverArrived'] == true && !_driverArrived) {
+          if (mounted) setState(() => _driverArrived = true);
+        }
+
         if (data['status'] == 'completed' || data['status'] == 'cancelled') {
           // The build method now handles returning the full screen End UI
         }
@@ -117,7 +131,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     try {
       const config = ImageConfiguration(size: Size(48, 48));
       _vehicleIcon = await BitmapDescriptor.asset(config, path);
-      _driverLabelIcon = await MapUtils.createLabelMarker('Driver is here');
+      _pickupDot = await MarkerGenerator.createDotMarker(color: Colors.green);
       _dropDot = await MarkerGenerator.createDotMarker(color: AppTheme.danger);
       if (mounted) setState(() {});
     } catch (_) {}
@@ -526,7 +540,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                             _confettiController?.stop();
                             context.read<RideProvider>().resetRide();
                             Navigator.of(context).pushAndRemoveUntil(
-                              MaterialPageRoute(builder: (_) => const MainScreen()),
+                              MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
                               (_) => false,
                             );
                           },
@@ -599,6 +613,100 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
         Text(label,
             style: GoogleFonts.inter(fontSize: 11, color: AppTheme.text3)),
       ],
+    );
+  }
+
+  /// Full-width banner shown for first 5 seconds: "✅ Driver Matched • 300m away"
+  Widget _buildFullBanner() {
+    return Container(
+      key: const ValueKey('full_banner'),
+      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.primary.withValues(alpha: 0.95),
+            AppTheme.primary.withValues(alpha: 0.80),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primary.withValues(alpha: 0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.check_circle, color: Colors.white, size: 18),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              'Driver Matched${_driverProximity.isNotEmpty ? " • $_driverProximity" : ""}',
+              style: GoogleFonts.inter(
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                color: Colors.white,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Compact corner chip shown after 5 seconds: "📍 300m" or "📍 Driver is nearby"
+  Widget _buildCompactChip() {
+    final bool isNearby = _driverProximity == 'Arriving soon';
+    final String label = isNearby ? 'Driver is nearby' : _driverProximity;
+
+    return Align(
+      key: const ValueKey('compact_chip'),
+      alignment: Alignment.topRight,
+      child: Container(
+        margin: const EdgeInsets.only(right: 16, top: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isNearby
+              ? AppTheme.success.withValues(alpha: 0.95)
+              : Colors.white.withValues(alpha: 0.95),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+          border: isNearby
+              ? null
+              : Border.all(color: AppTheme.border.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isNearby ? Icons.near_me : Icons.location_on,
+              size: 14,
+              color: isNearby ? Colors.white : AppTheme.primary,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label.isNotEmpty ? label : 'Locating...',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: isNearby ? Colors.white : AppTheme.text,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -702,7 +810,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
       }
       context.read<RideProvider>().resetRide();
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const MainScreen()),
+        MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
         (_) => false,
       );
     } catch (e) {
@@ -872,8 +980,19 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
             },
             polylines: _buildPolylines(status, routeCoords),
             markers: {
-              // Rider's own location is shown by the native blue dot (myLocationEnabled: true).
-              // No custom pickup marker needed — avoids the green icon confusion.
+              // Show green pickup pin during matched phase
+              if (_ride!['pickup'] != null && status == 'matched')
+                Marker(
+                  markerId: const MarkerId('pickup'),
+                  position: LatLng(
+                    (_ride!['pickup']['lat'] as num).toDouble(),
+                    (_ride!['pickup']['lng'] as num).toDouble(),
+                  ),
+                  icon: _pickupDot ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+                  anchor: const Offset(0.5, 0.9),
+                  zIndexInt: 0,
+                ),
+              // Drop pin during ride
               if (_ride!['drop'] != null && status == 'started')
                 Marker(
                   markerId: const MarkerId('drop'),
@@ -883,6 +1002,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                   ),
                   icon: _dropDot ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
                 ),
+              // Driver vehicle marker
               if (_driverAnimator.currentPos != null)
                 Marker(
                   markerId: const MarkerId('driver'),
@@ -892,103 +1012,86 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                   anchor: const Offset(0.5, 0.5),
                   zIndexInt: 1,
                 ),
-              // Only show "Driver is here" label during matched phase; hide once ride starts
-              if (_driverAnimator.currentPos != null && _driverLabelIcon != null && status == 'matched')
-                Marker(
-                  markerId: const MarkerId('driver_label'),
-                  position: _driverAnimator.currentPos!,
-                  icon: _driverLabelIcon!,
-                  anchor: const Offset(0.5, 1.2), // Adjusted anchor to reduce gap
-                  zIndexInt: 2,
-                ),
             },
           ),
 
-          // Status bar — hidden when ride ends
-          if (!isEndState)
+          // Distance label — animated banner → compact chip
+          if (!isEndState && status == 'matched')
             SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    margin: const EdgeInsets.all(16),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: status == 'started'
-                          ? AppTheme.success.withValues(alpha: 0.2)
-                          : AppTheme.primary.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: status == 'started'
-                            ? AppTheme.success
-                            : AppTheme.primary,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 400),
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                child: _driverArrived
+                    ? const SizedBox.shrink(key: ValueKey('hidden'))
+                    : _showFullBanner
+                        ? _buildFullBanner()
+                        : _buildCompactChip(),
+              ),
+            ),
+
+          // Ride in progress status chip
+          if (!isEndState && status == 'started')
+            SafeArea(
+              child: Container(
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppTheme.success.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.success),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.navigation, color: AppTheme.success, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      '🚀 Ride in Progress',
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.success,
                       ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          status == 'started'
-                              ? Icons.navigation
-                              : Icons.check_circle,
-                          color: status == 'started'
-                              ? AppTheme.success
-                              : AppTheme.primary,
-                          size: 18,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            status == 'started'
-                                ? '🚀 Ride in Progress'
-                                : '✅ Driver Matched${_driverProximity.isNotEmpty ? " • $_driverProximity" : ""}',
-                            style: GoogleFonts.inter(
-                              fontWeight: FontWeight.w700,
-                              color: status == 'started'
-                                  ? AppTheme.success
-                                  : AppTheme.primary,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Stale signal warning
+          if (!isEndState && _isDriverSignalStale && (status == 'matched' || status == 'started'))
+            SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(top: status == 'matched' && !_driverArrived ? 60 : 70, left: 16, right: 16),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.warning,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
-                  if (_isDriverSignalStale && (status == 'matched' || status == 'started'))
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: AppTheme.warning,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.1),
-                              blurRadius: 4,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.signal_wifi_bad, color: Colors.white, size: 16),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Driver signal lost. Updating...',
-                              style: GoogleFonts.inter(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.signal_wifi_bad, color: Colors.white, size: 16),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Driver signal lost. Updating...',
+                        style: GoogleFonts.inter(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    ),
-                ],
+                    ],
+                  ),
+                ),
               ),
             ),
 

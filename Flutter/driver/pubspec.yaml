@@ -52,6 +52,8 @@ dependencies:
   share_plus: ^10.1.4
   app_links: ^6.3.3
   fl_chart: ^0.70.2
+  table_calendar: ^3.2.0
+  package_info_plus: ^9.0.1
 
 dev_dependencies:
   integration_test:
@@ -68,19 +70,21 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/images/logo/ashvo_saarathi_splash.png"
-  adaptive_icon_background: "#000000"
-  adaptive_icon_foreground: "assets/images/logo/ashvo_saarathi_splash.png"
+  image_path: "assets/images/logo/gaman_driver_logo.png"
+  adaptive_icon_foreground: "assets/images/logo/foreground.png"
+  adaptive_icon_background: "assets/images/logo/background.png"
 
 flutter_native_splash:
-  color: "#000000"
-  image: "assets/images/logo/ashvo_saarathi_splash.png"
   android: true
   ios: true
+
+  color: "#FFcc00"
+  image: "assets/images/logo/splashscreen.png"
+  
   fullscreen: true
   android_12:
-    image: "assets/images/logo/ashvo_saarathi_splash.png"
-    color: "#000000"
+    color: "#FFcc00"
+    image: "assets/images/logo/android12splash.png"
 
 flutter:
   uses-material-design: true

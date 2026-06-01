@@ -1,0 +1,35 @@
+2026-06-01T04:23:02.997597Z ? checkSubscriptions:     at ServiceClientImpl.makeServerStreamRequest (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:342:32)
+2026-06-01T04:23:02.997603Z ? checkSubscriptions:     at ServiceClientImpl.<anonymous> (/workspace/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+2026-06-01T04:23:02.997608Z ? checkSubscriptions:     at /workspace/node_modules/@google-cloud/firestore/build/src/v1/firestore_client.js:242:33
+2026-06-01T04:23:02.997613Z ? checkSubscriptions:     at /workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:38:28
+2026-06-01T04:23:02.997618Z ? checkSubscriptions:     at /workspace/node_modules/google-gax/build/src/normalCalls/timeout.js:44:16
+2026-06-01T04:23:02.997623Z ? checkSubscriptions:     at Object.request (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:234:40)
+2026-06-01T04:23:02.997628Z ? checkSubscriptions:     at makeRequest (/workspace/node_modules/retry-request/index.js:159:28)
+2026-06-01T04:23:02.997633Z ? checkSubscriptions:     at retryRequest (/workspace/node_modules/retry-request/index.js:119:5)
+2026-06-01T04:23:02.997638Z ? checkSubscriptions:     at StreamProxy.setStream (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:225:37)
+2026-06-01T04:23:02.997644Z ? checkSubscriptions:     at StreamingApiCaller.call (/workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:54:16)
+2026-06-01T04:23:02.997652Z ? checkSubscriptions: Caused by: Error
+2026-06-01T04:23:02.997657Z ? checkSubscriptions:     at QueryUtil._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query-util.js:44:23)
+2026-06-01T04:23:02.997662Z ? checkSubscriptions:     at Query._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:784:32)
+2026-06-01T04:23:02.997668Z ? checkSubscriptions:     at Query._get (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:777:35)
+2026-06-01T04:23:02.997672Z ? checkSubscriptions:     at /workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:745:43
+2026-06-01T04:23:02.997677Z ? checkSubscriptions:     at /workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:110:30
+2026-06-01T04:23:02.997682Z ? checkSubscriptions:     at NoopContextManager.with (/workspace/node_modules/@opentelemetry/api/build/src/context/NoopContextManager.js:14:19)
+2026-06-01T04:23:02.997687Z ? checkSubscriptions:     at ContextAPI.with (/workspace/node_modules/@opentelemetry/api/build/src/api/context.js:51:46)
+2026-06-01T04:23:02.997693Z ? checkSubscriptions:     at NoopTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/NoopTracer.js:54:31)
+2026-06-01T04:23:02.997698Z ? checkSubscriptions:     at ProxyTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/ProxyTracer.js:27:24)
+2026-06-01T04:23:02.997703Z ? checkSubscriptions:     at EnabledTraceUtil.startActiveSpan (/workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:102:28) {
+2026-06-01T04:23:02.997707Z ? checkSubscriptions:   code: 9,
+2026-06-01T04:23:02.997714Z ? checkSubscriptions:   details: 'The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/mana-yatra/firestore/indexes?create_composite=Ckpwcm9qZWN0cy9tYW5hLXlhdHJhL2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9kcml2ZXJzL2luZGV4ZXMvXxABGgwKCGlzT25saW5lEAEaGwoXc3Vic2NyaXB0aW9uQWN0aXZlVW50aWwQARoMCghfX25hbWVfXxAB',
+2026-06-01T04:23:02.997733Z ? checkSubscriptions:   metadata: Metadata {
+2026-06-01T04:23:02.997737Z ? checkSubscriptions:     internalRepr: Map(1) { 'x-debug-tracking-id' => [Array] },
+2026-06-01T04:23:02.997742Z ? checkSubscriptions:     opaqueData: Map(0) {},
+2026-06-01T04:23:02.997747Z ? checkSubscriptions:     options: {}
+2026-06-01T04:23:02.997752Z ? checkSubscriptions:   }
+2026-06-01T04:23:02.997756Z ? checkSubscriptions: }
+2026-06-01T04:23:03.094352029Z D expandRideSearch: Function execution took 296 ms, finished with status: 'ok'
+2026-06-01T04:23:03.297323758Z D checkSubscriptions: Function execution took 2065 ms, finished with status: 'ok'
+2026-06-01T04:23:04.244244335Z D autoOfflineIdleDrivers: Function execution started
+2026-06-01T04:23:05.189545081Z D cleanupExpiredRides: Function execution started
+2026-06-01T04:23:05.529041250Z D cleanupExpiredRides: Function execution took 339 ms, finished with status: 'ok'
+2026-06-01T04:23:05.991526341Z D autoOfflineIdleDrivers: Function execution took 1747 ms, finished with status: 'ok'

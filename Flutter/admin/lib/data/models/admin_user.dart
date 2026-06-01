@@ -1,13 +1,12 @@
 // lib/data/models/admin_user.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../core/constants/rbac.dart';
 
 /// Represents an admin user in the system.
 class AdminUser {
   final String uid;
   final String email;
   final String displayName;
-  final AdminRole role;
+  final String role;
   final List<String> permissions;
   final String? createdBy;
   final DateTime? createdAt;
@@ -32,7 +31,7 @@ class AdminUser {
       uid: doc.id,
       email: data['email'] as String? ?? '',
       displayName: (data['displayName'] as String?)?.isNotEmpty == true ? data['displayName'] as String : 'Admin',
-      role: AdminRole.fromString(data['role'] as String? ?? 'viewer'),
+      role: data['role'] as String? ?? 'super_admin',
       permissions: List<String>.from(data['permissions'] ?? []),
       createdBy: data['createdBy'] as String?,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
@@ -45,7 +44,7 @@ class AdminUser {
     return {
       'email': email,
       'displayName': displayName,
-      'role': role.value,
+      'role': role,
       'permissions': permissions,
       'createdBy': createdBy,
       'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : FieldValue.serverTimestamp(),
@@ -58,7 +57,7 @@ class AdminUser {
     String? uid,
     String? email,
     String? displayName,
-    AdminRole? role,
+    String? role,
     List<String>? permissions,
     String? createdBy,
     DateTime? createdAt,
@@ -76,10 +75,5 @@ class AdminUser {
       lastLogin: lastLogin ?? this.lastLogin,
       isActive: isActive ?? this.isActive,
     );
-  }
-
-  /// Check if this admin has a specific permission.
-  bool hasPermission(Permission permission) {
-    return RBACConfig.hasPermission(role, permission);
   }
 }

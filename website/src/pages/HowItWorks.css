@@ -50,7 +50,7 @@
   padding-bottom: 100px;
 }
 
-.hiw-hero .badge-purple {
+.hiw-hero .badge-primary {
   margin-bottom: 24px;
 }
 
@@ -95,7 +95,7 @@
   text-align: center;
 }
 
-.hiw-rider-flow .badge-purple {
+.hiw-rider-flow .badge-primary {
   margin-bottom: 20px;
 }
 
@@ -183,7 +183,7 @@
   text-align: center;
 }
 
-.hiw-driver-flow .badge-green {
+.hiw-driver-flow .badge-secondary {
   margin-bottom: 20px;
 }
 

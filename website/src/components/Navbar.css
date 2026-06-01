@@ -33,18 +33,11 @@
   color: var(--white);
 }
 
-.navbar-logo .logo-icon {
+.navbar-logo .logo-icon-img {
   width: 32px;
   height: 32px;
-  background: var(--accent);
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 18px;
-  color: var(--white);
+  border-radius: 8px;
+  object-fit: contain;
 }
 
 .navbar-logo .logo-text {

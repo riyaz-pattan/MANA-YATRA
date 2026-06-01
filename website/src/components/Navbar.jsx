@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import './Navbar.css';
 
+import gamanLogo from '../assets/gaman_logo.png';
+
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -30,7 +32,7 @@ export default function Navbar() {
       <nav className={`navbar ${scrolled ? 'scrolled' : ''}`}>
         <div className="navbar-inner">
           <Link to="/" className="navbar-logo">
-            <div className="logo-icon">G</div>
+            <img src={gamanLogo} alt="Gaman Logo" className="logo-icon-img" />
             <span className="logo-text">Gaman</span>
           </Link>
 
@@ -39,6 +41,7 @@ export default function Navbar() {
             <Link to="/for-drivers" className={isActive('/for-drivers')}>For Drivers</Link>
             <Link to="/for-riders" className={isActive('/for-riders')}>For Riders</Link>
             <Link to="/pricing" className={isActive('/pricing')}>Pricing</Link>
+            <Link to="/referral" className={isActive('/referral')} style={{color: 'var(--success)', fontWeight: 'bold'}}>Refer & Earn</Link>
           </div>
 
           <div className="navbar-right">
@@ -75,6 +78,7 @@ export default function Navbar() {
         <Link to="/for-drivers">For Drivers</Link>
         <Link to="/for-riders">For Riders</Link>
         <Link to="/pricing">Pricing</Link>
+        <Link to="/referral">Refer & Earn</Link>
         <Link to="/about">About</Link>
         <Link to="/support">Support</Link>
         <div className="mobile-cta">

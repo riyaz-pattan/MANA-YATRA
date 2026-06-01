@@ -8,6 +8,7 @@ import 'delete_account_screen.dart';
 import 'login_screen.dart';
 import '../config/theme.dart';
 import '../utils/skeleton.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -18,14 +19,22 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late Future<void> _loadSettingsFuture;
-  bool _promoNotificationsEnabled = true;
-  String _themeMode = 'System Default';
+  String _appVersion = '';
 
   @override
   void initState() {
     super.initState();
-    // Simulate a brief loading state to show shimmer (as requested for UI polish)
-    _loadSettingsFuture = Future.delayed(const Duration(milliseconds: 600));
+    _loadSettingsFuture = _initSettings();
+  }
+
+  Future<void> _initSettings() async {
+    await Future.delayed(const Duration(milliseconds: 600));
+    final packageInfo = await PackageInfo.fromPlatform();
+    if (mounted) {
+      setState(() {
+        _appVersion = packageInfo.version;
+      });
+    }
   }
 
   @override
@@ -59,30 +68,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ],
               ),
-              
               const SizedBox(height: 24),
-              _buildSectionTitle('Preferences'),
-              _buildSettingsGroup(
-                children: [
-                  _buildSwitchTile(
-                    icon: Icons.notifications_active_outlined,
-                    title: 'Promotional Alerts',
-                    value: _promoNotificationsEnabled,
-                    onChanged: (val) {
-                      setState(() => _promoNotificationsEnabled = val);
-                      // TODO: Save preference locally/remotely
-                    },
-                    showDivider: true,
-                  ),
-                  _buildSettingTile(
-                    icon: Icons.dark_mode_outlined,
-                    title: 'App Theme',
-                    trailing: Text(_themeMode, style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 13, fontWeight: FontWeight.w500)),
-                    onTap: _showThemeDialog,
-                  ),
-                ],
-              ),
-              
               const SizedBox(height: 24),
               _buildSectionTitle('Support'),
               _buildSettingsGroup(
@@ -150,7 +136,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 48),
               Center(
                 child: Text(
-                  'App Version 1.0.0',
+                  'App Version $_appVersion',
                   style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text3, fontWeight: FontWeight.w500),
                 ),
               ),
@@ -160,35 +146,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
-
-  void _showThemeDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        title: Text('Choose Theme', style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 18)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: ['System Default', 'Light Mode', 'Dark Mode'].map((mode) {
-            return RadioListTile<String>(
-              title: Text(mode, style: GoogleFonts.inter(fontSize: 15)),
-              value: mode,
-              groupValue: _themeMode,
-              activeColor: AppTheme.primary,
-              onChanged: (val) {
-                if (val != null) {
-                  setState(() => _themeMode = val);
-                  // TODO: Implement actual theme provider switching here
-                  Navigator.pop(ctx);
-                }
-              },
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-
   Widget _buildShimmerLoading() {
     return ListView(
       padding: const EdgeInsets.all(24),
@@ -268,43 +225,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           trailing: trailing ?? const Icon(Icons.chevron_right, color: AppTheme.text3, size: 20),
           onTap: onTap,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        ),
-        if (showDivider)
-          const Divider(height: 1, indent: 56, endIndent: 16, color: AppTheme.border),
-      ],
-    );
-  }
-
-  Widget _buildSwitchTile({
-    required IconData icon,
-    required String title,
-    required bool value,
-    required ValueChanged<bool> onChanged,
-    bool showDivider = false,
-  }) {
-    return Column(
-      children: [
-        SwitchListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-          secondary: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppTheme.bg2,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: AppTheme.primary, size: 20),
-          ),
-          title: Text(
-            title,
-            style: GoogleFonts.inter(
-              fontSize: 15,
-              fontWeight: FontWeight.w500,
-              color: AppTheme.text,
-            ),
-          ),
-          value: value,
-          onChanged: onChanged,
-          activeColor: AppTheme.success,
         ),
         if (showDivider)
           const Divider(height: 1, indent: 56, endIndent: 16, color: AppTheme.border),

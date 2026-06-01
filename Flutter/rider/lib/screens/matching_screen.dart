@@ -98,7 +98,7 @@ class _MatchingScreenState extends State<MatchingScreen>
         if (data['status'] == 'cancelled' || data['status'] == 'expired') {
           context.read<RideProvider>().resetRide();
           Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const MainScreen()),
+            MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
             (_) => false,
           );
         }
@@ -193,7 +193,7 @@ class _MatchingScreenState extends State<MatchingScreen>
       if (mounted) {
         context.read<RideProvider>().resetRide();
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const MainScreen()),
+          MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
           (_) => false,
         );
       }
@@ -222,7 +222,7 @@ class _MatchingScreenState extends State<MatchingScreen>
       if (mounted) {
         context.read<RideProvider>().resetRide();
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const MainScreen()),
+          MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
           (_) => false,
         );
       }
@@ -233,7 +233,7 @@ class _MatchingScreenState extends State<MatchingScreen>
       if (mounted) {
         context.read<RideProvider>().resetRide();
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const MainScreen()),
+          MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
           (_) => false,
         );
       }

@@ -8,11 +8,11 @@
   --black: #000000;
   --dark: #111827;
   --surface: #1F2937;
-  --accent: #6C63FF;
-  --accent-dark: #534AB7;
-  --accent-light: #EEEDFE;
-  --success: #10B981;
-  --success-dark: #059669;
+  --accent: #ffcc00;
+  --accent-dark: #e6b800;
+  --accent-light: rgba(255, 204, 0, 0.15);
+  --success: #0cc0df;
+  --success-dark: #0ba8c4;
   --warning: #F59E0B;
   --white: #FFFFFF;
   --light-grey: #F3F4F6;
@@ -193,24 +193,24 @@ h3 {
 }
 
 /* ===== Badges ===== */
-.badge-purple {
+.badge-primary {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   background: var(--accent-light);
-  color: #3C3489;
+  color: #b38f00;
   font-size: 12px;
   font-weight: 500;
   padding: 4px 12px;
   border-radius: var(--radius-full);
 }
 
-.badge-green {
+.badge-secondary {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: #D1FAE5;
-  color: #065F46;
+  background: rgba(12, 192, 223, 0.1);
+  color: #0ba8c4;
   font-size: 12px;
   font-weight: 500;
   padding: 4px 12px;
@@ -267,6 +267,40 @@ h3 {
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+/* Cinematic Scroll Animations */
+.animated-section {
+  opacity: 0;
+  will-change: opacity, transform;
+}
+
+.animated-section.is-visible {
+  opacity: 1;
+}
+
+.animated-section.fade-in-up {
+  transform: translateY(40px);
+  transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animated-section.fade-in-up.is-visible {
+  transform: translateY(0);
+}
+
+.animated-section.fade-in {
+  transition: opacity 0.8s ease-out;
+}
+
+.animated-section.zoom-in {
+  transform: scale(0.95);
+  transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animated-section.zoom-in.is-visible {
+  transform: scale(1);
 }
 
 /* ===== Responsive ===== */

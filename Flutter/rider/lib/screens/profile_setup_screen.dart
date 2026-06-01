@@ -72,7 +72,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen>
 
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const MainScreen()),
+          MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
           (route) => false,
         );
       }

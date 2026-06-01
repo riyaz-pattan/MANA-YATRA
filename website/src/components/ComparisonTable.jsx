@@ -17,8 +17,8 @@ export default function ComparisonTable() {
         <thead>
           <tr>
             <th></th>
-            <th>Uber / Ola</th>
-            <th>Rapido</th>
+            <th>Other Cab Apps</th>
+            <th>Other Bike Apps</th>
             <th className="col-gaman">
               Gaman
               <span className="table-badge">

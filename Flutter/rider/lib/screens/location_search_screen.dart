@@ -22,6 +22,9 @@ class LocationSearchScreen extends StatefulWidget {
   /// Saved Work location from Firestore (nullable).
   final Map<String, dynamic>? savedWork;
 
+  /// Saved Custom locations from Firestore (nullable).
+  final List<Map<String, dynamic>>? savedCustomPlaces;
+
   /// Whether to auto-focus a specific field.
   /// true = drop, false = pickup, null = default logic.
   final bool? focusDrop;
@@ -31,6 +34,7 @@ class LocationSearchScreen extends StatefulWidget {
     required this.currentPosition,
     this.savedHome,
     this.savedWork,
+    this.savedCustomPlaces,
     this.focusDrop,
   });
 
@@ -487,34 +491,49 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
   }
 
   Widget _buildActionRow() {
+    final children = <Widget>[
+      // Select on map
+      _buildActionChip(
+        icon: Icons.map_outlined,
+        label: 'Select on map',
+        onTap: _openMapPicker,
+      ),
+    ];
+
+    if (widget.savedHome != null) {
+      children.add(const SizedBox(width: 10));
+      children.add(_buildActionChip(
+        icon: Icons.home_rounded,
+        label: 'Home',
+        onTap: () => _selectSavedPlace(widget.savedHome!, 'Home'),
+      ));
+    }
+
+    if (widget.savedWork != null) {
+      children.add(const SizedBox(width: 10));
+      children.add(_buildActionChip(
+        icon: Icons.work_rounded,
+        label: 'Work',
+        onTap: () => _selectSavedPlace(widget.savedWork!, 'Work'),
+      ));
+    }
+
+    if (widget.savedCustomPlaces != null) {
+      for (final place in widget.savedCustomPlaces!) {
+        children.add(const SizedBox(width: 10));
+        children.add(_buildActionChip(
+          icon: Icons.star_rounded,
+          label: place['short_name'] ?? 'Custom Place',
+          onTap: () => _selectSavedPlace(place, place['short_name'] ?? 'Custom Place'),
+        ));
+      }
+    }
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
-        children: [
-          // Select on map
-          _buildActionChip(
-            icon: Icons.map_outlined,
-            label: 'Select on map',
-            onTap: _openMapPicker,
-          ),
-          const SizedBox(width: 10),
-          // Home shortcut
-          if (widget.savedHome != null)
-            _buildActionChip(
-              icon: Icons.home_rounded,
-              label: 'Home',
-              onTap: () => _selectSavedPlace(widget.savedHome!, 'Home'),
-            ),
-          if (widget.savedHome != null) const SizedBox(width: 10),
-          // Work shortcut
-          if (widget.savedWork != null)
-            _buildActionChip(
-              icon: Icons.work_rounded,
-              label: 'Work',
-              onTap: () => _selectSavedPlace(widget.savedWork!, 'Work'),
-            ),
-        ],
+        children: children,
       ),
     );
   }

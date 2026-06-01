@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
-import 'role_management_screen.dart';
 import 'audit_log_screen.dart';
 import 'feature_flags_screen.dart';
 
@@ -21,7 +20,7 @@ class SystemHubScreen extends ConsumerWidget {
     final text3Color = isDark ? AppTheme.darkText3 : AppTheme.lightText3;
 
     return DefaultTabController(
-      length: 3,
+      length: 2,
       child: Scaffold(
         backgroundColor: bg,
         appBar: AppBar(
@@ -38,7 +37,6 @@ class SystemHubScreen extends ConsumerWidget {
                 indicatorColor: AppTheme.brandBlue,
                 indicatorWeight: 3,
                 tabs: const [
-                  Tab(text: 'Role Management'),
                   Tab(text: 'Audit Logs'),
                   Tab(text: 'Feature Flags'),
                 ],
@@ -48,7 +46,6 @@ class SystemHubScreen extends ConsumerWidget {
         ),
         body: const TabBarView(
           children: [
-            RoleManagementScreen(),
             AuditLogScreen(),
             FeatureFlagsScreen(),
           ],

@@ -38,7 +38,7 @@ export default function DataDeletion() {
       {/* Hero Section */}
       <section className="deletion-hero">
         <div className="container">
-          <span className="badge-purple">🔒 Your Privacy Matters</span>
+          <span className="badge-primary">🔒 Your Privacy Matters</span>
           <h1>Data Deletion</h1>
           <p className="deletion-hero-subtitle">
             We respect your privacy. Here's how you can delete your account and all associated data from Gaman.
@@ -99,7 +99,7 @@ export default function DataDeletion() {
               <h3>Can't Access the App?</h3>
               <p>
                 If you are unable to access the app or your account, you can request account deletion by emailing us at{' '}
-                <a href="mailto:support@manayatra.com">support@manayatra.com</a>{' '}
+                <a href="mailto:support@wetechspire.com">support@wetechspire.com</a>{' '}
                 with the subject line "Account Deletion Request". Please include your registered phone number and name for verification.
               </p>
               <p className="deletion-alt-timeline">

@@ -68,8 +68,8 @@ const driverFaqs = [
     a: 'No! There are no minimum ride requirements, no penalties for going offline, and no forced ride assignments. Drive when you want, as much as you want.',
   },
   {
-    q: 'How is Gaman different from driving for Ola or Uber?',
-    a: 'With Ola/Uber, you lose 20-30% of every fare to commission. With Gaman, you pay a flat ₹20/day subscription and keep 100% of every fare. On 15 rides averaging ₹100 each, that\'s ₹4,000+ more in your pocket every month.',
+    q: 'How is Gaman different from driving for other platforms?',
+    a: 'With other platforms, you lose 20-30% of every fare to commission. With Gaman, you pay a flat ₹20/day subscription and keep 100% of every fare. On 15 rides averaging ₹100 each, that\'s ₹4,000+ more in your pocket every month.',
   },
 ];
 
@@ -81,7 +81,7 @@ export default function ForDrivers() {
       {/* Hero Section */}
       <section className="section fd-hero">
         <div className="container">
-          <span className="badge-green">🚗 For Drivers</span>
+          <span className="badge-secondary">🚗 For Drivers</span>
           <h1>
             Drive on your<br />
             <span className="fd-gradient-text">own terms</span>

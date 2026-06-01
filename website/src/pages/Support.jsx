@@ -6,7 +6,7 @@ export default function Support() {
       {/* Hero Section */}
       <section className="support-hero">
         <div className="container">
-          <span className="badge-purple">💬 We're Here to Help</span>
+          <span className="badge-primary">💬 We're Here to Help</span>
           <h1>How Can We Help?</h1>
           <p className="support-hero-subtitle">
             We're here 24/7 to assist you with anything related to your Gaman experience.
@@ -24,8 +24,8 @@ export default function Support() {
               <p>
                 Send us a detailed message and our team will get back to you within 24 hours.
               </p>
-              <a href="mailto:support@manayatra.com" className="support-card-link">
-                support@manayatra.com
+              <a href="mailto:support@wetechspire.com" className="support-card-link">
+                support@wetechspire.com
               </a>
             </div>
 

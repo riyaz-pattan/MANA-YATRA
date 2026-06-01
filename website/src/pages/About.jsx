@@ -14,7 +14,7 @@ const missionCards = [
   {
     icon: '🤝',
     title: 'Community First',
-    description: 'Gaman is built for Hyderabad, by Hyderabad. We prioritize local needs, local drivers, and building a mobility ecosystem that serves our community.',
+    description: 'Gaman is built for India, starting with Hyderabad. We prioritize local needs, local drivers, and building a mobility ecosystem that serves our community.',
   },
 ];
 
@@ -24,8 +24,8 @@ export default function About() {
       {/* Hero Section */}
       <section className="about-hero">
         <div className="container">
-          <span className="badge-purple">🏙️ Made in Hyderabad</span>
-          <h1>Built in Hyderabad.<br />Built for Hyderabad.</h1>
+          <span className="badge-primary">🏙️ Built for India</span>
+          <h1>Fair rides.<br />Now live in Hyderabad.</h1>
           <p className="about-hero-telugu telugu">
             మన city, మన app, మన drivers.
           </p>
@@ -37,10 +37,10 @@ export default function About() {
         <div className="container">
           <div className="story-content">
             <div className="story-text">
-              <span className="badge-purple">💡 Our Story</span>
+              <span className="badge-primary">💡 Our Story</span>
               <h2>Why we built Gaman</h2>
               <p>
-                Every day, thousands of drivers in Hyderabad wake up before dawn, navigate through traffic, and work 12-14 hour shifts — only to hand over 20-30% of their hard-earned money to ride-hailing platforms. That's not a partnership. That's exploitation.
+                Every day, thousands of drivers wake up before dawn, navigate through traffic, and work 12-14 hour shifts — only to hand over 20-30% of their hard-earned money to ride-hailing platforms. That's not a partnership. That's exploitation.
               </p>
               <p>
                 We started Gaman because we believe the people who do the work should keep the money. It's that simple. No complicated revenue-sharing formulas, no hidden platform fees, no surge pricing that benefits the platform more than the driver.
@@ -71,7 +71,7 @@ export default function About() {
       <section className="section about-mission-section">
         <div className="container">
           <div className="about-mission-header">
-            <span className="badge-green">🎯 Our Mission</span>
+            <span className="badge-secondary">🎯 Our Mission</span>
             <h2>What drives us</h2>
             <p className="about-mission-subtitle">
               Three principles guide everything we build at Gaman.
@@ -93,16 +93,16 @@ export default function About() {
       <section className="section about-team-section">
         <div className="container">
           <div className="about-team-content">
-            <span className="badge-purple">👥 Our Team</span>
+            <span className="badge-primary">👥 Our Team</span>
             <h2>The people behind Gaman</h2>
             <p className="about-team-description">
-              Our team is growing. We're a small, passionate group based in Hyderabad, building the future of fair mobility. We come from diverse backgrounds — tech, transportation, design — but share one common belief: drivers deserve better.
+              Our team is growing. We're a small, passionate group currently operating in Hyderabad, building the future of fair mobility. We come from diverse backgrounds — tech, transportation, design — but share one common belief: drivers deserve better.
             </p>
             <div className="about-team-cta">
               <p className="about-team-join">
                 Interested in joining us? We're always looking for people who care about making a difference.
               </p>
-              <a href="mailto:support@manayatra.com" className="btn btn-primary">
+              <a href="mailto:support@wetechspire.com" className="btn btn-primary">
                 Get in Touch
               </a>
             </div>

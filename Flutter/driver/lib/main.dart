@@ -17,6 +17,7 @@ import 'screens/onboarding_screen.dart';
 import 'screens/pending_screen.dart';
 import 'screens/rejected_screen.dart';
 import 'screens/account_deletion_pending_screen.dart';
+import 'screens/custom_splash_screen.dart';
 
 import 'screens/dashboard_screen.dart';
 import 'screens/active_ride_screen.dart';
@@ -60,43 +61,87 @@ late final FirestoreRideRepository rideRepository;
 late final FirebaseAuthRepository authRepository;
 late final AnalyticsService analyticsService;
 
-void main() async {
+void main() {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+  runApp(const AppInitializer());
+}
 
-  // Only await the bare essentials — dotenv + Firebase Auth need to be ready
-  await dotenv.load(fileName: ".env");
-  await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
+class AppInitializer extends StatefulWidget {
+  const AppInitializer({super.key});
 
-  await FirebaseAppCheck.instance.activate(
-    androidProvider: kDebugMode
-        ? AndroidProvider.debug
-        : AndroidProvider.playIntegrity,
-  );
+  @override
+  State<AppInitializer> createState() => _AppInitializerState();
+}
 
-  // Initialize Crashlytics and Global Error Handling
-  await ErrorHandler.initialize();
+class _AppInitializerState extends State<AppInitializer> {
+  bool _initialized = false;
 
-  // Initialize Hive for persistent action queue
-  await Hive.initFlutter();
-  actionQueueService = ActionQueueService();
-  await actionQueueService.init();
-  syncEngine = SyncEngine(actionQueueService);
-  syncEngine.start();
+  @override
+  void initState() {
+    super.initState();
+    _initApp();
+  }
 
-  rideRepository = FirestoreRideRepository(syncEngine: syncEngine);
-  authRepository = FirebaseAuthRepository();
-  analyticsService = AnalyticsService();
+  Future<void> _initApp() async {
+    // Remove native splash right after the first frame of CustomSplashScreen is rendered
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FlutterNativeSplash.remove();
+    });
 
-  // Remove splash immediately — UI is ready to render
-  FlutterNativeSplash.remove();
-  runApp(const ManaYatraDriverApp());
+    await Future.wait([
+      Future.delayed(const Duration(milliseconds: 1500)),
+      () async {
+        // Only await the bare essentials — dotenv + Firebase Auth need to be ready
+        await dotenv.load(fileName: ".env");
+        await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
 
-  // Initialize FCM in the background (non-blocking)
-  _initFCM();
+        await FirebaseAppCheck.instance.activate(
+          androidProvider: kDebugMode
+              ? AndroidProvider.debug
+              : AndroidProvider.playIntegrity,
+        );
 
-  // Initialize deep link handling (non-blocking)
-  _initDeepLinks();
+        // Initialize Crashlytics and Global Error Handling
+        await ErrorHandler.initialize();
+
+        // Initialize Hive for persistent action queue
+        await Hive.initFlutter();
+        actionQueueService = ActionQueueService();
+        await actionQueueService.init();
+        syncEngine = SyncEngine(actionQueueService);
+        syncEngine.start();
+
+        rideRepository = FirestoreRideRepository(syncEngine: syncEngine);
+        authRepository = FirebaseAuthRepository();
+        analyticsService = AnalyticsService();
+
+        // Initialize FCM in the background (non-blocking)
+        _initFCM();
+
+        // Initialize deep link handling (non-blocking)
+        _initDeepLinks();
+      }(),
+    ]);
+
+    if (mounted) {
+      setState(() {
+        _initialized = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_initialized) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.darkTheme,
+        home: const CustomSplashScreen(),
+      );
+    }
+    return const ManaYatraDriverApp();
+  }
 }
 
 /// Sets up Firebase Cloud Messaging listeners.
@@ -181,10 +226,7 @@ void _handleDeepLink(Uri uri) async {
       // If user is already logged in, show a toast
       final ctx = navigatorKey.currentContext;
       if (ctx != null && ctx.mounted) {
-        CustomToast.show(
-          context: ctx,
-          message: 'Referral code applied: $code',
-        );
+        CustomToast.show(context: ctx, message: 'Referral code applied: $code');
       }
     }
   }
@@ -229,14 +271,16 @@ class AuthGate extends StatelessWidget {
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, authSnap) {
         if (authSnap.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(color: AppTheme.primary),
-            ),
-          );
+          return const CustomSplashScreen();
         }
 
         if (authSnap.data == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final provider = context.read<DriverProvider>();
+            if (provider.user != null) {
+              provider.setUser(null);
+            }
+          });
           return const LoginScreen();
         }
 
@@ -262,11 +306,7 @@ class AuthGate extends StatelessWidget {
             if (provider.user == null ||
                 provider.authLoading ||
                 provider.profileLoading) {
-              return const Scaffold(
-                body: Center(
-                  child: CircularProgressIndicator(color: AppTheme.primary),
-                ),
-              );
+              return const CustomSplashScreen();
             }
 
             // Handle Profile states from Provider

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -25,8 +26,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final searchCtrl = TextEditingController();
+    final customNameCtrl = TextEditingController();
     List<PlacePrediction> predictions = [];
     bool searching = false;
+    Timer? debounce;
 
     await showModalBottomSheet(
       context: context,
@@ -74,10 +77,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 fontSize: 20, fontWeight: FontWeight.w700)),
                       ],
                     ),
+                    if (label == 'Custom Place') ...[
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: customNameCtrl,
+                        style: GoogleFonts.inter(fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: 'Enter name for custom place...',
+                          labelText: 'Place Name',
+                          prefixIcon: const Icon(Icons.edit, size: 20),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppTheme.border),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppTheme.border),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppTheme.primary),
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     TextField(
                       controller: searchCtrl,
-                      autofocus: true,
+                      autofocus: label != 'Custom Place',
                       style: GoogleFonts.inter(fontSize: 14),
                       decoration: InputDecoration(
                         hintText: 'Search for $label location...',
@@ -92,16 +119,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               )
                             : null,
                       ),
-                      onChanged: (q) async {
+                      onChanged: (q) {
+                        if (debounce?.isActive ?? false) debounce!.cancel();
                         if (q.isEmpty) {
                           setSheetState(() => predictions = []);
                           return;
                         }
                         setSheetState(() => searching = true);
-                        final res = await GoogleMapsService.getPlacePredictions(q);
-                        setSheetState(() {
-                          predictions = res;
-                          searching = false;
+                        debounce = Timer(const Duration(milliseconds: 1000), () async {
+                          final res = await GoogleMapsService.getPlacePredictions(q);
+                          setSheetState(() {
+                            predictions = res;
+                            searching = false;
+                          });
                         });
                       },
                     ),
@@ -148,10 +178,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               final detail = await GoogleMapsService.getPlaceDetails(p.placeId);
                               
                               if (detail != null) {
-                                await FirebaseFirestore.instance
-                                    .collection('users')
-                                    .doc(uid)
-                                    .update({firestoreKey: detail.toMap()});
+                                final detailMap = detail.toMap();
+                                if (label == 'Custom Place') {
+                                  detailMap['short_name'] = customNameCtrl.text.trim().isEmpty 
+                                      ? (detail.shortName.isNotEmpty ? detail.shortName : detail.displayName)
+                                      : customNameCtrl.text.trim();
+                                  
+                                  await FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(uid)
+                                      .update({
+                                    'savedCustomPlaces': FieldValue.arrayUnion([detailMap])
+                                  });
+                                } else {
+                                  await FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(uid)
+                                      .update({firestoreKey: detailMap});
+                                }
                                 
                                 if (ctx.mounted) Navigator.pop(ctx);
                                 if (!context.mounted) return;
@@ -215,6 +259,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .collection('users')
           .doc(uid)
           .update({firestoreKey: FieldValue.delete()});
+      if (mounted) {
+        CustomToast.show(
+            context: context, message: '$label location removed');
+      }
+    }
+  }
+
+  Future<void> _removeCustomPlace(Map<String, dynamic> placeMap) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final label = placeMap['short_name'] ?? 'Custom Place';
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Remove $label?',
+            style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+        content: Text('This will remove your saved $label location.',
+            style: GoogleFonts.inter(color: AppTheme.text2)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child:
+                Text('Cancel', style: GoogleFonts.inter(color: AppTheme.text3)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.danger,
+              minimumSize: const Size(80, 40),
+            ),
+            child: Text('Remove', style: GoogleFonts.inter()),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .update({
+        'savedCustomPlaces': FieldValue.arrayRemove([placeMap])
+      });
       if (mounted) {
         CustomToast.show(
             context: context, message: '$label location removed');
@@ -477,7 +566,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildSavedPlacesSection(Map<String, dynamic>? data) {
     final homePlace = data?['savedHome'] as Map<String, dynamic>?;
     final workPlace = data?['savedWork'] as Map<String, dynamic>?;
-    final customPlace = data?['savedCustom'] as Map<String, dynamic>?;
+    final customPlaces = (data?['savedCustomPlaces'] as List<dynamic>?)
+        ?.map((e) => e as Map<String, dynamic>)
+        .toList() ?? [];
+
+    final children = <Widget>[
+      _buildSavedPlaceRow(
+        icon: Icons.home_rounded,
+        label: 'Home',
+        address: homePlace?['short_name'],
+        firestoreKey: 'savedHome',
+      ),
+      const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Divider(color: AppTheme.border, height: 1),
+      ),
+      _buildSavedPlaceRow(
+        icon: Icons.work_rounded,
+        label: 'Work',
+        address: workPlace?['short_name'],
+        firestoreKey: 'savedWork',
+      ),
+    ];
+
+    for (var i = 0; i < customPlaces.length; i++) {
+      final place = customPlaces[i];
+      children.add(const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Divider(color: AppTheme.border, height: 1),
+      ));
+      children.add(_buildCustomPlaceRow(place));
+    }
+
+    if (customPlaces.length < 5) {
+      children.add(const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Divider(color: AppTheme.border, height: 1),
+      ));
+      children.add(_buildSavedPlaceRow(
+        icon: Icons.star_rounded,
+        label: 'Custom Place',
+        address: null,
+        firestoreKey: 'savedCustomPlaces',
+      ));
+    }
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -487,32 +619,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
         border: Border.all(color: AppTheme.border),
       ),
       child: Column(
+        children: children,
+      ),
+    );
+  }
+
+  Widget _buildCustomPlaceRow(Map<String, dynamic> place) {
+    final label = place['short_name'] ?? 'Custom Place';
+    final address = place['display_name'] ?? '';
+
+    return InkWell(
+      onTap: () {}, // Custom places are added via the bottom sheet, not edited directly once added
+      borderRadius: BorderRadius.circular(12),
+      child: Row(
         children: [
-          _buildSavedPlaceRow(
-            icon: Icons.home_rounded,
-            label: 'Home',
-            address: homePlace?['short_name'],
-            firestoreKey: 'savedHome',
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.star_rounded, size: 22, color: AppTheme.primary),
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Divider(color: AppTheme.border, height: 1),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.text),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  address,
+                  style: GoogleFonts.inter(fontSize: 12, color: AppTheme.text2),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
-          _buildSavedPlaceRow(
-            icon: Icons.work_rounded,
-            label: 'Work',
-            address: workPlace?['short_name'],
-            firestoreKey: 'savedWork',
-          ),
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Divider(color: AppTheme.border, height: 1),
-          ),
-          _buildSavedPlaceRow(
-            icon: Icons.star_rounded,
-            label: 'Custom Place',
-            address: customPlace?['short_name'],
-            firestoreKey: 'savedCustom',
+          IconButton(
+            icon: const Icon(Icons.close, size: 18, color: AppTheme.text3),
+            onPressed: () => _removeCustomPlace(place),
+            tooltip: 'Remove',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
           ),
         ],
       ),

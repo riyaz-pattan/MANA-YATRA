@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config/theme.dart';
 import '../config/constants.dart';
 import 'report_issue_screen.dart';
+import 'my_tickets_screen.dart';
 
 class SupportScreen extends StatelessWidget {
   const SupportScreen({super.key});
@@ -13,7 +14,10 @@ class SupportScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Support', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+        title: Text(
+          'Support',
+          style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+        ),
         backgroundColor: AppTheme.surface,
         elevation: 0,
       ),
@@ -22,30 +26,15 @@ class SupportScreen extends StatelessWidget {
         children: [
           const Icon(Icons.support_agent, size: 64, color: AppTheme.primary),
           const SizedBox(height: 16),
-          Text(
-            'How can we help you?',
-            style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 32),
-          _buildContactCard(
-            icon: Icons.phone,
-            title: 'Call Support',
-            subtitle: '+91 8000 000 000',
-            onTap: () async {
-              final Uri launchUri = Uri(scheme: 'tel', path: '+918000000000');
-              if (await canLaunchUrl(launchUri)) {
-                await launchUrl(launchUri);
-              }
-            },
-          ),
-          const SizedBox(height: 16),
           _buildContactCard(
             icon: Icons.email,
             title: 'Email Us',
-            subtitle: 'support@manayatra.com',
+            subtitle: 'support@wetechspire.com',
             onTap: () async {
-              final Uri launchUri = Uri(scheme: 'mailto', path: 'support@manayatra.com');
+              final Uri launchUri = Uri(
+                scheme: 'mailto',
+                path: 'support@wetechspire.com',
+              );
               if (await canLaunchUrl(launchUri)) {
                 await launchUrl(launchUri);
               }
@@ -57,10 +46,24 @@ class SupportScreen extends StatelessWidget {
             title: 'Report an Issue',
             subtitle: 'Raise a support ticket',
             onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportIssueScreen()));
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ReportIssueScreen()),
+              );
             },
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 16),
+          _buildContactCard(
+            icon: Icons.history,
+            title: 'My Tickets',
+            subtitle: 'View your support tickets',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const MyTicketsScreen()),
+              );
+            },
+          ),
           const SizedBox(height: 32),
           Text(
             'Smart Help Topics',
@@ -75,10 +78,30 @@ class SupportScreen extends StatelessWidget {
             crossAxisSpacing: 12,
             childAspectRatio: 1.1,
             children: [
-              _buildSmartFaqCard(context, Icons.account_balance_wallet_outlined, 'Earnings & Payments', 'Learn about 0% commission'),
-              _buildSmartFaqCard(context, Icons.electric_rickshaw_outlined, 'Ride Issues', 'Disputes, cancellations'),
-              _buildSmartFaqCard(context, Icons.person_outline, 'Account Details', 'Update phone or vehicle'),
-              _buildSmartFaqCard(context, Icons.security_outlined, 'Safety & Rules', 'Community guidelines'),
+              _buildSmartFaqCard(
+                context,
+                Icons.account_balance_wallet_outlined,
+                'Earnings & Payments',
+                'Learn about 0% commission',
+              ),
+              _buildSmartFaqCard(
+                context,
+                Icons.electric_rickshaw_outlined,
+                'Ride Issues',
+                'Disputes, cancellations',
+              ),
+              _buildSmartFaqCard(
+                context,
+                Icons.person_outline,
+                'Account Details',
+                'Update phone or vehicle',
+              ),
+              _buildSmartFaqCard(
+                context,
+                Icons.security_outlined,
+                'Safety & Rules',
+                'Community guidelines',
+              ),
             ],
           ),
         ],
@@ -86,7 +109,12 @@ class SupportScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildContactCard({required IconData icon, required String title, required String subtitle, required VoidCallback onTap}) {
+  Widget _buildContactCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
@@ -112,8 +140,20 @@ class SupportScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600)),
-                  Text(subtitle, style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2)),
+                  Text(
+                    title,
+                    style: GoogleFonts.inter(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: AppTheme.text2,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -124,7 +164,12 @@ class SupportScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSmartFaqCard(BuildContext context, IconData icon, String title, String subtitle) {
+  Widget _buildSmartFaqCard(
+    BuildContext context,
+    IconData icon,
+    String title,
+    String subtitle,
+  ) {
     return InkWell(
       onTap: () {
         showDialog(
@@ -135,7 +180,15 @@ class SupportScreen extends StatelessWidget {
               children: [
                 Icon(icon, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                Expanded(child: Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16))),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
               ],
             ),
             content: Text(
@@ -145,7 +198,13 @@ class SupportScreen extends StatelessWidget {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: Text('Close', style: GoogleFonts.inter(color: AppTheme.primary, fontWeight: FontWeight.w600)),
+                child: Text(
+                  'Close',
+                  style: GoogleFonts.inter(
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ],
           ),
@@ -165,13 +224,30 @@ class SupportScreen extends StatelessWidget {
           children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.1), shape: BoxShape.circle),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
               child: Icon(icon, color: AppTheme.primary, size: 20),
             ),
             const SizedBox(height: 12),
-            Text(title, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.text), maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(
+              title,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.text,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
             const SizedBox(height: 4),
-            Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: AppTheme.text3), maxLines: 2, overflow: TextOverflow.ellipsis),
+            Text(
+              subtitle,
+              style: GoogleFonts.inter(fontSize: 11, color: AppTheme.text3),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ),
       ),

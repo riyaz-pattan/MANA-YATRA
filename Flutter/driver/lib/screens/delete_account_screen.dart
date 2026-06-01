@@ -75,10 +75,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           context: context, 
           message: 'Account deleted successfully.',
         );
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
-          (_) => false,
-        );
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
       setState(() => _isLoading = false);

@@ -61,7 +61,7 @@ export default function Pricing() {
         <div className="container">
           <div className="trial-content">
             <div className="trial-text-block">
-              <span className="badge-green">🎉 Free for 7 Days</span>
+              <span className="badge-secondary">🎉 Free for 7 Days</span>
               <h2>Start driving with zero risk</h2>
               <p className="trial-description">
                 Every new driver gets a full 7-day free trial. No strings attached — just download the app, sign up, and start earning immediately.

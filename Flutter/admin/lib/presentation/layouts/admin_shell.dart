@@ -5,7 +5,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
-import '../../core/constants/rbac.dart';
 
 /// Navigation item model for the sidebar/bottom nav.
 class NavItem {
@@ -13,14 +12,12 @@ class NavItem {
   final IconData activeIcon;
   final String label;
   final String routeKey;
-  final Permission? requiredPermission;
 
   const NavItem({
     required this.icon,
     required this.activeIcon,
     required this.label,
     required this.routeKey,
-    this.requiredPermission,
   });
 }
 
@@ -31,63 +28,54 @@ const List<NavItem> allNavItems = [
     activeIcon: Icons.dashboard_rounded,
     label: 'Dashboard',
     routeKey: 'dashboard',
-    requiredPermission: Permission.dashboardView,
   ),
   NavItem(
     icon: Icons.local_taxi_outlined,
     activeIcon: Icons.local_taxi_rounded,
     label: 'Drivers',
     routeKey: 'drivers',
-    requiredPermission: Permission.driversRead,
   ),
   NavItem(
     icon: Icons.people_outlined,
     activeIcon: Icons.people_rounded,
     label: 'Riders',
     routeKey: 'riders',
-    requiredPermission: Permission.usersRead,
   ),
   NavItem(
     icon: Icons.route_outlined,
     activeIcon: Icons.route_rounded,
     label: 'Rides',
     routeKey: 'rides',
-    requiredPermission: Permission.ridesRead,
   ),
   NavItem(
     icon: Icons.account_balance_wallet_outlined,
     activeIcon: Icons.account_balance_wallet_rounded,
     label: 'Financials',
     routeKey: 'financials',
-    requiredPermission: Permission.financialsRead,
   ),
   NavItem(
     icon: Icons.shield_outlined,
     activeIcon: Icons.shield_rounded,
     label: 'Operations',
     routeKey: 'operations',
-    requiredPermission: Permission.operationsRead,
   ),
   NavItem(
     icon: Icons.support_agent_outlined,
     activeIcon: Icons.support_agent_rounded,
     label: 'Support',
     routeKey: 'support',
-    requiredPermission: Permission.supportRead,
   ),
   NavItem(
     icon: Icons.analytics_outlined,
     activeIcon: Icons.analytics_rounded,
     label: 'Analytics',
     routeKey: 'analytics',
-    requiredPermission: Permission.analyticsView,
   ),
   NavItem(
     icon: Icons.settings_outlined,
     activeIcon: Icons.settings_rounded,
     label: 'System',
     routeKey: 'system',
-    requiredPermission: Permission.auditLogView,
   ),
 ];
 
@@ -145,11 +133,7 @@ class _AdminShellState extends ConsumerState<AdminShell>
   }
 
   List<NavItem> _getVisibleNavItems() {
-    final role = ref.watch(adminRoleProvider);
-    return allNavItems.where((item) {
-      if (item.requiredPermission == null) return true;
-      return RBACConfig.hasPermission(role, item.requiredPermission!);
-    }).toList();
+    return allNavItems;
   }
 
   @override
@@ -160,12 +144,91 @@ class _AdminShellState extends ConsumerState<AdminShell>
     final isTablet = screenWidth >= 768 && screenWidth < 1024;
     final isMobile = screenWidth < 768;
     final visibleItems = _getVisibleNavItems();
+    
+    final adminUserAsync = ref.watch(adminUserProvider);
 
-    if (isMobile) {
-      return _buildMobileLayout(visibleItems, isDark);
-    }
+    return adminUserAsync.when(
+      data: (adminUser) {
+        if (adminUser == null) {
+          return _buildUnauthorizedScreen(isDark);
+        }
 
-    return _buildDesktopLayout(visibleItems, isDark, isCollapsed: isTablet);
+        if (isMobile) {
+          return _buildMobileLayout(visibleItems, isDark);
+        }
+
+        return _buildDesktopLayout(visibleItems, isDark, isCollapsed: isTablet);
+      },
+      loading: () => Scaffold(
+        backgroundColor: isDark ? AppTheme.darkBg : AppTheme.lightBg,
+        body: const Center(child: CircularProgressIndicator(color: AppTheme.brandBlue)),
+      ),
+      error: (_, __) => Scaffold(
+        backgroundColor: isDark ? AppTheme.darkBg : AppTheme.lightBg,
+        body: Center(
+          child: Text(
+            'Error loading admin session.',
+            style: GoogleFonts.inter(color: isDark ? AppTheme.darkText : AppTheme.lightText),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUnauthorizedScreen(bool isDark) {
+    return Scaffold(
+      backgroundColor: isDark ? AppTheme.darkBg : AppTheme.lightBg,
+      body: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 400),
+          padding: const EdgeInsets.all(32),
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.security, size: 64, color: AppTheme.danger),
+              const SizedBox(height: 24),
+              Text(
+                'Unauthorized Access',
+                style: GoogleFonts.inter(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? AppTheme.darkText : AppTheme.lightText,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Your account has not been granted access to the Admin Console. Please contact the Super Admin to configure your account in the database.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  color: isDark ? AppTheme.darkText2 : AppTheme.lightText2,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.logout),
+                  label: const Text('Sign Out'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.danger,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => FirebaseAuth.instance.signOut(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // ══════════════════════════════
@@ -601,7 +664,7 @@ class _AdminShellState extends ConsumerState<AdminShell>
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        adminUser?.role.displayName ?? 'Admin',
+                        (adminUser?.role ?? 'Admin').toUpperCase(),
                         style: GoogleFonts.inter(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,

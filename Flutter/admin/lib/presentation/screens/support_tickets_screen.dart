@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
+import '../widgets/ticket_details_dialog.dart';
 
 class SupportTicketsScreen extends ConsumerStatefulWidget {
   const SupportTicketsScreen({super.key});
@@ -16,6 +17,21 @@ class SupportTicketsScreen extends ConsumerStatefulWidget {
 
 class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
   String _filter = 'open'; // open | in_progress | resolved | closed
+  String _roleFilter = 'All Roles';
+  String _categoryFilter = 'All Categories';
+
+  final List<String> _roleOptions = ['All Roles', 'Rider', 'Driver'];
+  final List<String> _categoryOptions = [
+    'All Categories',
+    'Payment Issue',
+    'Payout Issue',
+    'Driver Behavior',
+    'Rider Behavior',
+    'Lost Item',
+    'Navigation Issue',
+    'App Bug',
+    'Other'
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -44,7 +60,18 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
         final resolvedCount = allTickets.where((d) => d['status'] == 'resolved').length;
         final closedCount = allTickets.where((d) => d['status'] == 'closed').length;
 
-        final filtered = allTickets.where((d) => d['status'] == _filter).toList();
+        final filtered = allTickets.where((d) {
+          if (d['status'] != _filter) return false;
+          if (_roleFilter != 'All Roles') {
+            final r = (d['role'] ?? 'rider').toString().toLowerCase();
+            if (r != _roleFilter.toLowerCase()) return false;
+          }
+          if (_categoryFilter != 'All Categories') {
+            final c = (d['category'] ?? 'General').toString();
+            if (c != _categoryFilter) return false;
+          }
+          return true;
+        }).toList();
 
         return SingleChildScrollView(
           padding: EdgeInsets.all(isDesktop ? 32 : 16),
@@ -68,6 +95,18 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
                   ],
                 ),
               ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildDropdown(_roleOptions, _roleFilter, (val) => setState(() => _roleFilter = val!), bg, border, textColor),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _buildDropdown(_categoryOptions, _categoryFilter, (val) => setState(() => _categoryFilter = val!), bg, border, textColor),
+                  ),
+                ],
+              ),
               const SizedBox(height: 24),
 
               if (filtered.isEmpty)
@@ -78,7 +117,7 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
                       children: [
                         Icon(Icons.check_circle_outline, size: 64, color: AppTheme.success.withValues(alpha: 0.5)),
                         const SizedBox(height: 16),
-                        Text('No $_filter tickets', style: GoogleFonts.inter(fontSize: 16, color: text3Color)),
+                        Text('No tickets matching filters', style: GoogleFonts.inter(fontSize: 16, color: text3Color)),
                       ],
                     ),
                   ),
@@ -89,6 +128,28 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildDropdown(List<String> items, String value, ValueChanged<String?> onChanged, Color bg, Color border, Color textColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8), border: Border.all(color: border)),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          isExpanded: true,
+          dropdownColor: bg,
+          icon: Icon(Icons.arrow_drop_down, color: textColor),
+          items: items.map((String item) {
+            return DropdownMenuItem<String>(
+              value: item,
+              child: Text(item, style: GoogleFonts.inter(color: textColor, fontSize: 14, fontWeight: FontWeight.w500)),
+            );
+          }).toList(),
+          onChanged: onChanged,
+        ),
+      ),
     );
   }
 
@@ -154,6 +215,12 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(color: (isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2), borderRadius: BorderRadius.circular(6)),
+                            child: Text(role.toUpperCase(), style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: role == 'driver' ? AppTheme.brandBlue : AppTheme.success)),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(color: (isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2), borderRadius: BorderRadius.circular(6)),
                             child: Text(category, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: textColor)),
                           ),
                           const SizedBox(width: 8),
@@ -172,6 +239,25 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
                       ),
                       const SizedBox(height: 12),
                       Text(subject, style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700, color: textColor)),
+                      if (t['rideId'] != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: InkWell(
+                            onTap: () => _showTicketDetails(t),
+                            borderRadius: BorderRadius.circular(4),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 2.0),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.directions_car, size: 14, color: AppTheme.brandBlue),
+                                  const SizedBox(width: 4),
+                                  Text('Linked Ride: ${t['rideId']}', style: GoogleFonts.inter(fontSize: 12, color: AppTheme.brandBlue, fontWeight: FontWeight.w600, decoration: TextDecoration.underline, decorationColor: AppTheme.brandBlue)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -194,7 +280,7 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
                   ],
                 ),
                 ElevatedButton(
-                  onPressed: () => _updateTicketStatus(t['id']),
+                  onPressed: () => _showTicketDetails(t),
                   style: ElevatedButton.styleFrom(backgroundColor: AppTheme.brandBlue, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
                   child: const Text('View & Update'),
                 ),
@@ -206,27 +292,10 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
     );
   }
 
-  void _updateTicketStatus(String id) {
-    // Show dialog to update status
+  void _showTicketDetails(Map<String, dynamic> ticketData) {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Update Ticket Status'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(title: const Text('Open'), onTap: () => _setStatus(id, 'open', ctx)),
-            ListTile(title: const Text('In Progress'), onTap: () => _setStatus(id, 'in_progress', ctx)),
-            ListTile(title: const Text('Resolved'), onTap: () => _setStatus(id, 'resolved', ctx)),
-            ListTile(title: const Text('Closed'), onTap: () => _setStatus(id, 'closed', ctx)),
-          ],
-        ),
-      ),
+      builder: (ctx) => TicketDetailsDialog(ticketData: ticketData),
     );
-  }
-
-  void _setStatus(String id, String status, BuildContext ctx) {
-    FirebaseFirestore.instance.collection('support_tickets').doc(id).update({'status': status});
-    Navigator.pop(ctx);
   }
 }

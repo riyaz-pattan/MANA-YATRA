@@ -12,6 +12,18 @@ import '../config/theme.dart';
 import '../config/constants.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
+
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    return TextEditingValue(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
+    );
+  }
+}
 
 class OnboardingScreen extends StatefulWidget {
   final bool isResubmission;
@@ -25,7 +37,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _nameController = TextEditingController();
   final _vehicleNumberController = TextEditingController();
   final _upiIdController = TextEditingController();
-  String _vehicleType = 'auto';
+  String? _vehicleType;
   bool _showReferralField = false;
   final _referralCodeController = TextEditingController();
   File? _selfieFile;
@@ -310,12 +322,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<String?> _uploadFile(File file, String path) async {
     try {
+      debugPrint('📤 [UPLOAD] Starting upload: $path (size: ${file.lengthSync()} bytes)');
       final compressed = await _compressImage(file);
+      debugPrint('📤 [UPLOAD] Compressed: ${compressed.lengthSync()} bytes');
       final ref = FirebaseStorage.instance.ref(path);
       await ref.putFile(compressed);
-      return await ref.getDownloadURL();
+      final url = await ref.getDownloadURL();
+      debugPrint('📤 [UPLOAD] SUCCESS: $path → $url');
+      return url;
     } catch (e) {
-      return null;
+      debugPrint('📤 [UPLOAD] FAILED: $path → $e');
+      rethrow; // Let _submit() catch it and show error to user
     }
   }
 
@@ -326,6 +343,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
     if (_vehicleNumberController.text.trim().isEmpty) {
       setState(() => _error = 'Please enter your vehicle number');
+      return;
+    }
+    if (_vehicleType == null) {
+      setState(() => _error = 'Please select a vehicle type');
       return;
     }
     
@@ -403,6 +424,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         'isOnline': false,
       };
 
+      // 1. Read referral code BEFORE Firestore write (before widget potentially disposes)
+      final enteredReferralCode = _referralCodeController.text.trim().toUpperCase();
+
       if (widget.isResubmission) {
         // Merge so we don't overwrite createdAt, subscription fields, etc.
         await FirebaseFirestore.instance
@@ -418,23 +442,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             .set(profileData);
       }
 
-      setState(() => _uploadProgress = 1.0);
+      if (mounted) {
+        setState(() => _uploadProgress = 1.0);
+      }
 
-      // Register referral code if entered in the form
-      if (!widget.isResubmission) {
+      // 2. Register referral code using the local variable
+      if (!widget.isResubmission && enteredReferralCode.isNotEmpty) {
         try {
-          String referralCode = _referralCodeController.text.trim().toUpperCase();
-          if (referralCode.isNotEmpty) {
-            if (!referralCode.startsWith('G-')) {
-              referralCode = 'G-$referralCode';
-            }
-            debugPrint('🔗 [REFERRAL] Calling registerReferral with code: $referralCode');
-            final result = await FirebaseFunctions.instance
-                .httpsCallable('registerReferral')
-                .call({'referralCode': referralCode});
-            debugPrint('🔗 [REFERRAL] registerReferral result: ${result.data}');
+          String referralCode = enteredReferralCode;
+          if (!referralCode.startsWith('G-')) {
+            referralCode = 'G-$referralCode';
           }
-          // Also clear any pending code from deep links
+          debugPrint('🔗 [REFERRAL] Calling registerReferral with code: $referralCode');
+          final result = await FirebaseFunctions.instance
+              .httpsCallable('registerReferral')
+              .call({'referralCode': referralCode});
+          debugPrint('🔗 [REFERRAL] registerReferral result: ${result.data}');
+          
+          // Clear any pending code from deep links
           final prefs = await SharedPreferences.getInstance();
           await prefs.remove('pending_referral_code');
         } catch (e) {
@@ -447,8 +472,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
+      debugPrint('❌ [ONBOARDING] _submit error: $e');
+      if (!mounted) return;
       setState(() {
-        _error = 'Failed to submit. Try again.';
+        _error = e.toString().contains('permission')
+            ? 'Storage permission denied. Please try again.'
+            : 'Failed to submit: ${e.toString().length > 100 ? e.toString().substring(0, 100) : e}';
         _submitting = false;
         _uploadProgress = 0;
       });
@@ -466,357 +495,271 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [AppTheme.bg, AppTheme.bg2],
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Back button for resubmission
-                if (widget.isResubmission) ...[
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surface,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(Icons.arrow_back, size: 20),
+      backgroundColor: AppTheme.bg,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Back button for resubmission
+              if (widget.isResubmission) ...[
+                GestureDetector(
+                  onTap: () => Navigator.of(context).pop(),
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: const BoxDecoration(
+                      color: AppTheme.surface,
+                      shape: BoxShape.circle,
                     ),
+                    child: const Icon(Icons.arrow_back, size: 22, color: AppTheme.text),
                   ),
-                  const SizedBox(height: 16),
-                ],
-
-                const SizedBox(height: 4),
-                const Text('🧑‍✈️', style: TextStyle(fontSize: 40)),
-                const SizedBox(height: 12),
-                Text(
-                  widget.isResubmission
-                      ? 'Resubmit Your Documents'
-                      : 'Complete Your Profile',
-                  style: GoogleFonts.inter(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  widget.isResubmission
-                      ? 'Please upload clear photos to get approved'
-                      : 'Tell us about yourself and your vehicle',
-                  style: GoogleFonts.inter(fontSize: 15, color: AppTheme.text2),
                 ),
                 const SizedBox(height: 24),
+              ],
 
-                // Rejection reasons display for resubmission
-                if (widget.isResubmission && _rejectionReason != null && _rejectionReason!.isNotEmpty) ...[
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: AppTheme.danger.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: AppTheme.danger.withValues(alpha: 0.15),
-                      ),
+              Text(
+                widget.isResubmission ? 'Resubmit Documents' : 'Driver Registration',
+                style: GoogleFonts.outfit(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.text,
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                widget.isResubmission
+                    ? 'Please review the feedback and upload correct documents.'
+                    : 'Join MANA YATRA as a partner. Let\'s get you set up.',
+                style: GoogleFonts.inter(fontSize: 15, color: AppTheme.text2, height: 1.4),
+              ),
+              const SizedBox(height: 32),
+
+              // Rejection reasons display for resubmission
+              if (widget.isResubmission && _rejectionReason != null && _rejectionReason!.isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.danger.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: AppTheme.danger.withValues(alpha: 0.15),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.info_outline, size: 16, color: AppTheme.danger),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Reasons for Rejection',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.danger,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        _rejectionReason!,
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          color: AppTheme.text,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 32),
+              ],
+
+              _sectionTitle('Personal Details'),
+              _buildTextField(
+                label: 'Full Name',
+                hint: 'As per Aadhaar/PAN',
+                controller: _nameController,
+                icon: Icons.person_outline,
+              ),
+              const SizedBox(height: 24),
+              _buildTextField(
+                label: 'Payment UPI ID',
+                hint: 'e.g. 9876543210@ybl',
+                controller: _upiIdController,
+                keyboardType: TextInputType.emailAddress,
+                icon: Icons.account_balance_wallet_outlined,
+              ),
+
+              const SizedBox(height: 40),
+              _sectionTitle('Vehicle Information'),
+              _label('Select Vehicle Type'),
+              const SizedBox(height: 12),
+              Row(
+                children: AppConstants.vehicleTypes.entries.map((e) {
+                  final selected = _vehicleType == e.key;
+                  return Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _vehicleType = e.key),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        margin: const EdgeInsets.symmetric(horizontal: 6),
+                        padding: const EdgeInsets.symmetric(vertical: 20),
+                        decoration: BoxDecoration(
+                          color: selected ? AppTheme.primary : AppTheme.surface,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: selected ? [
+                            BoxShadow(color: AppTheme.primary.withValues(alpha: 0.3), blurRadius: 12, offset: const Offset(0, 4))
+                          ] : [],
+                        ),
+                        child: Column(
                           children: [
-                            const Icon(Icons.info_outline, size: 16, color: AppTheme.danger),
-                            const SizedBox(width: 8),
+                            Text(e.value.icon, style: const TextStyle(fontSize: 36)),
+                            const SizedBox(height: 10),
                             Text(
-                              'Reasons for Rejection',
+                              e.value.label,
                               style: GoogleFonts.inter(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.danger,
+                                fontSize: 14,
+                                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                                color: selected ? Colors.white : AppTheme.text2,
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 10),
-                        Text(
-                          _rejectionReason!,
-                          style: GoogleFonts.inter(
-                            fontSize: 14,
-                            color: AppTheme.text,
-                            height: 1.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                ] else ...[
-                  const SizedBox(height: 8),
-                ],
-
-                // Selfie
-                _label('Your Photo'),
-                _hintNote(
-                  Icons.camera_alt_outlined,
-                  'Take a clear selfie or choose from gallery. Must match your Aadhaar & Driving License photo.',
-                ),
-                const SizedBox(height: 12),
-                Center(child: _selfieCapture()),
-                const SizedBox(height: 28),
-
-                // Name
-                _label('Full Name'),
-                _hintNote(
-                  Icons.info_outline,
-                  'Name must match exactly as on your Aadhaar & PAN card.',
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _nameController,
-                  style: GoogleFonts.inter(fontSize: 15),
-                  decoration: const InputDecoration(
-                    hintText: 'e.g. Rajesh Kumar',
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // Vehicle type
-                _label('Vehicle Type'),
-                Row(
-                  children: AppConstants.vehicleTypes.entries.map((e) {
-                    final selected = _vehicleType == e.key;
-                    return Expanded(
-                      child: GestureDetector(
-                        onTap: () => setState(() => _vehicleType = e.key),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? AppTheme.primary.withValues(alpha: 0.2)
-                                : AppTheme.surface,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: selected
-                                  ? AppTheme.primary
-                                  : AppTheme.border,
-                              width: selected ? 2 : 1,
-                            ),
-                          ),
-                          child: Column(
-                            children: [
-                              Text(
-                                e.value.icon,
-                                style: const TextStyle(fontSize: 32),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                e.value.label,
-                                style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  fontWeight: selected
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                  color: selected
-                                      ? AppTheme.primary
-                                      : AppTheme.text2,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                       ),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 24),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 24),
+              _buildTextField(
+                label: 'Vehicle Number',
+                hint: 'e.g. TS 09 AB 1234',
+                controller: _vehicleNumberController,
+                icon: Icons.directions_car_outlined,
+                formatters: [UpperCaseTextFormatter()],
+                textCapitalization: TextCapitalization.characters,
+              ),
 
-                // Vehicle number
-                _label('Vehicle Number'),
-                TextField(
-                  controller: _vehicleNumberController,
-                  textCapitalization: TextCapitalization.characters,
-                  style: GoogleFonts.inter(fontSize: 15),
-                  decoration: const InputDecoration(
-                    hintText: 'e.g. TS 09 AB 1234',
-                  ),
-                ),
-                const SizedBox(height: 28),
+              const SizedBox(height: 40),
+              _sectionTitle('Verification Documents'),
+              _hintNote('Please ensure all photos are clear and readable.'),
+              const SizedBox(height: 16),
+              
+              _photoUploader(
+                label: 'Driver Profile Photo',
+                file: _selfieFile,
+                existingUrl: _existingSelfieUrl,
+                onTap: () {
+                  if (_selfieFile != null || _existingSelfieUrl != null) {
+                    _showImagePreview(_selfieFile, _existingSelfieUrl);
+                  } else {
+                    _pickSelfie();
+                  }
+                },
+                onLongPress: _pickSelfie,
+                icon: Icons.face,
+              ),
+              const SizedBox(height: 16),
+              
+              _photoUploader(
+                label: 'Aadhaar Card',
+                file: _aadharFile,
+                existingUrl: _existingAadharUrl,
+                onTap: () {
+                  if (_aadharFile != null || _existingAadharUrl != null) {
+                    _showImagePreview(_aadharFile, _existingAadharUrl);
+                  } else {
+                    _pickDocument('aadhar');
+                  }
+                },
+                onLongPress: () => _pickDocument('aadhar'),
+                icon: Icons.badge_outlined,
+              ),
+              const SizedBox(height: 16),
+              
+              _photoUploader(
+                label: 'Driving License',
+                file: _licenseFile,
+                existingUrl: _existingLicenseUrl,
+                onTap: () {
+                  if (_licenseFile != null || _existingLicenseUrl != null) {
+                    _showImagePreview(_licenseFile, _existingLicenseUrl);
+                  } else {
+                    _pickDocument('license');
+                  }
+                },
+                onLongPress: () => _pickDocument('license'),
+                icon: Icons.fact_check_outlined,
+              ),
+              const SizedBox(height: 16),
+              
+              _photoUploader(
+                label: 'Vehicle Photo (with Number Plate)',
+                file: _vehicleFile,
+                existingUrl: _existingVehicleUrl,
+                onTap: () {
+                  if (_vehicleFile != null || _existingVehicleUrl != null) {
+                    _showImagePreview(_vehicleFile, _existingVehicleUrl);
+                  } else {
+                    _pickVehicleImage();
+                  }
+                },
+                onLongPress: _pickVehicleImage,
+                icon: Icons.directions_car_outlined,
+              ),
 
-                // UPI ID
-                _label('Payment UPI ID'),
-                _hintNote(
-                  Icons.payments_outlined,
-                  'Passengers will pay directly to this UPI ID. Ensure it is correct.',
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _upiIdController,
-                  keyboardType: TextInputType.emailAddress,
-                  style: GoogleFonts.inter(fontSize: 15),
-                  decoration: const InputDecoration(
-                    hintText: 'e.g. 9876543210@ybl',
-                  ),
-                ),
-                const SizedBox(height: 28),
-
-                // Documents
-                _label('Documents'),
-                _hintNote(
-                  Icons.verified_user_outlined,
-                  'Name & photo on documents must match your selfie and name above.',
-                ),
-                const SizedBox(height: 12),
-                _docUploader('Aadhaar Card', _aadharFile, 'aadhar'),
-                const SizedBox(height: 10),
-                _docUploader('Driving License', _licenseFile, 'license'),
-                const SizedBox(height: 20),
-
-                // Vehicle photo
-                _label('Vehicle Photo'),
-                _hintNote(
-                  Icons.directions_car_outlined,
-                  'Photo must show the vehicle clearly with the number plate fully visible. This helps verify your vehicle details.',
-                ),
-                const SizedBox(height: 12),
+              // Referral Code
+              if (!widget.isResubmission) ...[
+                const SizedBox(height: 40),
                 GestureDetector(
-                  onTap: () {
-                    if (_vehicleFile != null) {
-                      showDialog(
-                        context: context,
-                        builder: (_) => Dialog(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Image.file(_vehicleFile!, fit: BoxFit.contain),
-                          ),
-                        ),
-                      );
-                    } else {
-                      _pickVehicleImage();
-                    }
-                  },
-                  onLongPress: () => _pickVehicleImage(),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    height: 64,
+                  onTap: () => setState(() => _showReferralField = !_showReferralField),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                     decoration: BoxDecoration(
-                      color: (_vehicleFile != null || _existingVehicleUrl != null)
-                          ? AppTheme.success.withValues(alpha: 0.05)
-                          : AppTheme.surface,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: (_vehicleFile != null || _existingVehicleUrl != null)
-                            ? AppTheme.success.withValues(alpha: 0.3)
-                            : AppTheme.border,
-                      ),
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(16),
                     ),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Row(
                       children: [
                         Icon(
-                          (_vehicleFile != null || _existingVehicleUrl != null)
-                              ? Icons.check_circle
-                              : Icons.directions_car_outlined,
-                          color: (_vehicleFile != null || _existingVehicleUrl != null)
-                              ? AppTheme.success
-                              : AppTheme.text3,
+                          _showReferralField ? Icons.card_giftcard : Icons.card_giftcard_outlined,
                           size: 22,
+                          color: _showReferralField ? AppTheme.accent : AppTheme.text3,
                         ),
                         const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Vehicle Photo',
-                                style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.text,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                (_vehicleFile != null || _existingVehicleUrl != null)
-                                    ? (_existingVehicleUrl != null && _vehicleFile == null
-                                        ? 'Existing photo'
-                                        : 'Tap to preview • Long press to change')
-                                    : 'Tap to upload',
-                                style: GoogleFonts.inter(fontSize: 11, color: AppTheme.text3),
-                              ),
-                            ],
+                        Text(
+                          'Have a referral code?',
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: _showReferralField ? AppTheme.accent : AppTheme.text2,
                           ),
                         ),
-                        if (_vehicleFile == null && _existingVehicleUrl == null)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: AppTheme.primary.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              'Upload',
-                              style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primary),
-                            ),
-                          ),
+                        const Spacer(),
+                        Icon(
+                          _showReferralField ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                          size: 22,
+                          color: AppTheme.text3,
+                        ),
                       ],
                     ),
                   ),
                 ),
-
-                // Referral code section
-                if (!widget.isResubmission) ...[
-                  const SizedBox(height: 24),
-                  GestureDetector(
-                    onTap: () => setState(() => _showReferralField = !_showReferralField),
+                AnimatedCrossFade(
+                  firstChild: const SizedBox.shrink(),
+                  secondChild: Padding(
+                    padding: const EdgeInsets.only(top: 12),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                       decoration: BoxDecoration(
                         color: AppTheme.surface,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppTheme.border),
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            _showReferralField ? Icons.card_giftcard : Icons.card_giftcard_outlined,
-                            size: 20,
-                            color: _showReferralField ? AppTheme.accent : AppTheme.text3,
-                          ),
-                          const SizedBox(width: 10),
-                          Text(
-                            'Have a referral code?',
-                            style: GoogleFonts.inter(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: _showReferralField ? AppTheme.accent : AppTheme.text2,
-                            ),
-                          ),
-                          const Spacer(),
-                          Icon(
-                            _showReferralField ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                            size: 20,
-                            color: AppTheme.text3,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  AnimatedCrossFade(
-                    firstChild: const SizedBox.shrink(),
-                    secondChild: Padding(
-                      padding: const EdgeInsets.only(top: 12),
                       child: TextField(
                         controller: _referralCodeController,
                         textCapitalization: TextCapitalization.characters,
@@ -859,143 +802,165 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             letterSpacing: 2,
                           ),
                           counterText: '',
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
                         ),
                       ),
                     ),
-                    crossFadeState: _showReferralField ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-                    duration: const Duration(milliseconds: 250),
                   ),
-                ],
+                  crossFadeState: _showReferralField ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                  duration: const Duration(milliseconds: 250),
+                ),
+              ],
 
-                const SizedBox(height: 32),
+              const SizedBox(height: 48),
 
-                // Progress bar
-                if (_submitting && _uploadProgress > 0) ...[
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: LinearProgressIndicator(
-                      value: _uploadProgress,
-                      backgroundColor: AppTheme.surface2,
-                      color: AppTheme.primary,
-                      minHeight: 6,
-                    ),
+              // Progress bar
+              if (_submitting && _uploadProgress > 0) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: _uploadProgress,
+                    backgroundColor: AppTheme.surface2,
+                    color: AppTheme.primary,
+                    minHeight: 6,
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _uploadProgress < 0.9
-                        ? 'Uploading documents…'
-                        : 'Saving your profile…',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: AppTheme.text3,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-
-                // Error
-                if (_error.isNotEmpty) ...[
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: AppTheme.danger.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: AppTheme.danger.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Text(
-                      _error,
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.inter(
-                        color: AppTheme.danger,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ],
-
-                // Submit
-                SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: ElevatedButton(
-                    onPressed: _submitting ? null : _submit,
-                    child: _submitting
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: Colors.white,
-                            ),
-                          )
-                        : Text(
-                            widget.isResubmission
-                                ? 'Resubmit for Review →'
-                                : 'Submit for Review →',
-                            style: GoogleFonts.inter(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 16,
-                            ),
-                          ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _uploadProgress < 0.9
+                      ? 'Uploading documents…'
+                      : 'Saving your profile…',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppTheme.text3,
                   ),
                 ),
                 const SizedBox(height: 16),
-                SizedBox(
+              ],
+
+              // Error
+              if (_error.isNotEmpty) ...[
+                Container(
                   width: double.infinity,
-                  child: TextButton(
-                    onPressed: () {
-                      if (widget.isResubmission) {
-                        Navigator.of(context).pop();
-                      } else {
-                        FirebaseAuth.instance.signOut();
-                      }
-                    },
-                    child: Text(
-                      widget.isResubmission ? 'Go Back' : 'Logout',
-                      style: GoogleFonts.inter(color: AppTheme.text3),
+                  padding: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.only(bottom: 24),
+                  decoration: BoxDecoration(
+                    color: AppTheme.danger.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppTheme.danger.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Text(
+                    _error,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      color: AppTheme.danger,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
               ],
-            ),
+
+              // Submit
+              SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: ElevatedButton(
+                  onPressed: _submitting ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(
+                          widget.isResubmission
+                              ? 'Resubmit for Review →'
+                              : 'Submit for Review →',
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () {
+                    if (widget.isResubmission) {
+                      Navigator.of(context).pop();
+                    } else {
+                      FirebaseAuth.instance.signOut();
+                    }
+                  },
+                  child: Text(
+                    widget.isResubmission ? 'Go Back' : 'Logout',
+                    style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _label(String text) {
+  Widget _sectionTitle(String title) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.only(bottom: 24),
       child: Text(
-        text,
-        style: GoogleFonts.inter(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: AppTheme.text2,
+        title,
+        style: GoogleFonts.outfit(
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.text,
         ),
       ),
     );
   }
 
-  Widget _hintNote(IconData icon, String text) {
+  Widget _label(String text) {
+    return Text(
+      text,
+      style: GoogleFonts.inter(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: AppTheme.text2,
+      ),
+    );
+  }
+
+  Widget _hintNote(String text) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 14, color: AppTheme.warning),
-          const SizedBox(width: 6),
+          const Icon(Icons.info_outline, size: 16, color: AppTheme.text3),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               text,
               style: GoogleFonts.inter(
-                fontSize: 11.5,
-                color: AppTheme.warning,
+                fontSize: 13,
+                color: AppTheme.text3,
                 fontWeight: FontWeight.w500,
                 height: 1.4,
               ),
@@ -1006,181 +971,120 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  Widget _selfieCapture() {
-    final bool hasImage = _selfieFile != null || _existingSelfieUrl != null;
-    return GestureDetector(
-      onTap: _pickSelfie,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        width: 80,
-        height: 80,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: hasImage
-              ? AppTheme.success.withValues(alpha: 0.1)
-              : AppTheme.surface,
-          border: Border.all(
-            color: hasImage ? AppTheme.success : AppTheme.border,
-            width: hasImage ? 3 : 2,
+  Widget _buildTextField({
+    required String label,
+    required String hint,
+    required TextEditingController controller,
+    required IconData icon,
+    TextInputType? keyboardType,
+    List<TextInputFormatter>? formatters,
+    TextCapitalization textCapitalization = TextCapitalization.none,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _label(label),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(16),
           ),
-          boxShadow: hasImage
-              ? [
-                  BoxShadow(
-                    color: AppTheme.success.withValues(alpha: 0.2),
-                    blurRadius: 16,
-                    spreadRadius: 2,
-                  ),
-                ]
-              : null,
+          child: TextField(
+            controller: controller,
+            keyboardType: keyboardType,
+            inputFormatters: formatters,
+            textCapitalization: textCapitalization,
+            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w500, color: AppTheme.text),
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: GoogleFonts.inter(color: AppTheme.text3, fontSize: 15),
+              prefixIcon: Icon(icon, color: AppTheme.text3),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+            ),
+          ),
         ),
-        child: hasImage
-            ? ClipOval(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _selfieFile != null 
-                        ? Image.file(_selfieFile!, fit: BoxFit.cover)
-                        : Image.network(_existingSelfieUrl!, fit: BoxFit.cover),
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [
-                              Colors.black.withValues(alpha: 0.7),
-                              Colors.transparent,
-                            ],
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(
-                              Icons.check_circle,
-                              color: AppTheme.success,
-                              size: 10,
-                            ),
-                            const SizedBox(width: 3),
-                            Text(
-                              _selfieFile != null ? 'Change' : 'Existing',
-                              style: GoogleFonts.inter(
-                                fontSize: 8,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            : Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.add_a_photo_outlined,
-                    color: AppTheme.text3,
-                    size: 28,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Add Photo',
-                    style: GoogleFonts.inter(
-                      color: AppTheme.text3,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
+      ],
+    );
+  }
+
+  void _showImagePreview(File? file, String? url) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: file != null
+              ? Image.file(file, fit: BoxFit.contain)
+              : Image.network(url!, fit: BoxFit.contain),
+        ),
       ),
     );
   }
 
-  Widget _docUploader(String label, File? file, String type) {
-    final hasExisting = (type == 'aadhar' && _existingAadharUrl != null) ||
-        (type == 'license' && _existingLicenseUrl != null);
-    final hasFile = file != null || hasExisting;
+  Widget _photoUploader({
+    required String label,
+    required File? file,
+    required String? existingUrl,
+    required VoidCallback onTap,
+    required VoidCallback onLongPress,
+    required IconData icon,
+  }) {
+    final bool hasFile = file != null || existingUrl != null;
 
     return GestureDetector(
-      onTap: () {
-        if (hasFile && file != null) {
-          // Show preview dialog
-          showDialog(
-            context: context,
-            builder: (_) => Dialog(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.file(file, fit: BoxFit.contain),
-              ),
-            ),
-          );
-        } else {
-          _pickDocument(type);
-        }
-      },
-      onLongPress: () => _pickDocument(type),
+      onTap: onTap,
+      onLongPress: onLongPress,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
-        height: 64,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         decoration: BoxDecoration(
           color: hasFile ? AppTheme.success.withValues(alpha: 0.05) : AppTheme.surface,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: hasFile ? AppTheme.success.withValues(alpha: 0.3) : AppTheme.border,
+            color: hasFile ? AppTheme.success.withValues(alpha: 0.3) : Colors.transparent,
           ),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(
           children: [
-            Icon(
-              hasFile ? Icons.check_circle : Icons.cloud_upload_outlined,
-              color: hasFile ? AppTheme.success : AppTheme.text3,
-              size: 22,
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: hasFile ? AppTheme.success : AppTheme.primary.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                hasFile ? Icons.check : icon,
+                color: hasFile ? Colors.white : AppTheme.primary,
+                size: 22,
+              ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 16),
             Expanded(
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     label,
                     style: GoogleFonts.inter(
-                      fontSize: 13,
+                      fontSize: 14,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.text,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 4),
                   Text(
-                    hasFile
-                        ? (hasExisting && file == null ? 'Existing file' : 'Tap to preview • Long press to change')
-                        : 'Tap to upload',
-                    style: GoogleFonts.inter(fontSize: 11, color: AppTheme.text3),
+                    hasFile ? 'Tap to preview • Long press to change' : 'Tap to upload document',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: hasFile ? AppTheme.success : AppTheme.text3,
+                    ),
                   ),
                 ],
               ),
             ),
-            if (!hasFile)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'Upload',
-                  style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primary),
-                ),
-              ),
           ],
         ),
       ),

@@ -102,7 +102,7 @@ export default function ForRiders() {
       {/* Hero Section */}
       <section className="section fr-hero">
         <div className="container">
-          <span className="badge-purple">🚶 For Riders</span>
+          <span className="badge-primary">🚶 For Riders</span>
           <h1>
             Your ride. Your price.<br />
             <span className="fr-gradient-text">Your choice.</span>
@@ -203,7 +203,7 @@ export default function ForRiders() {
             </div>
           </div>
           <div className="fr-payment-note">
-            <span className="badge-purple">🔒 Direct Payment</span>
+            <span className="badge-primary">🔒 Direct Payment</span>
             <p>
               Gaman never holds your payment. Every rupee goes directly from you to the driver —
               no deductions, no delays.

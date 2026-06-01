@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import './Footer.css';
 
+import gamanLogo from '../assets/gaman_logo.png';
+
 export default function Footer() {
   return (
     <footer className="footer">
@@ -8,7 +10,7 @@ export default function Footer() {
         <div className="footer-grid">
           <div className="footer-brand">
             <div className="footer-logo">
-              <div className="footer-logo-icon">G</div>
+              <img src={gamanLogo} alt="Gaman Logo" className="logo-icon-img" />
               <span className="footer-logo-text">Gaman</span>
             </div>
             <p>
@@ -16,7 +18,7 @@ export default function Footer() {
               fair prices, and 100% earnings for drivers.
             </p>
             <p style={{ marginTop: 8, fontFamily: 'var(--font-telugu)', fontSize: 13 }}>
-              మన Hyderabad కి మన app.
+              Now live in Hyderabad.
             </p>
             <div className="footer-social">
               <a href="#" aria-label="Twitter">𝕏</a>
@@ -49,7 +51,7 @@ export default function Footer() {
         </div>
 
         <div className="footer-bottom">
-          <p>© {new Date().getFullYear()} Gaman. All rights reserved. Built in Hyderabad 🛺</p>
+          <p>© {new Date().getFullYear()} Gaman. All rights reserved. Made in India 🇮🇳</p>
           <div className="footer-bottom-links">
             <a href="https://manayatra.com/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
             <a href="https://manayatra.com/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a>

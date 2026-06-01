@@ -33,7 +33,7 @@ enum RideFlowState { pickup, drop, route }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   GoogleMapController? _mapController;
-  
+
   // Custom Markers
   BitmapDescriptor? _pickupDot;
   BitmapDescriptor? _dropDot;
@@ -53,6 +53,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Timer? _debounce;
   Map<String, dynamic>? _savedHome;
   Map<String, dynamic>? _savedWork;
+  List<Map<String, dynamic>>? _savedCustomPlaces;
   bool _bidBelowMinimum = false; // tracks min-fare warning state
 
   StreamSubscription? _rideListener;
@@ -66,8 +67,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _listenForActiveRide();
     _loadSavedPlaces();
     _loadCustomIcons();
-    _pickupFocusNode.addListener(() { setState(() {}); });
-    _dropFocusNode.addListener(() { setState(() {}); });
+    _pickupFocusNode.addListener(() {
+      setState(() {});
+    });
+    _dropFocusNode.addListener(() {
+      setState(() {});
+    });
   }
 
   /// Request notification permission first, then location permission.
@@ -113,67 +118,82 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _rideListener = FirebaseFirestore.instance
         .collection('rides')
         .where('riderId', isEqualTo: uid)
-        .where('status', whereIn: ['searching', 'bidding', 'matched', 'started'])
+        .where(
+          'status',
+          whereIn: ['searching', 'bidding', 'matched', 'started'],
+        )
         .snapshots()
-        .listen((snap) {
-      if (snap.docs.isNotEmpty) {
-        if (!mounted) return;
-        try {
-          final ride = snap.docs.first;
-          final data = Map<String, dynamic>.from(ride.data() as Map);
-          data['id'] = ride.id;
-          final provider = context.read<RideProvider>();
-          provider.setActiveRide(data);
+        .listen(
+          (snap) {
+            if (snap.docs.isNotEmpty) {
+              if (!mounted) return;
+              try {
+                final ride = snap.docs.first;
+                final data = Map<String, dynamic>.from(ride.data() as Map);
+                data['id'] = ride.id;
+                final provider = context.read<RideProvider>();
+                provider.setActiveRide(data);
 
-          final status = data['status'];
-          final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+                final status = data['status'];
+                final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
 
-          if (status == 'searching' || status == 'bidding') {
-            if (createdAt != null && DateTime.now().difference(createdAt).inMinutes >= AppConstants.rideExpiryMinutes) {
-              // Force expire locally if the app was closed and server hasn't cleaned it up yet
-              FirebaseFirestore.instance.collection('rides').doc(ride.id).update({'status': 'expired'});
-              provider.setActiveRide(null);
-              return;
+                if (status == 'searching' || status == 'bidding') {
+                  if (createdAt != null &&
+                      DateTime.now().difference(createdAt).inMinutes >=
+                          AppConstants.rideExpiryMinutes) {
+                    // Force expire locally if the app was closed and server hasn't cleaned it up yet
+                    FirebaseFirestore.instance
+                        .collection('rides')
+                        .doc(ride.id)
+                        .update({'status': 'expired'});
+                    provider.setActiveRide(null);
+                    return;
+                  }
+
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (_) => MatchingScreen(rideId: ride.id),
+                    ),
+                  );
+                } else if (status == 'matched') {
+                  if (createdAt != null &&
+                      DateTime.now().difference(createdAt).inMinutes >= 60) {
+                    // Force expire locally if it's been stuck in matched for over 60 minutes
+                    FirebaseFirestore.instance
+                        .collection('rides')
+                        .doc(ride.id)
+                        .update({
+                          'status': 'cancelled',
+                          'cancelReason': 'local_stale_cleanup',
+                        });
+                    provider.setActiveRide(null);
+                    return;
+                  }
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (_) => ActiveRideScreen(rideId: ride.id),
+                    ),
+                  );
+                } else if (status == 'started') {
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (_) => ActiveRideScreen(rideId: ride.id),
+                    ),
+                  );
+                }
+              } catch (e) {
+                debugPrint('Error in HomeScreen _listenForActiveRide: $e');
+              }
+            } else {
+              if (mounted) {
+                context.read<RideProvider>().setActiveRide(null);
+              }
             }
-            
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => MatchingScreen(rideId: ride.id),
-              ),
-            );
-          } else if (status == 'matched') {
-            if (createdAt != null && DateTime.now().difference(createdAt).inMinutes >= 60) {
-              // Force expire locally if it's been stuck in matched for over 60 minutes
-              FirebaseFirestore.instance.collection('rides').doc(ride.id).update({
-                'status': 'cancelled',
-                'cancelReason': 'local_stale_cleanup'
-              });
-              provider.setActiveRide(null);
-              return;
-            }
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => ActiveRideScreen(rideId: ride.id),
-              ),
-            );
-          } else if (status == 'started') {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => ActiveRideScreen(rideId: ride.id),
-              ),
-            );
-          }
-        } catch (e) {
-          debugPrint('Error in HomeScreen _listenForActiveRide: $e');
-        }
-      } else {
-        if (mounted) {
-          context.read<RideProvider>().setActiveRide(null);
-        }
-      }
-    }, onError: (error) {
-      debugPrint('Firestore stream error in HomeScreen: $error');
-    });
+          },
+          onError: (error) {
+            debugPrint('Firestore stream error in HomeScreen: $error');
+          },
+        );
   }
 
   Future<void> _requestNotificationPermission() async {
@@ -337,7 +357,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     await Geolocator.openAppSettings();
                     // After returning from settings, check again
                     final perm = await Geolocator.checkPermission();
-                    final granted = perm == LocationPermission.whileInUse ||
+                    final granted =
+                        perm == LocationPermission.whileInUse ||
                         perm == LocationPermission.always;
                     if (ctx.mounted) Navigator.pop(ctx, granted);
                   },
@@ -389,7 +410,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         final enabled = await _showEnableLocationDialog();
         if (!enabled) {
           if (mounted) {
-            CustomToast.show(context: context, message: 'Device location is required to continue.', isError: true);
+            CustomToast.show(
+              context: context,
+              message: 'Device location is required to continue.',
+              isError: true,
+            );
           }
           return;
         }
@@ -397,7 +422,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         serviceEnabled = await Geolocator.isLocationServiceEnabled();
         if (!serviceEnabled) {
           if (mounted) {
-            CustomToast.show(context: context, message: 'Device location is still off. Please enable GPS.', isError: true);
+            CustomToast.show(
+              context: context,
+              message: 'Device location is still off. Please enable GPS.',
+              isError: true,
+            );
           }
           return;
         }
@@ -417,9 +446,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         // Re-check permission after returning from settings
         permission = await Geolocator.checkPermission();
       }
-      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
         if (mounted) {
-          CustomToast.show(context: context, message: 'Location permission denied. Please enable in settings.', isError: true);
+          CustomToast.show(
+            context: context,
+            message: 'Location permission denied. Please enable in settings.',
+            isError: true,
+          );
         }
         return;
       }
@@ -440,7 +474,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
       if (pos == null) {
         if (mounted) {
-          CustomToast.show(context: context, message: 'Could not get location. Please try again.', isError: true);
+          CustomToast.show(
+            context: context,
+            message: 'Could not get location. Please try again.',
+            isError: true,
+          );
         }
         return;
       }
@@ -454,7 +492,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         setState(() {
           _currentPos = LatLng(pos!.latitude, pos.longitude);
         });
-        _mapController?.animateCamera(CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 15));
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 15),
+        );
       }
     } catch (e) {
       if (mounted) setState(() {});
@@ -465,15 +505,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final markers = <Marker>{};
     for (var d in provider.nearbyDrivers) {
       if (d['vehicleType'] == provider.vehicleType) {
-        markers.add(Marker(
-          markerId: MarkerId(d['id']),
-          position: LatLng(d['lat'], d['lng']),
-          icon: d['vehicleType'] == 'bike' 
-              ? (_bikeIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueCyan))
-              : (_autoIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueCyan)),
-          anchor: const Offset(0.5, 0.5),
-          rotation: d['heading'] ?? 0.0,
-        ));
+        markers.add(
+          Marker(
+            markerId: MarkerId(d['id']),
+            position: LatLng(d['lat'], d['lng']),
+            icon: d['vehicleType'] == 'bike'
+                ? (_bikeIcon ??
+                      BitmapDescriptor.defaultMarkerWithHue(
+                        BitmapDescriptor.hueCyan,
+                      ))
+                : (_autoIcon ??
+                      BitmapDescriptor.defaultMarkerWithHue(
+                        BitmapDescriptor.hueCyan,
+                      )),
+            anchor: const Offset(0.5, 0.5),
+            rotation: d['heading'] ?? 0.0,
+          ),
+        );
       }
     }
     return markers;
@@ -482,22 +530,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _loadSavedPlaces() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .snapshots()
-        .listen((snap) {
+    FirebaseFirestore.instance.collection('users').doc(uid).snapshots().listen((
+      snap,
+    ) {
       final data = snap.data();
       if (mounted) {
         setState(() {
           _savedHome = data?['savedHome'] as Map<String, dynamic>?;
           _savedWork = data?['savedWork'] as Map<String, dynamic>?;
+          _savedCustomPlaces = (data?['savedCustomPlaces'] as List<dynamic>?)
+              ?.map((e) => e as Map<String, dynamic>)
+              .toList();
         });
       }
     });
   }
-
-
 
   void _toggleMapFocus() {
     setState(() {
@@ -525,18 +572,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     final bounds = LatLngBounds(
       southwest: LatLng(
-        provider.pickup!.lat < provider.drop!.lat ? provider.pickup!.lat : provider.drop!.lat,
-        provider.pickup!.lng < provider.drop!.lng ? provider.pickup!.lng : provider.drop!.lng,
+        provider.pickup!.lat < provider.drop!.lat
+            ? provider.pickup!.lat
+            : provider.drop!.lat,
+        provider.pickup!.lng < provider.drop!.lng
+            ? provider.pickup!.lng
+            : provider.drop!.lng,
       ),
       northeast: LatLng(
-        provider.pickup!.lat > provider.drop!.lat ? provider.pickup!.lat : provider.drop!.lat,
-        provider.pickup!.lng > provider.drop!.lng ? provider.pickup!.lng : provider.drop!.lng,
+        provider.pickup!.lat > provider.drop!.lat
+            ? provider.pickup!.lat
+            : provider.drop!.lat,
+        provider.pickup!.lng > provider.drop!.lng
+            ? provider.pickup!.lng
+            : provider.drop!.lng,
       ),
     );
 
-    _mapController?.animateCamera(
-      CameraUpdate.newLatLngBounds(bounds, 100),
-    );
+    _mapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
   }
 
   /// Shows a beautiful, informative error dialog when pickup/drop locations are invalid.
@@ -593,17 +646,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               const SizedBox(height: 14),
               // Hint pill
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.warning.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.warning.withValues(alpha: 0.4)),
+                  border: Border.all(
+                    color: AppTheme.warning.withValues(alpha: 0.4),
+                  ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.lightbulb_outline_rounded,
-                        color: AppTheme.warning, size: 16),
+                    const Icon(
+                      Icons.lightbulb_outline_rounded,
+                      color: AppTheme.warning,
+                      size: 16,
+                    ),
                     const SizedBox(width: 8),
                     Flexible(
                       child: Text(
@@ -719,7 +780,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         title: 'No Driveable Route Found',
         message:
             'We could not find a road route between your pickup and drop locations.\n\nThis usually happens when the locations are in different regions, countries, or separated by water.',
-        hint: 'Tip: Make sure both points are reachable by road in the same area.',
+        hint:
+            'Tip: Make sure both points are reachable by road in the same area.',
       );
       return;
     }
@@ -787,9 +849,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     if (mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => MatchingScreen(rideId: rideId),
-        ),
+        MaterialPageRoute(builder: (_) => MatchingScreen(rideId: rideId)),
       );
     }
   }
@@ -797,6 +857,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<RideProvider>();
+
+    if (provider.shouldCalculateRoute) {
+      provider.clearRouteCalculationFlag();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _confirmDrop();
+        }
+      });
+    }
 
     // Notify parent about booking state for bottom nav visibility
     final isBooking = _flowState == RideFlowState.route;
@@ -830,9 +899,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         Polyline(
                           polylineId: const PolylineId('route'),
                           points: provider.route!.coordinates,
-                          color: Colors.black.withValues(alpha: 0.8), // Sleek black route
+                          color: Colors.black.withValues(
+                            alpha: 0.8,
+                          ), // Sleek black route
                           width: 3,
-                        )
+                        ),
                       }
                     : {},
                 markers: {
@@ -840,18 +911,35 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     // Pickup Dot
                     Marker(
                       markerId: const MarkerId('pickup_dot'),
-                      position: LatLng(provider.pickup!.lat, provider.pickup!.lng),
-                      icon: _pickupDot ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-                      anchor: const Offset(0.5, 0.9), // Anchor at the bottom of the stem
+                      position: LatLng(
+                        provider.pickup!.lat,
+                        provider.pickup!.lng,
+                      ),
+                      icon:
+                          _pickupDot ??
+                          BitmapDescriptor.defaultMarkerWithHue(
+                            BitmapDescriptor.hueGreen,
+                          ),
+                      anchor: const Offset(
+                        0.5,
+                        0.9,
+                      ), // Anchor at the bottom of the stem
                     ),
                     // Pickup Label
                     if (_pickupLabel != null)
                       Marker(
                         markerId: const MarkerId('pickup_label'),
-                        position: LatLng(provider.pickup!.lat, provider.pickup!.lng),
+                        position: LatLng(
+                          provider.pickup!.lat,
+                          provider.pickup!.lng,
+                        ),
                         icon: _pickupLabel!,
-                        anchor: const Offset(0.88, 2.4), // Shift higher to float above the pin
-                        onTap: () => _openSearchScreen(focusDrop: false), // Focus pickup
+                        anchor: const Offset(
+                          0.78,
+                          2.0,
+                        ), // Shift higher to float above the pin
+                        onTap: () =>
+                            _openSearchScreen(focusDrop: false), // Focus pickup
                       ),
                   ],
                   if (provider.drop != null) ...[
@@ -859,17 +947,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     Marker(
                       markerId: const MarkerId('drop_dot'),
                       position: LatLng(provider.drop!.lat, provider.drop!.lng),
-                      icon: _dropDot ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-                      anchor: const Offset(0.5, 0.9), // Anchor at the bottom of the stem
+                      icon:
+                          _dropDot ??
+                          BitmapDescriptor.defaultMarkerWithHue(
+                            BitmapDescriptor.hueRed,
+                          ),
+                      anchor: const Offset(
+                        0.5,
+                        0.9,
+                      ), // Anchor at the bottom of the stem
                     ),
                     // Drop Label
                     if (_dropLabel != null)
                       Marker(
                         markerId: const MarkerId('drop_label'),
-                        position: LatLng(provider.drop!.lat, provider.drop!.lng),
+                        position: LatLng(
+                          provider.drop!.lat,
+                          provider.drop!.lng,
+                        ),
                         icon: _dropLabel!,
-                        anchor: const Offset(0.88, 2.4), // Shift higher to float above the pin
-                        onTap: () => _openSearchScreen(focusDrop: true), // Focus drop
+                        anchor: const Offset(
+                          0.78,
+                          2.0,
+                        ), // Shift higher to float above the pin
+                        onTap: () =>
+                            _openSearchScreen(focusDrop: true), // Focus drop
                       ),
                   ],
                   ..._dynamicDriverMarkers(provider),
@@ -889,13 +991,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         provider.setRoute(null);
                       }),
                       child: Container(
-                        width: 44, height: 44,
+                        width: 44,
+                        height: 44,
                         decoration: BoxDecoration(
                           color: AppTheme.bg,
                           borderRadius: BorderRadius.circular(12),
-                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8)],
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.15),
+                              blurRadius: 8,
+                            ),
+                          ],
                         ),
-                        child: const Icon(Icons.arrow_back, color: AppTheme.text, size: 22),
+                        child: const Icon(
+                          Icons.arrow_back,
+                          color: AppTheme.text,
+                          size: 22,
+                        ),
                       ),
                     ),
                   ),
@@ -908,19 +1020,29 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 child: GestureDetector(
                   onTap: _toggleMapFocus,
                   child: Container(
-                    width: 48, height: 48,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       color: AppTheme.bg,
                       borderRadius: BorderRadius.circular(12),
-                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8)],
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.15),
+                          blurRadius: 8,
+                        ),
+                      ],
                       border: Border.all(
-                        color: _isLocationCentered ? AppTheme.primary : Colors.transparent,
+                        color: _isLocationCentered
+                            ? AppTheme.primary
+                            : Colors.transparent,
                         width: 2,
                       ),
                     ),
                     child: Icon(
                       _isLocationCentered ? Icons.my_location : Icons.route,
-                      color: _isLocationCentered ? AppTheme.primary : AppTheme.text,
+                      color: _isLocationCentered
+                          ? AppTheme.primary
+                          : AppTheme.text,
                       size: 24,
                     ),
                   ),
@@ -955,10 +1077,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           top: 0,
           left: 0,
           right: 0,
-          child: SafeArea(
-            bottom: false,
-            child: _buildLandingCard(provider),
-          ),
+          child: SafeArea(bottom: false, child: _buildLandingCard(provider)),
         ),
       ],
     );
@@ -966,7 +1085,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   /// Bottom card: shows only the "Where are you going?" search field.
   Widget _buildLandingCard(RideProvider provider) {
-
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -990,14 +1108,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 const SizedBox(
                   width: 22,
                   height: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black54),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.black54,
+                  ),
                 )
               else
-                const Icon(Icons.search_rounded, color: Colors.black54, size: 22),
+                const Icon(
+                  Icons.search_rounded,
+                  color: Colors.black54,
+                  size: 22,
+                ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  _isFetchingLocation ? 'Fetching location...' : 'Where are you going?',
+                  _isFetchingLocation
+                      ? 'Fetching location...'
+                      : 'Where are you going?',
                   style: GoogleFonts.inter(
                     color: Colors.black87,
                     fontSize: 15,
@@ -1019,12 +1146,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       setState(() => _isFetchingLocation = true);
       await _getCurrentLocation();
       setState(() => _isFetchingLocation = false);
-      
+
       // If still null after requesting, show toast
       if (_currentPos == null && mounted) {
         CustomToast.show(
           context: context,
-          message: 'Location permission is required to book a ride. Please allow location access.',
+          message:
+              'Location permission is required to book a ride. Please allow location access.',
           isError: true,
         );
         return;
@@ -1039,6 +1167,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           currentPosition: _currentPos!,
           savedHome: _savedHome,
           savedWork: _savedWork,
+          savedCustomPlaces: _savedCustomPlaces,
           focusDrop: focusDrop,
         ),
       ),
@@ -1063,14 +1192,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-
-
-
-
   Widget _buildBottomPanel(RideProvider provider) {
     return Container(
       padding: EdgeInsets.fromLTRB(
-          20, 20, 20, MediaQuery.of(context).padding.bottom + 16),
+        20,
+        20,
+        20,
+        MediaQuery.of(context).padding.bottom + 16,
+      ),
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -1103,141 +1232,156 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             // Vertical vehicle list (fixed, non-scrollable)
             Column(
               children: AppConstants.vehicleTypes.entries.map((entry) {
-                    final isSelected = provider.vehicleType == entry.key;
-                    final (low, high) = AppConstants.estimatePriceRange(
+                final isSelected = provider.vehicleType == entry.key;
+                final (low, high) = AppConstants.estimatePriceRange(
+                  provider.route!.distanceKm,
+                  entry.key,
+                );
+
+                // Dynamic ETA Calculation
+                final driversOfType = provider.nearbyDrivers
+                    .where((d) => d['vehicleType'] == entry.key)
+                    .toList();
+
+                String etaString = '';
+                if (driversOfType.isNotEmpty) {
+                  driversOfType.sort(
+                    (a, b) => (a['distance'] as double).compareTo(
+                      b['distance'] as double,
+                    ),
+                  );
+                  final closestDistanceMeters =
+                      driversOfType.first['distance'] as double;
+                  // Assume 20km/h = ~333 meters per minute
+                  final etaMinutes = (closestDistanceMeters / 333).ceil();
+                  final displayMinutes = etaMinutes < 1 ? 1 : etaMinutes;
+                  etaString = '$displayMinutes mins away';
+                }
+
+                return GestureDetector(
+                  onTap: () {
+                    provider.setVehicleType(entry.key);
+                    final estimate = AppConstants.estimatePrice(
                       provider.route!.distanceKm,
                       entry.key,
                     );
-
-                    // Dynamic ETA Calculation
-                    final driversOfType = provider.nearbyDrivers
-                        .where((d) => d['vehicleType'] == entry.key)
-                        .toList();
-                    
-                    String etaString = '';
-                    if (driversOfType.isNotEmpty) {
-                      driversOfType.sort((a, b) => (a['distance'] as double).compareTo(b['distance'] as double));
-                      final closestDistanceMeters = driversOfType.first['distance'] as double;
-                      // Assume 20km/h = ~333 meters per minute
-                      final etaMinutes = (closestDistanceMeters / 333).ceil();
-                      final displayMinutes = etaMinutes < 1 ? 1 : etaMinutes;
-                      etaString = '$displayMinutes mins away';
-                    }
-
-                    return GestureDetector(
-                      onTap: () {
-                        provider.setVehicleType(entry.key);
-                        final estimate = AppConstants.estimatePrice(
-                          provider.route!.distanceKm,
-                          entry.key,
-                        );
-                        provider.setBidPrice(estimate.toInt());
-                        _bidController.text = estimate.toInt().toString();
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: isSelected ? AppTheme.primary : AppTheme.border,
-                            width: isSelected ? 2 : 1,
+                    provider.setBidPrice(estimate.toInt());
+                    _bidController.text = estimate.toInt().toString();
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isSelected ? AppTheme.primary : AppTheme.border,
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        // Icon
+                        Container(
+                          width: 50,
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: AppTheme.bg,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            entry.value.icon,
+                            style: const TextStyle(fontSize: 28),
                           ),
                         ),
-                        child: Row(
-                          children: [
-                            // Icon
-                            Container(
-                              width: 50,
-                              height: 50,
-                              decoration: BoxDecoration(
-                                color: AppTheme.bg,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(entry.value.icon, style: const TextStyle(fontSize: 28)),
-                            ),
-                            const SizedBox(width: 12),
-                            // Details
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                        const SizedBox(width: 12),
+                        // Details
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
                                 children: [
-                                  Row(
-                                    children: [
-                                      Text(
-                                        entry.value.label,
-                                        style: GoogleFonts.inter(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                          color: AppTheme.text,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Icon(Icons.person, size: 16, color: AppTheme.text2),
-                                      Text(
-                                        ' ${entry.value.seats}',
-                                        style: GoogleFonts.inter(
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppTheme.text2,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  if (etaString.isNotEmpty) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      etaString,
-                                      style: GoogleFonts.inter(
-                                        fontSize: 13,
-                                        color: AppTheme.text2,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                  const SizedBox(height: 2),
                                   Text(
-                                    '${provider.route!.distanceKm} km',
+                                    entry.value.label,
                                     style: GoogleFonts.inter(
-                                      fontSize: 12,
-                                      color: AppTheme.text3,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.text,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Icon(
+                                    Icons.person,
+                                    size: 16,
+                                    color: AppTheme.text2,
+                                  ),
+                                  Text(
+                                    ' ${entry.value.seats}',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.text2,
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
-                            // Price
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  '₹$low – ₹$high',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppTheme.text,
-                                  ),
-                                ),
+                              if (etaString.isNotEmpty) ...[
                                 const SizedBox(height: 4),
                                 Text(
-                                  'Estimated',
+                                  etaString,
                                   style: GoogleFonts.inter(
-                                    fontSize: 11,
-                                    color: AppTheme.text3,
+                                    fontSize: 13,
+                                    color: AppTheme.text2,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ],
+                              const SizedBox(height: 2),
+                              Text(
+                                '${provider.route!.distanceKm} km',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: AppTheme.text3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Price
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              '₹$low – ₹$high',
+                              style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.text,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Estimated',
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                color: AppTheme.text3,
+                              ),
                             ),
                           ],
                         ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-            
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+
             if (provider.vehicleType.isNotEmpty) ...[
               const SizedBox(height: 12),
               // Compact Row: Payment Method & Bid Price
@@ -1259,7 +1403,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         child: Row(
                           children: [
                             Icon(
-                              provider.paymentMethod == 'Cash' ? Icons.money : Icons.qr_code,
+                              provider.paymentMethod == 'Cash'
+                                  ? Icons.money
+                                  : Icons.qr_code,
                               color: AppTheme.primary,
                               size: 18,
                             ),
@@ -1275,7 +1421,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            const Icon(Icons.chevron_right, size: 16, color: AppTheme.text3),
+                            const Icon(
+                              Icons.chevron_right,
+                              size: 16,
+                              color: AppTheme.text3,
+                            ),
                           ],
                         ),
                       ),
@@ -1294,7 +1444,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppTheme.primary, width: 2),
+                            border: Border.all(
+                              color: AppTheme.primary,
+                              width: 2,
+                            ),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -1330,8 +1483,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                     final price = int.tryParse(val);
                                     if (price != null) {
                                       provider.setBidPrice(price);
-                                      final min = AppConstants.minFare[provider.vehicleType] ?? 20;
-                                      setState(() => _bidBelowMinimum = price < min);
+                                      final min =
+                                          AppConstants.minFare[provider
+                                              .vehicleType] ??
+                                          20;
+                                      setState(
+                                        () => _bidBelowMinimum = price < min,
+                                      );
                                     }
                                   },
                                 ),
@@ -1356,20 +1514,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: AppTheme.info,
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
                                       'You can change this price!',
-                                      style: GoogleFonts.inter(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
+                                      style: GoogleFonts.inter(
+                                        fontSize: 11,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
                                   // Tail of the speech bubble
                                   Transform.translate(
                                     offset: const Offset(0, -6),
-                                    child: const Icon(Icons.arrow_drop_down, color: AppTheme.info, size: 20),
+                                    child: const Icon(
+                                      Icons.arrow_drop_down,
+                                      color: AppTheme.info,
+                                      size: 20,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -1381,7 +1550,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ),
                 ],
               ),
-              
+
               if (_bidBelowMinimum) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -1394,7 +1563,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   textAlign: TextAlign.right,
                 ),
               ],
-              
+
               const SizedBox(height: 12),
               // Request Button
               SizedBox(
@@ -1424,12 +1593,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
+                  border: Border.all(
+                    color: AppTheme.primary.withValues(alpha: 0.2),
+                  ),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.touch_app, size: 16, color: AppTheme.primary),
+                    const Icon(
+                      Icons.touch_app,
+                      size: 16,
+                      color: AppTheme.primary,
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       'Select a vehicle type to continue',
@@ -1453,10 +1628,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               padding: const EdgeInsets.all(20),
               child: Text(
                 'Search for a destination above',
-                style: GoogleFonts.inter(
-                  color: AppTheme.text3,
-                  fontSize: 14,
-                ),
+                style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 14),
                 textAlign: TextAlign.center,
               ),
             ),
@@ -1490,8 +1662,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               const SizedBox(height: 20),
               ListTile(
                 leading: const Icon(Icons.money, color: AppTheme.primary),
-                title: Text('Cash', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-                trailing: provider.paymentMethod == 'Cash' ? const Icon(Icons.check_circle, color: AppTheme.primary) : null,
+                title: Text(
+                  'Cash',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                ),
+                trailing: provider.paymentMethod == 'Cash'
+                    ? const Icon(Icons.check_circle, color: AppTheme.primary)
+                    : null,
                 onTap: () {
                   provider.setPaymentMethod('Cash');
                   Navigator.pop(ctx);
@@ -1500,8 +1677,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               const Divider(height: 1, color: AppTheme.border),
               ListTile(
                 leading: const Icon(Icons.qr_code, color: AppTheme.primary),
-                title: Text('UPI', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-                trailing: provider.paymentMethod == 'UPI' ? const Icon(Icons.check_circle, color: AppTheme.primary) : null,
+                title: Text(
+                  'UPI',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                ),
+                trailing: provider.paymentMethod == 'UPI'
+                    ? const Icon(Icons.check_circle, color: AppTheme.primary)
+                    : null,
                 onTap: () {
                   provider.setPaymentMethod('UPI');
                   Navigator.pop(ctx);

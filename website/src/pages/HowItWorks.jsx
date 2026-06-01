@@ -109,7 +109,7 @@ export default function HowItWorks() {
       {/* Hero Section */}
       <section className="section hiw-hero">
         <div className="container">
-          <span className="badge-purple">📖 Understanding Gaman</span>
+          <span className="badge-primary">📖 Understanding Gaman</span>
           <h1>
             How <span className="hiw-gradient-text">Gaman</span> Works
           </h1>
@@ -137,7 +137,7 @@ export default function HowItWorks() {
       {/* Rider Flow Section */}
       <section className="section hiw-rider-flow">
         <div className="container">
-          <span className="badge-purple">🚶 Rider Journey</span>
+          <span className="badge-primary">🚶 Rider Journey</span>
           <h2 className="hiw-section-title">
             How Riders <span className="hiw-gradient-text">Book a Ride</span>
           </h2>
@@ -160,7 +160,7 @@ export default function HowItWorks() {
       {/* Driver Flow Section */}
       <section className="section hiw-driver-flow">
         <div className="container">
-          <span className="badge-green">🚗 Driver Journey</span>
+          <span className="badge-secondary">🚗 Driver Journey</span>
           <h2 className="hiw-section-title hiw-title-dark">
             How Drivers <span className="hiw-gradient-text">Earn</span>
           </h2>

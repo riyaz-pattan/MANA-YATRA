@@ -1,12 +1,13 @@
-// lib/screens/report_issue_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../utils/custom_toast.dart';
 
 class ReportIssueScreen extends StatefulWidget {
-  const ReportIssueScreen({super.key});
+  final String? initialRideId;
+  const ReportIssueScreen({super.key, this.initialRideId});
 
   @override
   State<ReportIssueScreen> createState() => _ReportIssueScreenState();
@@ -17,6 +18,9 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
   final _descCtrl = TextEditingController();
   String _category = 'Payout Issue';
   bool _isLoading = false;
+  String? _selectedRideId;
+  List<Map<String, dynamic>> _recentRides = [];
+  bool _isLoadingRides = false;
 
   final categories = [
     'Payout Issue',
@@ -26,11 +30,58 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
     'Other'
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _selectedRideId = widget.initialRideId;
+    _loadRecentRides();
+  }
+
+  Future<void> _loadRecentRides() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    setState(() => _isLoadingRides = true);
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('rides')
+          .where('driverId', isEqualTo: user.uid)
+          .orderBy('createdAt', descending: true)
+          .limit(20)
+          .get();
+      
+      final rides = snap.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+      
+      if (widget.initialRideId != null && !rides.any((r) => r['id'] == widget.initialRideId)) {
+        rides.insert(0, {
+          'id': widget.initialRideId,
+          'createdAt': Timestamp.now(),
+          'pickup': {'short_name': 'Selected Ride'}
+        });
+      }
+
+      if (mounted) {
+        setState(() {
+          _recentRides = rides;
+          _isLoadingRides = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingRides = false);
+    }
+  }
+
+  String _formatDate(DateTime dt) {
+    return "${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
+  }
+
   Future<void> _submitTicket() async {
     if (_subjectCtrl.text.trim().isEmpty || _descCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill all fields')),
-      );
+      CustomToast.show(context: context, message: 'Please fill all fields', isError: true);
       return;
     }
 
@@ -49,12 +100,15 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
         }
       }
 
+      final isRideRelated = ['Payout Issue', 'Rider Behavior', 'Navigation Issue'].contains(_category);
+
       await FirebaseFirestore.instance.collection('support_tickets').add({
         'role': 'driver',
         'name': name,
         'phone': phone,
         'uid': user?.uid ?? '',
         'category': _category,
+        'rideId': isRideRelated ? _selectedRideId : null,
         'subject': _subjectCtrl.text.trim(),
         'description': _descCtrl.text.trim(),
         'status': 'open',
@@ -64,20 +118,18 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
 
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Issue reported successfully. Support will contact you.')),
-        );
+        CustomToast.show(context: context, message: 'Issue reported successfully. Support will contact you.');
       }
     } catch (e) {
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to submit: $e')),
-      );
+      CustomToast.show(context: context, message: 'Failed to submit: $e', isError: true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isRideRelated = ['Payout Issue', 'Rider Behavior', 'Navigation Issue'].contains(_category);
+
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
@@ -107,6 +159,40 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                 if (val != null) setState(() => _category = val);
               },
             ),
+            if (isRideRelated) ...[
+              const SizedBox(height: 24),
+              Text('Select Ride', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              if (_isLoadingRides)
+                const Padding(
+                  padding: EdgeInsets.all(8.0),
+                  child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))),
+                )
+              else if (_recentRides.isEmpty)
+                Text('No recent rides found.', style: GoogleFonts.inter(color: AppTheme.text2))
+              else
+                DropdownButtonFormField<String>(
+                  value: _selectedRideId,
+                  hint: Text('Select a past ride', style: GoogleFonts.inter(color: AppTheme.text3)),
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: AppTheme.surface,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                  ),
+                  items: _recentRides.map((r) {
+                    final date = r['createdAt'] != null ? _formatDate((r['createdAt'] as Timestamp).toDate()) : '';
+                    final p = r['pickup'] != null ? (r['pickup']['short_name'] ?? 'Unknown') : 'Unknown';
+                    return DropdownMenuItem<String>(
+                      value: r['id'],
+                      child: Text('$date - $p', overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(fontSize: 14)),
+                    );
+                  }).toList(),
+                  onChanged: (val) {
+                    if (val != null) setState(() => _selectedRideId = val);
+                  },
+                ),
+            ],
             const SizedBox(height: 24),
             Text('Subject', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),

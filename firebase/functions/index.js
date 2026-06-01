@@ -367,7 +367,9 @@ exports.completeRide = functions.https.onCall(async (data, context) => {
 
   try {
     await db.runTransaction(async (txn) => {
+      // ── ALL READS FIRST (Firestore transactions require reads before writes) ──
       const rideSnap = await txn.get(rideRef);
+      const driverSnap = await txn.get(driverRef);
 
       if (!rideSnap.exists) {
         throw new functions.https.HttpsError("not-found", "Ride not found.");
@@ -392,13 +394,13 @@ exports.completeRide = functions.https.onCall(async (data, context) => {
         ? Math.round((completedAtDate.getTime() - startedAt.getTime()) / 60000)
         : null;
 
+      // ── ALL WRITES AFTER READS ──
       txn.update(rideRef, {
         status: "completed",
         completedAt: admin.firestore.FieldValue.serverTimestamp(),
         ...(actualDurationMin !== null && { actualDurationMin }),
       });
 
-      const driverSnap = await txn.get(driverRef);
       const driverData = driverSnap.data() || {};
       const subActiveUntil = driverData.subscriptionActiveUntil ? driverData.subscriptionActiveUntil.toDate() : new Date(0);
       const isExpired = subActiveUntil <= completedAtDate;
@@ -417,6 +419,65 @@ exports.completeRide = functions.https.onCall(async (data, context) => {
     if (error instanceof functions.https.HttpsError) throw error;
     console.error("completeRide error:", error);
     throw new functions.https.HttpsError("internal", "Failed to complete ride.");
+  }
+});
+
+/**
+ * notifyDriverArrived
+ * Driver callable — sends FCM notification to rider when driver arrives at pickup.
+ */
+exports.notifyDriverArrived = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Please log in.");
+  }
+
+  const rideId = data.rideId;
+  const driverId = context.auth.uid;
+
+  if (!rideId) {
+    throw new functions.https.HttpsError("invalid-argument", "Missing rideId.");
+  }
+
+  const db = admin.firestore();
+
+  // Rate Limiting — max 5 calls per minute
+  await checkRateLimit(db, driverId, 'notifyDriverArrived', 5, 60000);
+
+  try {
+    const rideSnap = await db.collection("rides").doc(rideId).get();
+    if (!rideSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "Ride not found.");
+    }
+
+    const ride = rideSnap.data();
+
+    if (ride.driverId !== driverId) {
+      throw new functions.https.HttpsError("permission-denied", "Not assigned to this ride.");
+    }
+
+    const riderId = ride.riderId;
+    if (!riderId) {
+      throw new functions.https.HttpsError("not-found", "Rider not found on this ride.");
+    }
+
+    // Send FCM to rider's personal topic
+    await admin.messaging().send({
+      topic: `rider_${riderId}`,
+      notification: {
+        title: "🚗 Driver has arrived!",
+        body: "Your driver is at the pickup location. Please head to the pickup point.",
+      },
+      data: {
+        type: "driver_arrived",
+        rideId: rideId,
+      },
+    });
+
+    return { success: true };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error("notifyDriverArrived error:", error);
+    throw new functions.https.HttpsError("internal", "Failed to send arrival notification.");
   }
 });
 
@@ -864,6 +925,7 @@ exports.registerReferral = functions.https.onCall(async (data, context) => {
     batch.set(referralRef, {
       referrerDriverId,
       referredDriverId: uid,
+      referredDriverName: referredDriverSnap.data().name || "New Driver",
       referralCode,
       status: "pending",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -988,6 +1050,21 @@ exports.deleteMyAccount = functions.https.onCall(async (data, context) => {
       // Delete driver from Firestore
       await admin.firestore().collection("drivers").doc(uid).delete();
       
+      // Delete driver's payment history
+      try {
+        const paymentsSnap = await admin.firestore().collection("payments").where("driverId", "==", uid).get();
+        if (!paymentsSnap.empty) {
+          const batch = admin.firestore().batch();
+          paymentsSnap.forEach(doc => {
+            batch.delete(doc.ref);
+          });
+          await batch.commit();
+          console.log(`Deleted ${paymentsSnap.size} payment records for driver ${uid}`);
+        }
+      } catch (e) {
+        console.error(`Failed to delete payments for ${uid}:`, e);
+      }
+      
       // Delete driver from RTDB liveLocations
       try {
         await admin.database().ref(`liveLocations/${uid}`).remove();
@@ -1055,6 +1132,24 @@ exports.onDriverRegistered = functions.firestore
   .onCreate(async (snap, context) => {
     const data = snap.data();
     const name = data.name || "A new driver";
+    const driverId = context.params.driverId;
+    
+    // Fetch phone from Auth to guarantee we have it, even if client hasn't saved it yet
+    try {
+      const userRecord = await admin.auth().getUser(driverId);
+      const phone = userRecord.phoneNumber;
+      
+      // Check if driver has previously used a free trial on this phone number
+      if (phone) {
+        const usedTrialSnap = await admin.firestore().collection("used_free_trials").doc(phone).get();
+        if (usedTrialSnap.exists) {
+          await snap.ref.update({ hasFreeTrialUsed: true });
+          console.log(`[Driver Onboarding] Phone ${phone} has already used free trial. Set hasFreeTrialUsed = true.`);
+        }
+      }
+    } catch (e) {
+      console.error(`Error checking used_free_trials for driver ${driverId}:`, e);
+    }
     
     await admin.messaging().send({
       topic: "admins",
@@ -1165,8 +1260,8 @@ exports.onDriverApproved = functions.firestore
               await admin.messaging().send({
                 topic: `driver_${referrerDriverId}`,
                 notification: {
-                  title: "🎉 Referral Reward!",
-                  body: `Your referred driver ${after.name || "a driver"} was approved. You earned 7 days free!`,
+                  title: "🎉 Referral Reward Earned!",
+                  body: `Your friend ${after.name || "a driver"} has successfully onboarded! You have earned 7 days subscription free. Keep referring!`,
                 },
                 data: { type: "referral_reward" },
               });

@@ -14,22 +14,15 @@
 .footer-brand .footer-logo {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 16px;
 }
 
-.footer-brand .footer-logo-icon {
+.logo-icon-img {
   width: 32px;
   height: 32px;
-  background: var(--accent);
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 18px;
-  color: var(--white);
+  border-radius: 8px;
+  object-fit: contain;
 }
 
 .footer-brand .footer-logo-text {

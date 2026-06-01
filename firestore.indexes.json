@@ -48,33 +48,29 @@
   // ]
   "indexes": [
     {
-      "collectionGroup": "rides",
+      "collectionGroup": "referrals",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "status",
+          "fieldPath": "referrerDriverId",
           "order": "ASCENDING"
         },
         {
           "fieldPath": "createdAt",
-          "order": "ASCENDING"
+          "order": "DESCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "rides",
+      "collectionGroup": "referrals",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "driverId",
+          "fieldPath": "referredDriverId",
           "order": "ASCENDING"
         },
         {
           "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "completedAt",
           "order": "ASCENDING"
         }
       ]
@@ -88,8 +84,8 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
+          "fieldPath": "status",
+          "order": "ASCENDING"
         }
       ]
     }

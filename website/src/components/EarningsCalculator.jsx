@@ -6,13 +6,13 @@ export default function EarningsCalculator() {
   const [fare, setFare] = useState(100);
 
   const days = 30;
-  const olaUberCut = 0.25; // avg 25% commission
-  const gamanDaily = 20; // ₹20/day flat
+  const otherAppCut = 0.25; // avg 25% commission
+  const gamanSubscription = 20; // 20 rupees per day
 
   const totalMonthly = rides * fare * days;
-  const olaEarnings = Math.round(totalMonthly * (1 - olaUberCut));
-  const gamanEarnings = Math.round(totalMonthly - gamanDaily * days);
-  const savings = gamanEarnings - olaEarnings;
+  const otherAppEarnings = Math.round(totalMonthly * (1 - otherAppCut));
+  const gamanEarnings = totalMonthly - (gamanSubscription * days);
+  const savings = gamanEarnings - otherAppEarnings;
 
   return (
     <div className="earnings-calc">
@@ -51,8 +51,8 @@ export default function EarningsCalculator() {
 
       <div className="calc-results">
         <div className="calc-result-card other">
-          <div className="result-label">Your earnings on Ola/Uber</div>
-          <div className="result-value">₹{olaEarnings.toLocaleString('en-IN')}</div>
+          <div className="result-label">Your earnings on other platforms</div>
+          <div className="result-value">₹{otherAppEarnings.toLocaleString('en-IN')}</div>
           <div className="result-sub">per month (after ~25% cut)</div>
         </div>
         <div className="calc-result-card gaman">

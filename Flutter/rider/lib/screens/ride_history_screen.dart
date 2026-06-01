@@ -11,6 +11,7 @@ import '../utils/skeleton.dart';
 import '../providers/ride_provider.dart';
 import '../services/google_maps_service.dart';
 import 'main_screen.dart';
+import 'report_issue_screen.dart';
 
 class RideHistoryScreen extends StatefulWidget {
   const RideHistoryScreen({super.key});
@@ -112,6 +113,7 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final ride = docs[index].data() as Map<String, dynamic>;
+                    ride['id'] = docs[index].id;
                     return _buildRideCard(ride);
                   },
                 );
@@ -131,18 +133,19 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
           _selectedFilter = label;
         });
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         decoration: BoxDecoration(
           color: isSelected ? AppTheme.primary : AppTheme.surface,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(24),
           border: Border.all(color: isSelected ? AppTheme.primary : AppTheme.border),
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: AppTheme.primary.withValues(alpha: 0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
+                    color: AppTheme.primary.withValues(alpha: 0.25),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
                   )
                 ]
               : null,
@@ -151,7 +154,7 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
           label,
           style: GoogleFonts.inter(
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-            color: isSelected ? Colors.black : AppTheme.text2,
+            color: isSelected ? Colors.white : AppTheme.text2,
             fontSize: 14,
           ),
         ),
@@ -365,6 +368,8 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
       placeId: ride['drop']['place_id'] ?? 'unknown',
     ));
     
+    provider.triggerRouteCalculation();
+    
     // Switch to Home tab
     mainScreenKey.currentState?.switchTab(0);
     
@@ -375,13 +380,12 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
   }
 
   void _reportIssue(Map<String, dynamic> ride) {
-    final rideId = ride['id'] ?? 'Unknown';
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.surface,
         title: Text('Report an Issue', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
-        content: Text('Do you need help with ride $rideId?', style: GoogleFonts.inter(color: AppTheme.text2)),
+        content: Text('Do you need help with this ride?', style: GoogleFonts.inter(color: AppTheme.text2)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -390,10 +394,10 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(ctx);
-              // Open support modal/screen
+              Navigator.push(context, MaterialPageRoute(builder: (_) => ReportIssueScreen(initialRideId: ride['id'])));
             },
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
-            child: Text('Contact Support', style: GoogleFonts.inter(color: Colors.black)),
+            child: Text('Contact Support', style: GoogleFonts.inter(color: Colors.white)),
           ),
         ],
       ),
