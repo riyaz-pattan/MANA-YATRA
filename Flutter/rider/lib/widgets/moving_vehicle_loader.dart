@@ -88,7 +88,7 @@ class _MovingVehicleLoaderState extends State<MovingVehicleLoader>
                       child: Container(
                         padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
-                          color: AppTheme.surface,
+                          color: AppTheme.bg,
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(

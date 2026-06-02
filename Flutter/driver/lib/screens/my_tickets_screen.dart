@@ -23,7 +23,7 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
           'My Tickets',
           style: GoogleFonts.inter(fontWeight: FontWeight.w600),
         ),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppTheme.text),
       ),
@@ -110,7 +110,7 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.bg,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppTheme.border),
         boxShadow: [

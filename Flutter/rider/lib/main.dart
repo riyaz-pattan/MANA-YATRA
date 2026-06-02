@@ -187,8 +187,26 @@ class AuthGate extends StatelessWidget {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const CustomSplashScreen();
         }
-        if (snapshot.hasData && snapshot.data != null) {
-          final user = snapshot.data!;
+        if (!snapshot.hasData || snapshot.data == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            if (context.mounted) {
+              final provider = context.read<RideProvider>();
+              if (provider.user != null) {
+                provider.setUser(null);
+                // The rider just logged out! Delete the FCM token so this
+                // device stops receiving notifications for the old account.
+                try {
+                  await FirebaseMessaging.instance.deleteToken();
+                } catch (e) {
+                  debugPrint('Error deleting FCM token on logout: $e');
+                }
+              }
+            }
+          });
+          return const LoginScreen();
+        }
+
+        final user = snapshot.data!;
           // Set user in provider and load any persisted ride state
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (context.mounted) {
@@ -212,8 +230,6 @@ class AuthGate extends StatelessWidget {
               return _NameCheckGate(user: user);
             },
           );
-        }
-        return const LoginScreen();
       },
     );
   }

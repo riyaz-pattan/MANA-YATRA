@@ -41,7 +41,7 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
     final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Edit Name', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
         content: TextField(
@@ -85,9 +85,10 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
-        title: Text('Edit Profile', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-        backgroundColor: AppTheme.surface,
+        title: Text('Edit Profile', style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 24, letterSpacing: -0.5, color: AppTheme.text)),
+        backgroundColor: AppTheme.bg,
         elevation: 0,
+        centerTitle: true,
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
@@ -96,7 +97,7 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
               children: [
                 
                 _buildInfoTile('Full Name', _name, _editName),
-                const Divider(height: 1),
+                Divider(height: 1, color: AppTheme.border.withValues(alpha: 0.5)),
                 _buildInfoTile('Phone Number', phone, null),
               ],
             ),

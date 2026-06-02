@@ -5,9 +5,12 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../config/theme.dart';
 import '../providers/ride_provider.dart';
 import '../services/google_maps_service.dart';
+import '../utils/custom_toast.dart';
 import 'map_picker_screen.dart';
 
 /// Full-screen location search experience.
@@ -56,6 +59,9 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
   bool _fetchingDetails = false;
   Timer? _debounce;
 
+  Map<String, dynamic>? _localSavedHome;
+  Map<String, dynamic>? _localSavedWork;
+
   // Track if pickup is "Your Current Location" (auto-set)
   bool _pickupIsCurrentLocation = true;
 
@@ -63,6 +69,9 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
   void initState() {
     super.initState();
     
+    _localSavedHome = widget.savedHome;
+    _localSavedWork = widget.savedWork;
+
     // Populate existing values if any
     final provider = context.read<RideProvider>();
     if (provider.pickup != null) {
@@ -204,6 +213,181 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
       lng: (place['lng'] as num).toDouble(),
     );
     _selectLocation(loc);
+  }
+
+  Future<void> _editSavedPlace(String label, String firestoreKey) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final searchCtrl = TextEditingController();
+    List<PlacePrediction> predictions = [];
+    bool searching = false;
+    Timer? debounce;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+              child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.8,
+                ),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Handle bar
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppTheme.border,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Icon(
+                          label == 'Home' ? Icons.home : Icons.work,
+                          color: AppTheme.primary,
+                          size: 24,
+                        ),
+                        const SizedBox(width: 12),
+                        Text('Set $label Location',
+                            style: GoogleFonts.inter(
+                                fontSize: 20, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: searchCtrl,
+                      autofocus: true,
+                      style: GoogleFonts.inter(fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'Search for $label location...',
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        suffixIcon: searchCtrl.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: () {
+                                  searchCtrl.clear();
+                                  setSheetState(() => predictions = []);
+                                },
+                              )
+                            : null,
+                      ),
+                      onChanged: (q) {
+                        if (debounce?.isActive ?? false) debounce!.cancel();
+                        if (q.isEmpty) {
+                          setSheetState(() => predictions = []);
+                          return;
+                        }
+                        setSheetState(() => searching = true);
+                        debounce = Timer(const Duration(milliseconds: 1000), () async {
+                          final res = await GoogleMapsService.getPlacePredictions(q);
+                          setSheetState(() {
+                            predictions = res;
+                            searching = false;
+                          });
+                        });
+                      },
+                    ),
+                    if (searching)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 20),
+                        child: Center(
+                            child: CircularProgressIndicator(
+                                color: AppTheme.primary, strokeWidth: 2)),
+                      ),
+                    
+                    // Results list
+                    Flexible(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: predictions.length,
+                        padding: const EdgeInsets.only(top: 8),
+                        itemBuilder: (context, index) {
+                          final p = predictions[index];
+                          return ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: AppTheme.bg2,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(Icons.location_on_outlined,
+                                  size: 18, color: AppTheme.primary),
+                            ),
+                            title: Text(p.primaryText,
+                                style: GoogleFonts.inter(
+                                    fontWeight: FontWeight.w600, fontSize: 14)),
+                            subtitle: Text(p.secondaryText,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.inter(
+                                    color: AppTheme.text3, fontSize: 12)),
+                            onTap: () async {
+                              setSheetState(() => searching = true);
+                              
+                              final detail = await GoogleMapsService.getPlaceDetails(p.placeId);
+                              
+                              if (detail != null) {
+                                final detailMap = detail.toMap();
+                                await FirebaseFirestore.instance
+                                    .collection('users')
+                                    .doc(uid)
+                                    .update({firestoreKey: detailMap});
+                                
+                                if (mounted) {
+                                  setState(() {
+                                    if (label == 'Home') {
+                                      _localSavedHome = detailMap;
+                                    } else if (label == 'Work') {
+                                      _localSavedWork = detailMap;
+                                    }
+                                  });
+                                }
+
+                                if (ctx.mounted) Navigator.pop(ctx);
+                                if (!context.mounted) return;
+                                CustomToast.show(
+                                    context: context,
+                                    message: '$label location saved');
+                                
+                                _selectSavedPlace(detailMap, label);
+                              } else {
+                                setSheetState(() => searching = false);
+                                if (!context.mounted) return;
+                                CustomToast.show(
+                                    context: context,
+                                    message: 'Failed to fetch location details');
+                              }
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _openMapPicker() async {
@@ -500,23 +684,31 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
       ),
     ];
 
-    if (widget.savedHome != null) {
-      children.add(const SizedBox(width: 10));
-      children.add(_buildActionChip(
-        icon: Icons.home_rounded,
-        label: 'Home',
-        onTap: () => _selectSavedPlace(widget.savedHome!, 'Home'),
-      ));
-    }
+    children.add(const SizedBox(width: 10));
+    children.add(_buildActionChip(
+      icon: Icons.home_rounded,
+      label: 'Home',
+      onTap: () {
+        if (_localSavedHome != null) {
+          _selectSavedPlace(_localSavedHome!, 'Home');
+        } else {
+          _editSavedPlace('Home', 'savedHome');
+        }
+      },
+    ));
 
-    if (widget.savedWork != null) {
-      children.add(const SizedBox(width: 10));
-      children.add(_buildActionChip(
-        icon: Icons.work_rounded,
-        label: 'Work',
-        onTap: () => _selectSavedPlace(widget.savedWork!, 'Work'),
-      ));
-    }
+    children.add(const SizedBox(width: 10));
+    children.add(_buildActionChip(
+      icon: Icons.work_rounded,
+      label: 'Work',
+      onTap: () {
+        if (_localSavedWork != null) {
+          _selectSavedPlace(_localSavedWork!, 'Work');
+        } else {
+          _editSavedPlace('Work', 'savedWork');
+        }
+      },
+    ));
 
     if (widget.savedCustomPlaces != null) {
       for (final place in widget.savedCustomPlaces!) {
@@ -723,7 +915,7 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
     return Container(
       padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).padding.bottom + 16),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.bg,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),

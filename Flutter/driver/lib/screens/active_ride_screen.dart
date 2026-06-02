@@ -384,6 +384,11 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
       }
 
       if (!mounted) return;
+      
+      // ✅ Clear active ride so SmartTracker reverts to discovery mode
+      // and driver becomes visible to riders again.
+      context.read<DriverProvider>().setActiveRide(null);
+
       Navigator.pop(context); // pop the loading dialog
 
       if (sheetContext != null && sheetContext.mounted) {
@@ -688,7 +693,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     }
 
     return Container(
-      color: AppTheme.surface,
+      color: AppTheme.bg,
       child: Stack(
         alignment: Alignment.topCenter,
         children: [
@@ -890,7 +895,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: AppTheme.surface,
+            color: AppTheme.bg,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(icon, size: 22, color: AppTheme.primary),
@@ -980,7 +985,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
               child: Container(
                 height: 340,
                 decoration: BoxDecoration(
-                  color: AppTheme.surface,
+                  color: AppTheme.bg,
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
                   boxShadow: [
                     BoxShadow(
@@ -1049,6 +1054,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
             ),
             onMapCreated: (controller) {
               _mapController = controller;
+              _mapController?.setMapStyle(lightMapStyle);
               // Fit camera to route when map is ready
               if (_ride != null && !_cameraFitted) {
                 Future.delayed(const Duration(milliseconds: 500), () {
@@ -1190,7 +1196,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
         MediaQuery.of(context).padding.bottom + 12,
       ),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.bg,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: const Border(top: BorderSide(color: AppTheme.border)),
         boxShadow: [

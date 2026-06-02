@@ -213,7 +213,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       barrierDismissible: false,
       builder: (ctx) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         child: Padding(
           padding: const EdgeInsets.all(28),
           child: Column(
@@ -310,7 +310,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       barrierDismissible: false,
       builder: (ctx) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         child: Padding(
           padding: const EdgeInsets.all(28),
           child: Column(
@@ -603,7 +603,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       barrierDismissible: false,
       builder: (ctx) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         child: Padding(
           padding: const EdgeInsets.all(28),
           child: Column(
@@ -1201,7 +1201,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         MediaQuery.of(context).padding.bottom + 16,
       ),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.bg,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: const Border(top: BorderSide(color: AppTheme.border)),
         boxShadow: [
@@ -1641,7 +1641,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void _showPaymentBottomSheet(RideProvider provider) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppTheme.bg,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),

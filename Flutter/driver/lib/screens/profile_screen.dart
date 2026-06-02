@@ -61,11 +61,7 @@ class ProfileScreen extends StatelessWidget {
       body: Container(
         height: double.infinity,
         decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [AppTheme.bg, AppTheme.bg2],
-          ),
+          color: AppTheme.bg,
         ),
         child: SafeArea(
           child: SingleChildScrollView(
@@ -133,10 +129,15 @@ class ProfileScreen extends StatelessWidget {
                 const SizedBox(height: 24),
 
                 // Details
+                const Divider(height: 1, color: AppTheme.border),
                 _buildInfoTile(Icons.phone, 'Phone Number', profile['phone'] ?? ''),
+                const Divider(height: 1, color: AppTheme.border),
                 _buildUpiTile(context, profile['upiId']),
+                const Divider(height: 1, color: AppTheme.border),
                 _buildInfoTile(Icons.electric_rickshaw, 'Vehicle Type', (profile['vehicleType'] ?? '').toString().toUpperCase()),
+                const Divider(height: 1, color: AppTheme.border),
                 _buildInfoTile(Icons.pin, 'Vehicle Number', profile['vehicleNumber'] ?? ''),
+                const Divider(height: 1, color: AppTheme.border),
                 
                 const SizedBox(height: 32),
                 SizedBox(
@@ -184,84 +185,44 @@ class ProfileScreen extends StatelessWidget {
   }
 
   Widget _buildInfoTile(IconData icon, String title, String value) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.border),
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      leading: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppTheme.primary.withValues(alpha: 0.1),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: AppTheme.primary, size: 20),
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: AppTheme.primary),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 13)),
-                const SizedBox(height: 4),
-                Text(value, style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16)),
-              ],
-            ),
-          ),
-        ],
-      ),
+      title: Text(title, style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 12)),
+      subtitle: Text(value, style: GoogleFonts.inter(color: AppTheme.text, fontWeight: FontWeight.w600, fontSize: 16)),
     );
   }
 
   Widget _buildUpiTile(BuildContext context, String? currentUpi) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.border),
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      leading: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppTheme.primary.withValues(alpha: 0.1),
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(Icons.qr_code, color: AppTheme.primary, size: 20),
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.qr_code, color: AppTheme.primary),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('UPI ID', style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 13)),
-                const SizedBox(height: 4),
-                Text(
-                  currentUpi != null && currentUpi.isNotEmpty ? currentUpi : 'Not set',
-                  style: GoogleFonts.inter(
-                    fontWeight: FontWeight.w600, 
-                    fontSize: 16,
-                    color: currentUpi != null && currentUpi.isNotEmpty ? AppTheme.text : AppTheme.warning,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.edit, color: AppTheme.primary, size: 20),
-            onPressed: () => _showUpiEditDialog(context, currentUpi),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-          ),
-        ],
+      title: Text('UPI ID', style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 12)),
+      subtitle: Text(
+        currentUpi != null && currentUpi.isNotEmpty ? currentUpi : 'Not set',
+        style: GoogleFonts.inter(
+          color: currentUpi != null && currentUpi.isNotEmpty ? AppTheme.text : AppTheme.warning,
+          fontWeight: FontWeight.w600,
+          fontSize: 16,
+        ),
+      ),
+      trailing: IconButton(
+        icon: const Icon(Icons.edit, color: AppTheme.primary, size: 20),
+        onPressed: () => _showUpiEditDialog(context, currentUpi),
       ),
     );
   }
@@ -277,7 +238,7 @@ class ProfileScreen extends StatelessWidget {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setState) => Dialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          backgroundColor: AppTheme.surface,
+          backgroundColor: AppTheme.bg,
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Form(

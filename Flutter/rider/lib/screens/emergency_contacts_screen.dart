@@ -80,7 +80,7 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppTheme.bg,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -144,9 +144,10 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
-        title: Text('Emergency Contacts', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-        backgroundColor: AppTheme.surface,
+        title: Text('Emergency Contacts', style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 24, letterSpacing: -0.5, color: AppTheme.text)),
+        backgroundColor: AppTheme.bg,
         elevation: 0,
+        centerTitle: true,
       ),
       body: StreamBuilder<DocumentSnapshot>(
         stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
@@ -196,39 +197,35 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
+          return ListView.separated(
+            padding: const EdgeInsets.symmetric(vertical: 16),
             itemCount: contacts.length,
+            separatorBuilder: (_, __) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Divider(height: 1, indent: 72, color: AppTheme.border.withValues(alpha: 0.5)),
+            ),
             itemBuilder: (context, index) {
               final contact = contacts[index];
-              return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: AppTheme.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppTheme.border),
+              return ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                leading: CircleAvatar(
+                  backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
+                  child: Text(
+                    contact['name']?[0] ?? '?',
+                    style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold),
+                  ),
                 ),
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  leading: CircleAvatar(
-                    backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
-                    child: Text(
-                      contact['name']?[0] ?? '?',
-                      style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  title: Text(
-                    contact['name'] ?? 'Unknown',
-                    style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: Text(
-                    contact['phone'] ?? '',
-                    style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 13),
-                  ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete_outline, color: AppTheme.danger, size: 22),
-                    onPressed: () => _removeContact(contact),
-                  ),
+                title: Text(
+                  contact['name'] ?? 'Unknown',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: AppTheme.text),
+                ),
+                subtitle: Text(
+                  contact['phone'] ?? '',
+                  style: GoogleFonts.inter(color: AppTheme.text2, fontSize: 13),
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline, color: AppTheme.danger, size: 22),
+                  onPressed: () => _removeContact(contact),
                 ),
               );
             },

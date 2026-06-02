@@ -18,7 +18,7 @@ class SupportScreen extends StatelessWidget {
           'Support',
           style: GoogleFonts.inter(fontWeight: FontWeight.w600),
         ),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         elevation: 0,
       ),
       body: ListView(
@@ -121,7 +121,7 @@ class SupportScreen extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: AppTheme.surface,
+          color: AppTheme.bg,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppTheme.border),
         ),
@@ -175,7 +175,7 @@ class SupportScreen extends StatelessWidget {
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
-            backgroundColor: AppTheme.surface,
+            backgroundColor: AppTheme.bg,
             title: Row(
               children: [
                 Icon(icon, color: AppTheme.primary),

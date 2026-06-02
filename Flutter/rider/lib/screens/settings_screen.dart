@@ -42,9 +42,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
-        title: Text('Settings', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-        backgroundColor: AppTheme.surface,
+        title: Text('Settings', style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 24, letterSpacing: -0.5, color: AppTheme.text)),
+        backgroundColor: AppTheme.bg,
         elevation: 0,
+        centerTitle: true,
       ),
       body: FutureBuilder<void>(
         future: _loadSettingsFuture,
@@ -152,44 +153,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         const SkeletonBox(width: 100, height: 16, borderRadius: 4),
         const SizedBox(height: 16),
-        const SkeletonBox(width: double.infinity, height: 64, borderRadius: 16),
+        const SkeletonBox(width: double.infinity, height: 48, borderRadius: 8),
         const SizedBox(height: 24),
         const SkeletonBox(width: 100, height: 16, borderRadius: 4),
         const SizedBox(height: 16),
-        const SkeletonBox(width: double.infinity, height: 180, borderRadius: 16),
+        const SkeletonBox(width: double.infinity, height: 140, borderRadius: 8),
         const SizedBox(height: 24),
         const SkeletonBox(width: 100, height: 16, borderRadius: 4),
         const SizedBox(height: 16),
-        const SkeletonBox(width: double.infinity, height: 120, borderRadius: 16),
+        const SkeletonBox(width: double.infinity, height: 100, borderRadius: 8),
       ],
     );
   }
 
   Widget _buildSectionTitle(String title) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 8, top: 16),
       child: Text(
-        title,
+        title.toUpperCase(),
         style: GoogleFonts.inter(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: AppTheme.text2,
-          letterSpacing: 1.2,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.text3,
+          letterSpacing: 1.5,
         ),
       ),
     );
   }
 
   Widget _buildSettingsGroup({required List<Widget> children}) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: Column(
-        children: children,
-      ),
+    return Column(
+      children: children,
     );
   }
 
@@ -205,29 +199,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       children: [
         ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          leading: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppTheme.bg2,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: iconColor ?? AppTheme.primary, size: 20),
-          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          leading: Icon(icon, color: iconColor ?? AppTheme.text, size: 24),
           title: Text(
             title,
             style: GoogleFonts.inter(
-              fontSize: 15, 
-              fontWeight: FontWeight.w500, 
+              fontSize: 16, 
+              fontWeight: FontWeight.w600, 
               color: textColor ?? AppTheme.text,
             ),
           ),
           trailing: trailing ?? const Icon(Icons.chevron_right, color: AppTheme.text3, size: 20),
           onTap: onTap,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         ),
         if (showDivider)
-          const Divider(height: 1, indent: 56, endIndent: 16, color: AppTheme.border),
+          Divider(height: 1, indent: 44, color: AppTheme.border.withValues(alpha: 0.5)),
       ],
     );
   }

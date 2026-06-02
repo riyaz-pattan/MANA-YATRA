@@ -131,7 +131,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         elevation: 0,
         title: Text('Report an Issue', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: AppTheme.text)),
         iconTheme: const IconThemeData(color: AppTheme.text),
@@ -149,7 +149,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
               value: _category,
               decoration: InputDecoration(
                 filled: true,
-                fillColor: AppTheme.surface,
+                fillColor: AppTheme.bg,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               ),
               items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
@@ -175,7 +175,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                   isExpanded: true,
                   decoration: InputDecoration(
                     filled: true,
-                    fillColor: AppTheme.surface,
+                    fillColor: AppTheme.bg,
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                   ),
                   items: _recentRides.map((r) {
@@ -199,7 +199,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
               decoration: InputDecoration(
                 hintText: 'Briefly describe the issue',
                 filled: true,
-                fillColor: AppTheme.surface,
+                fillColor: AppTheme.bg,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               ),
             ),
@@ -212,7 +212,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
               decoration: InputDecoration(
                 hintText: 'Provide as much detail as possible...',
                 filled: true,
-                fillColor: AppTheme.surface,
+                fillColor: AppTheme.bg,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               ),
             ),

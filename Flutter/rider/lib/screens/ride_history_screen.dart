@@ -33,9 +33,10 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
-        title: Text('Ride History', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-        backgroundColor: AppTheme.surface,
+        title: Text('Ride History', style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 24, letterSpacing: -0.5, color: AppTheme.text)),
+        backgroundColor: AppTheme.bg,
         elevation: 0,
+        centerTitle: true,
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -108,9 +109,12 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
                 }
 
                 return ListView.separated(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 16),
                   itemCount: docs.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  separatorBuilder: (_, __) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Divider(height: 1, color: AppTheme.border.withValues(alpha: 0.5)),
+                  ),
                   itemBuilder: (context, index) {
                     final ride = docs[index].data() as Map<String, dynamic>;
                     ride['id'] = docs[index].id;
@@ -137,7 +141,7 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primary : AppTheme.surface,
+          color: isSelected ? AppTheme.primary : AppTheme.bg,
           borderRadius: BorderRadius.circular(24),
           border: Border.all(color: isSelected ? AppTheme.primary : AppTheme.border),
           boxShadow: isSelected
@@ -206,12 +210,8 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
     final dLng = (ride['drop']?['lng'] as num?)?.toDouble() ?? 0.0;
 
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.border),
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: AppTheme.bg,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -383,7 +383,7 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         title: Text('Report an Issue', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Text('Do you need help with this ride?', style: GoogleFonts.inter(color: AppTheme.text2)),
         actions: [

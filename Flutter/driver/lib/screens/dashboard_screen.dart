@@ -1,5 +1,7 @@
 // lib/screens/dashboard_screen.dart
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -58,6 +60,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   // Cache of fare bubble markers keyed by "<rideId>_<isActive>"
   final Map<String, BitmapDescriptor> _fareBubbleCache = {};
 
+  // Dotted curve line from driver to focused pickup
+  Set<Polyline> _routeCurvePolylines = {};
+  Marker? _distanceLabelMarker;
+
   bool _locating = false;
   bool _locationGranted = false;
 
@@ -81,6 +87,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _driverProvider = context.read<DriverProvider>();
       _driverProvider?.addListener(_onDriverLocationChanged);
+      // If driver is already online (e.g. returning from completed ride),
+      // restart the signal service so ride requests are visible immediately.
+      _resumeIfOnline();
     });
   }
   
@@ -157,7 +166,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       barrierDismissible: false,
       builder: (ctx) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         child: Padding(
           padding: const EdgeInsets.all(28),
           child: Column(
@@ -254,7 +263,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       barrierDismissible: false,
       builder: (ctx) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         child: Padding(
           padding: const EdgeInsets.all(28),
           child: Column(
@@ -548,7 +557,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       barrierDismissible: true,
       builder: (ctx) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         child: Padding(
           padding: const EdgeInsets.all(0),
           child: Column(
@@ -733,6 +742,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       _signalSub?.cancel();
       _signalService?.dispose();
       _signalService = null;
+      _clearRouteCurve();
       setState(() => _nearbyRides = []);
     }
   }
@@ -780,6 +790,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       _signalService?.dispose();
       _signalService = null;
       if (mounted) {
+        _clearRouteCurve();
         setState(() => _nearbyRides = []);
         CustomToast.show(
           context: context,
@@ -789,6 +800,20 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       }
     } catch (e) {
       debugPrint('Auto-offline failed: $e');
+    }
+  }
+
+  /// Resume ride signal listening if the driver is already online.
+  /// This handles the case where the dashboard is recreated (e.g. after
+  /// completing a ride via pushAndRemoveUntil) while the driver is still online.
+  void _resumeIfOnline() {
+    final provider = context.read<DriverProvider>();
+    if (provider.isOnline && _signalService == null) {
+      _lastActiveTime = DateTime.now();
+      _startAutoOfflineTimer();
+      // _getCurrentLocation fetches fresh GPS, initializes the animator,
+      // animates the camera, and then internally calls _startSignalService.
+      _getCurrentLocation();
     }
   }
 
@@ -814,24 +839,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     // Set the vehicle type on the tracker for FCM topic subscriptions
     provider.tracker?.setVehicleType(vehicleType);
 
-    // Seed initial zone from current location
-    if (provider.lat != null && provider.lng != null) {
-      _signalService!.updateZone(provider.lat!, provider.lng!);
-    }
-
-    // Listen for zone changes from SmartTracker
-    provider.tracker?.onZoneChanged = (lat, lng) {
-      _signalService?.updateZone(lat, lng);
-    };
-
-    // Start the RTDB listener
-    _signalService!.start();
-    setState(() => _loadingRides = true);
-
-    // Load existing bids for this driver
-    _loadExistingBids();
-
-    // Listen to the stream and update UI
+    // IMPORTANT: Set up the stream listener BEFORE calling updateZone/start.
+    // The ridesStream uses a broadcast StreamController, meaning events
+    // are only delivered to listeners that are active at the time of emission.
+    // If updateZone triggers an immediate RTDB snapshot (data already exists),
+    // the event would be lost if _signalSub wasn't set up yet.
+    _signalSub?.cancel();
     _signalSub = _signalService!.ridesStream.listen((rides) {
       if (!mounted) return;
 
@@ -861,6 +874,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       enriched.sort((a, b) =>
           ((a['distance'] as double?) ?? 0).compareTo((b['distance'] as double?) ?? 0));
 
+      final bool wasEmpty = _nearbyRides.isEmpty;
+
       setState(() {
         _nearbyRides = enriched
             .take(AppConstants.maxVisibleRides)
@@ -870,7 +885,274 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         _focusedRideIndex = 0;
       });
       _rebuildFareBubbles();
+
+      if (_nearbyRides.isNotEmpty) {
+        // If it was empty, animate the camera to frame it.
+        // If it wasn't empty, just silently update the curve to point to the new index 0.
+        _frameDriverAndPickup(animateCamera: wasEmpty);
+      } else {
+        _clearRouteCurve();
+      }
     });
+
+    // Now seed the zone and start — any RTDB snapshot will be caught by _signalSub
+    if (provider.lat != null && provider.lng != null) {
+      _signalService!.updateZone(provider.lat!, provider.lng!);
+    }
+
+    // Listen for zone changes from SmartTracker
+    provider.tracker?.onZoneChanged = (lat, lng) {
+      _signalService?.updateZone(lat, lng);
+    };
+
+    // Start the RTDB listener
+    _signalService!.start();
+    setState(() => _loadingRides = true);
+
+    // Load existing bids for this driver
+    _loadExistingBids();
+  }
+
+  void _frameDriverAndPickup({int? rideIndex, bool animateCamera = true}) {
+    if (_mapController == null || _nearbyRides.isEmpty) return;
+    final provider = context.read<DriverProvider>();
+    if (provider.lat == null || provider.lng == null) return;
+
+    final idx = rideIndex ?? 0;
+    if (idx >= _nearbyRides.length) return;
+
+    final ride = _nearbyRides[idx];
+    final pickup = ride['pickup'];
+    if (pickup == null || pickup['lat'] == null || pickup['lng'] == null) return;
+
+    final double driverLat = provider.lat!;
+    final double driverLng = provider.lng!;
+    final double pickupLat = (pickup['lat'] as num).toDouble();
+    final double pickupLng = (pickup['lng'] as num).toDouble();
+
+    final driverPos = LatLng(driverLat, driverLng);
+    final pickupPos = LatLng(pickupLat, pickupLng);
+
+    // Build the curved polyline
+    final curvePoints = _generateCurvePoints(driverPos, pickupPos);
+
+    // Calculate distance for the label
+    final distMeters = Geolocator.distanceBetween(
+      driverLat, driverLng, pickupLat, pickupLng,
+    );
+    final distLabel = distMeters < 1000
+        ? '${distMeters.toInt()} m'
+        : '${(distMeters / 1000).toStringAsFixed(1)} km';
+
+    // Build the dotted polyline from curve points
+    final dottedSegments = _buildDottedPolyline(curvePoints);
+
+    // Create distance label at the apex of the curve
+    _buildDistanceLabelMarker(curvePoints, distLabel).then((marker) {
+      if (mounted) {
+        setState(() {
+          _routeCurvePolylines = dottedSegments;
+          _distanceLabelMarker = marker;
+        });
+      }
+    });
+
+    if (animateCamera) {
+      // Fit bounds to show both points
+      final minLat = math.min(driverLat, pickupLat);
+      final maxLat = math.max(driverLat, pickupLat);
+      final minLng = math.min(driverLng, pickupLng);
+      final maxLng = math.max(driverLng, pickupLng);
+
+      final bounds = LatLngBounds(
+        southwest: LatLng(minLat, minLng),
+        northeast: LatLng(maxLat, maxLng),
+      );
+
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted && _mapController != null) {
+          _mapController?.animateCamera(
+            CameraUpdate.newLatLngBounds(bounds, 120.0),
+          );
+        }
+      });
+    }
+  }
+
+  /// Clear the curve and distance label when rides disappear
+  void _clearRouteCurve() {
+    setState(() {
+      _routeCurvePolylines = {};
+      _distanceLabelMarker = null;
+    });
+  }
+
+  void _removeRideLocally(String rideId, {bool markDeclined = false, bool removeBid = false}) {
+    if (!mounted) return;
+    setState(() {
+      if (removeBid) _biddedRides.remove(rideId);
+      if (markDeclined) _declinedRides.add(rideId);
+      
+      _nearbyRides.removeWhere((r) => r['id'] == rideId);
+      
+      if (_focusedRideIndex >= _nearbyRides.length) {
+        _focusedRideIndex = (_nearbyRides.length - 1).clamp(0, 999);
+      }
+    });
+    
+    _rebuildFareBubbles();
+    
+    if (_nearbyRides.isNotEmpty) {
+      _frameDriverAndPickup(rideIndex: _focusedRideIndex, animateCamera: false);
+    } else {
+      _clearRouteCurve();
+    }
+  }
+
+  /// Generate a smooth quadratic Bézier curve between two points.
+  /// The control point is offset perpendicular to the line, creating an arc.
+  List<LatLng> _generateCurvePoints(LatLng start, LatLng end) {
+    const int segments = 40;
+    final points = <LatLng>[];
+
+    final double midLat = (start.latitude + end.latitude) / 2;
+    final double midLng = (start.longitude + end.longitude) / 2;
+
+    // Calculate perpendicular offset for the control point
+    final double dLat = end.latitude - start.latitude;
+    final double dLng = end.longitude - start.longitude;
+    final double dist = math.sqrt(dLat * dLat + dLng * dLng);
+
+    // Arc height proportional to distance (clamped)
+    final double arcHeight = (dist * 0.25).clamp(0.001, 0.02);
+
+    // Perpendicular direction (rotate 90°)
+    final double perpLat = -dLng / dist * arcHeight;
+    final double perpLng = dLat / dist * arcHeight;
+
+    // Control point
+    final double ctrlLat = midLat + perpLat;
+    final double ctrlLng = midLng + perpLng;
+
+    for (int i = 0; i <= segments; i++) {
+      final double t = i / segments;
+      final double oneMinusT = 1 - t;
+
+      // Quadratic Bézier: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+      final double lat = oneMinusT * oneMinusT * start.latitude +
+          2 * oneMinusT * t * ctrlLat +
+          t * t * end.latitude;
+      final double lng = oneMinusT * oneMinusT * start.longitude +
+          2 * oneMinusT * t * ctrlLng +
+          t * t * end.longitude;
+
+      points.add(LatLng(lat, lng));
+    }
+
+    return points;
+  }
+
+  /// Build a dotted polyline from a list of curve points.
+  /// Creates alternating visible/invisible segments.
+  Set<Polyline> _buildDottedPolyline(List<LatLng> points) {
+    final polylines = <Polyline>{};
+    const int dashLength = 3; // points per dash
+    const int gapLength = 2;  // points per gap
+    int idx = 0;
+    int segmentId = 0;
+
+    while (idx < points.length) {
+      // Dash segment
+      final dashEnd = math.min(idx + dashLength, points.length);
+      if (dashEnd > idx + 1) {
+        polylines.add(Polyline(
+          polylineId: PolylineId('route_dash_$segmentId'),
+          points: points.sublist(idx, dashEnd),
+          color: const Color(0xFF4285F4), // Google blue
+          width: 4,
+          patterns: [],
+        ));
+      }
+      segmentId++;
+      idx = dashEnd;
+
+      // Gap segment (just skip points)
+      idx += gapLength;
+    }
+
+    return polylines;
+  }
+
+  /// Build a distance label marker at the apex (midpoint) of the curve.
+  Future<Marker> _buildDistanceLabelMarker(
+    List<LatLng> curvePoints,
+    String label,
+  ) async {
+    // Place marker at the apex of the curve (the midpoint)
+    final apexIndex = curvePoints.length ~/ 2;
+    final apexPos = curvePoints[apexIndex];
+
+    final icon = await _createDistanceBubbleIcon(label);
+
+    return Marker(
+      markerId: const MarkerId('distance_label'),
+      position: apexPos,
+      icon: icon,
+      anchor: const Offset(0.5, 0.5),
+      flat: true,
+      zIndexInt: 10,
+    );
+  }
+
+  /// Paint a compact rounded pill showing the distance text (e.g. "2.5 km").
+  Future<BitmapDescriptor> _createDistanceBubbleIcon(String label) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    final textPainter = TextPainter(
+      textDirection: TextDirection.ltr,
+      text: TextSpan(
+        text: label,
+        style: const TextStyle(
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+          letterSpacing: 0.3,
+        ),
+      ),
+    )..layout();
+
+    const double hPad = 16;
+    const double vPad = 8;
+    final double w = textPainter.width + hPad * 2;
+    final double h = textPainter.height + vPad * 2;
+
+    // Shadow
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(1, 2, w, h),
+        Radius.circular(h / 2),
+      ),
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.3)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+    );
+
+    // Background pill
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, 0, w, h),
+        Radius.circular(h / 2),
+      ),
+      Paint()..color = const Color(0xFF4285F4),
+    );
+
+    // Text
+    textPainter.paint(canvas, Offset(hPad, vPad));
+
+    final image = await recorder.endRecording().toImage(w.ceil() + 2, h.ceil() + 3);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(bytes!.buffer.asUint8List());
   }
 
   /// One-time load of this driver's existing pending bids.
@@ -909,18 +1191,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         .onValue
         .listen((event) {
       if (event.snapshot.value == true) {
-        if (mounted) {
-          setState(() {
-            _biddedRides.remove(rideId);
-            _declinedRides.add(rideId);
-            _nearbyRides.removeWhere((r) => r['id'] == rideId);
-          });
-          CustomToast.show(
-            context: context,
-            message: '⚠️ Rider declined your bid.',
-            isError: true,
-          );
-        }
+        _removeRideLocally(rideId, markDeclined: true, removeBid: true);
+        CustomToast.show(
+          context: context,
+          message: '⚠️ Rider declined your bid.',
+          isError: true,
+        );
         // Clean up this listener — no longer needed
         _declineSubs[rideId]?.cancel();
         _declineSubs.remove(rideId);
@@ -1025,7 +1301,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppTheme.bg,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -1254,6 +1530,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
             ),
             onMapCreated: (controller) {
               _mapController = controller;
+              _mapController?.setMapStyle(lightMapStyle);
             },
             markers: {
               if (_driverAnimator.currentPos != null && provider.isOnline)
@@ -1265,7 +1542,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   icon: _getVehicleIcon((provider.profile?['vehicleType'] as String?)?.toLowerCase()),
                 ),
               ..._buildRideMarkers(),
+              if (_distanceLabelMarker != null) _distanceLabelMarker!,
             },
+            polylines: _routeCurvePolylines,
           ),
 
           // Loading overlay
@@ -1285,7 +1564,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
-                  color: AppTheme.surface,
+                  color: AppTheme.bg,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: AppTheme.border),
                   boxShadow: [
@@ -1452,7 +1731,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       padding: EdgeInsets.fromLTRB(
           0, 12, 0, MediaQuery.of(context).padding.bottom + 8),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.bg,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: const Border(top: BorderSide(color: AppTheme.border)),
         boxShadow: [
@@ -1518,15 +1797,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     setState(() => _focusedRideIndex = index);
                     // Rebuild markers so active glow switches correctly
                     _rebuildFareBubbles();
-                    // Animate map camera to the focused pickup
-                    final ride = _nearbyRides[index];
-                    final lat = (ride['pickup']?['lat'] as num?)?.toDouble();
-                    final lng = (ride['pickup']?['lng'] as num?)?.toDouble();
-                    if (lat != null && lng != null) {
-                      _mapController?.animateCamera(
-                        CameraUpdate.newLatLngZoom(LatLng(lat, lng), 15),
-                      );
-                    }
+                    // Fit map to show both driver and focused pickup with curve
+                    _frameDriverAndPickup(rideIndex: index);
                   },
                   itemBuilder: (context, index) {
                     final ride = _nearbyRides[index];
@@ -1609,11 +1881,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                                                         .millisecondsSinceEpoch,
                                             onExpired: () {
                                               if (mounted) {
-                                                setState(() {
-                                                  _nearbyRides.removeWhere(
-                                                      (r) => r['id'] == rideId);
-                                                });
-                                                _rebuildFareBubbles();
+                                                _removeRideLocally(rideId);
                                               }
                                             },
                                           ),
@@ -1761,7 +2029,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                               // Action buttons
                               Container(
                                 decoration: const BoxDecoration(
-                                  color: AppTheme.surface,
+                                  color: AppTheme.bg,
                                   borderRadius: BorderRadius.vertical(
                                       bottom: Radius.circular(18)),
                                 ),
@@ -1791,18 +2059,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                                         Expanded(
                                           child: InkWell(
                                             onTap: () {
-                                              setState(() {
-                                                _declinedRides.add(rideId);
-                                                _nearbyRides.removeWhere(
-                                                    (r) => r['id'] == rideId);
-                                                if (_focusedRideIndex >=
-                                                    _nearbyRides.length) {
-                                                  _focusedRideIndex =
-                                                      (_nearbyRides.length - 1)
-                                                          .clamp(0, 999);
-                                                }
-                                              });
-                                              _rebuildFareBubbles();
+                                              _removeRideLocally(rideId, markDeclined: true);
                                             },
                                             borderRadius: const BorderRadius.only(
                                                 bottomLeft: Radius.circular(18)),
@@ -1873,7 +2130,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
   Widget _buildDrawer(BuildContext context, DriverProvider provider) {
     return Drawer(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppTheme.bg,
       child: Column(
         children: [
           UserAccountsDrawerHeader(

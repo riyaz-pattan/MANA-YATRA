@@ -19,8 +19,9 @@ import '../services/google_maps_service.dart';
 import '../utils/map_style.dart';
 
 import '../utils/marker_utils.dart';
-import 'main_screen.dart';
 import '../utils/custom_toast.dart';
+// Removed unused home_screen.dart import
+import 'main_screen.dart';
 import '../widgets/swipe_action.dart';
 import '../utils/skeleton.dart';
 import '../utils/marker_animator.dart';
@@ -56,6 +57,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
   bool _showFullBanner = true;
   bool _driverArrived = false;
   Timer? _bannerTimer;
+  bool _rideCompletedRecorded = false;
 
   @override
   void initState() {
@@ -112,11 +114,27 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
 
         // Detect driver arrival
         if (data['driverArrived'] == true && !_driverArrived) {
-          if (mounted) setState(() => _driverArrived = true);
+          if (mounted) {
+            setState(() => _driverArrived = true);
+            CustomToast.show(
+              context: context,
+              message: '🚗 Driver arrived at your location!',
+              isError: false,
+            );
+          }
         }
 
         if (data['status'] == 'completed' || data['status'] == 'cancelled') {
           // The build method now handles returning the full screen End UI
+          if (data['status'] == 'completed' && !_rideCompletedRecorded) {
+            _rideCompletedRecorded = true;
+            final uid = FirebaseAuth.instance.currentUser?.uid;
+            if (uid != null) {
+              FirebaseFirestore.instance.collection('users').doc(uid).update({
+                'totalRides': FieldValue.increment(1),
+              }).catchError((_) {});
+            }
+          }
         }
       } catch (e) {
         debugPrint('Error in _listenRide: $e');
@@ -457,13 +475,36 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                           child: ElevatedButton.icon(
                             onPressed: () async {
                               final driverName = _ride!['driverName'] ?? 'Driver';
-                              final upiLink = 'upi://pay?pa=$driverUpiId&pn=${Uri.encodeComponent(driverName)}&am=$finalPrice&cu=INR';
-                              final uri = Uri.parse(upiLink);
+                              final trimmedUpiId = driverUpiId.trim();
+                              
+                              // Build the UPI URI – only include payment params if we have a valid UPI ID
+                              String upiLink;
+                              if (trimmedUpiId.isNotEmpty) {
+                                upiLink = 'upi://pay?pa=${Uri.encodeComponent(trimmedUpiId)}&pn=${Uri.encodeComponent(driverName)}&am=$finalPrice&cu=INR';
+                              } else {
+                                upiLink = 'upi://pay';
+                              }
+                              
+                              // IMPORTANT: Do NOT use canLaunchUrl() for custom schemes like upi://
+                              // On Android 11+ (API 30+), canLaunchUrl uses resolveActivity() which
+                              // returns null for custom scheme intents even when apps can handle them.
+                              // Instead, directly try to launch and catch any failure.
                               try {
-                                if (await canLaunchUrl(uri)) {
-                                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                                } else {
-                                  if (mounted) {
+                                final uri = Uri.parse(upiLink);
+                                final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                if (!launched) {
+                                  // If specific URI didn't launch and we had payment params, try generic
+                                  if (trimmedUpiId.isNotEmpty) {
+                                    final genericUri = Uri.parse('upi://pay');
+                                    final fallbackLaunched = await launchUrl(genericUri, mode: LaunchMode.externalApplication);
+                                    if (!fallbackLaunched && mounted) {
+                                      CustomToast.show(
+                                        context: context,
+                                        message: 'No UPI apps found on your device.',
+                                        isError: true,
+                                      );
+                                    }
+                                  } else if (mounted) {
                                     CustomToast.show(
                                       context: context,
                                       message: 'No UPI apps found on your device.',
@@ -472,12 +513,18 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                                   }
                                 }
                               } catch (e) {
-                                if (mounted) {
-                                  CustomToast.show(
-                                    context: context,
-                                    message: 'Failed to open UPI app.',
-                                    isError: true,
-                                  );
+                                // launchUrl threw – try generic upi://pay as last resort
+                                try {
+                                  final genericUri = Uri.parse('upi://pay');
+                                  await launchUrl(genericUri, mode: LaunchMode.externalApplication);
+                                } catch (_) {
+                                  if (mounted) {
+                                    CustomToast.show(
+                                      context: context,
+                                      message: 'No UPI apps found on your device.',
+                                      isError: true,
+                                    );
+                                  }
                                 }
                               }
                             },
@@ -601,7 +648,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: AppTheme.surface,
+            color: AppTheme.bg,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(icon, size: 22, color: AppTheme.primary),
@@ -901,7 +948,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
               child: Container(
                 height: 340,
                 decoration: BoxDecoration(
-                  color: AppTheme.surface,
+                  color: AppTheme.bg,
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
                   boxShadow: [
                     BoxShadow(
@@ -1119,7 +1166,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
       padding: EdgeInsets.fromLTRB(
           20, 20, 20, MediaQuery.of(context).padding.bottom + 16),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.bg,
         borderRadius:
             const BorderRadius.vertical(top: Radius.circular(24)),
         border: const Border(top: BorderSide(color: AppTheme.border)),
@@ -1258,7 +1305,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                         height: 46,
                         margin: const EdgeInsets.only(left: 6),
                         decoration: BoxDecoration(
-                          color: AppTheme.surface,
+                          color: AppTheme.bg,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(color: AppTheme.primary, width: 1.5),
                         ),

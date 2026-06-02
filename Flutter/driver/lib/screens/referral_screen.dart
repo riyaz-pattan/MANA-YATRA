@@ -658,7 +658,7 @@ class _ReferralScreenState extends State<ReferralScreen>
             width: 64,
             height: 64,
             decoration: BoxDecoration(
-              color: AppTheme.surface,
+              color: AppTheme.bg,
               shape: BoxShape.circle,
             ),
             child: const Center(

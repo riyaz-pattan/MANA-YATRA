@@ -34,7 +34,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppTheme.bg,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -230,7 +230,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Remove $label?',
             style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
@@ -273,7 +273,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Remove $label?',
             style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
@@ -318,9 +318,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
-        title: Text('My Profile', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-        backgroundColor: AppTheme.surface,
+        title: Text('Profile', style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 24, letterSpacing: -0.5, color: AppTheme.text)),
+        backgroundColor: AppTheme.bg,
         elevation: 0,
+        centerTitle: true,
       ),
       body: uid == null 
           ? const Center(child: Text("Not signed in"))
@@ -355,96 +356,70 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
                   children: [
                     // ── Header Profile Info ──
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileDetailsScreen()));
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppTheme.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: AppTheme.border),
+                    Column(
+                      children: [
+                        const CircleAvatar(
+                          radius: 48,
+                          backgroundColor: AppTheme.bg2,
+                          child: Icon(Icons.person, size: 48, color: AppTheme.text3),
                         ),
-                        child: Row(
+                        const SizedBox(height: 16),
+                        Text(
+                          name,
+                          style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: AppTheme.text),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          phone,
+                          style: GoogleFonts.inter(fontSize: 16, color: AppTheme.text2),
+                        ),
+                        const SizedBox(height: 16),
+                        OutlinedButton(
+                          onPressed: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileDetailsScreen()));
+                          },
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(140, 40),
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                            side: const BorderSide(color: AppTheme.border, width: 1),
+                          ),
+                          child: Text('Edit Profile', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 14)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 32),
+                    
+                    // ── Stats ──
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        Column(
                           children: [
-                            const CircleAvatar(
-                              radius: 32,
-                              backgroundColor: AppTheme.bg2,
-                              child: Icon(Icons.person, size: 32, color: AppTheme.text3),
+                            Text(
+                              totalRides.toString(),
+                              style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: AppTheme.text),
                             ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    name,
-                                    style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700, color: AppTheme.text),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    phone,
-                                    style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2),
-                                  ),
-                                ],
-                              ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Total Rides',
+                              style: GoogleFonts.inter(fontSize: 13, color: AppTheme.text2),
                             ),
-                            const Icon(Icons.chevron_right, color: AppTheme.text3),
                           ],
                         ),
-                      ),
-                    ),
-                    
-                    const SizedBox(height: 20),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            decoration: BoxDecoration(
-                              color: AppTheme.surface,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: AppTheme.border),
+                        Container(width: 1, height: 40, color: AppTheme.border.withValues(alpha: 0.5)),
+                        Column(
+                          children: [
+                            Text(
+                              memberSince,
+                              style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: AppTheme.text),
                             ),
-                            child: Column(
-                              children: [
-                                Text(
-                                  totalRides.toString(),
-                                  style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.primary),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Total Rides',
-                                  style: GoogleFonts.inter(fontSize: 12, color: AppTheme.text2),
-                                ),
-                              ],
+                            const SizedBox(height: 4),
+                            Text(
+                              'Member Since',
+                              style: GoogleFonts.inter(fontSize: 13, color: AppTheme.text2),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            decoration: BoxDecoration(
-                              color: AppTheme.surface,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: AppTheme.border),
-                            ),
-                            child: Column(
-                              children: [
-                                Text(
-                                  memberSince,
-                                  style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.text),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Member Since',
-                                  style: GoogleFonts.inter(fontSize: 12, color: AppTheme.text2),
-                                ),
-                              ],
-                            ),
-                          ),
+                          ],
                         ),
                       ],
                     ),
@@ -466,14 +441,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           title: 'Emergency Contacts',
                           onTap: () {
                             Navigator.push(context, MaterialPageRoute(builder: (_) => const EmergencyContactsScreen()));
-                          },
-                          showDivider: true,
-                        ),
-                        _buildTile(
-                          icon: Icons.payment,
-                          title: 'Payment',
-                          onTap: () {
-                            CustomToast.show(context: context, message: 'Payment module coming soon');
                           },
                         ),
                       ],
@@ -513,29 +480,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildSectionTitle(String title) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 8, top: 16),
       child: Text(
-        title,
+        title.toUpperCase(),
         style: GoogleFonts.inter(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: AppTheme.text2,
-          letterSpacing: 1.2,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.text3,
+          letterSpacing: 1.5,
         ),
       ),
     );
   }
 
   Widget _buildSettingsGroup({required List<Widget> children}) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: Column(
-        children: children,
-      ),
+    return Column(
+      children: children,
     );
   }
 
@@ -543,22 +503,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Column(
       children: [
         ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           onTap: onTap,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          leading: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppTheme.bg2,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: AppTheme.primary, size: 20),
-          ),
-          title: Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 15)),
+          leading: Icon(icon, color: AppTheme.text, size: 24),
+          title: Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16, color: AppTheme.text)),
           trailing: const Icon(Icons.chevron_right, color: AppTheme.text3, size: 20),
         ),
         if (showDivider)
-          const Divider(height: 1, indent: 56, endIndent: 16, color: AppTheme.border),
+          Divider(height: 1, indent: 44, color: AppTheme.border.withValues(alpha: 0.5)),
       ],
     );
   }
@@ -577,9 +529,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         address: homePlace?['short_name'],
         firestoreKey: 'savedHome',
       ),
-      const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
-        child: Divider(color: AppTheme.border, height: 1),
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Divider(color: AppTheme.border.withValues(alpha: 0.5), height: 1, indent: 44),
       ),
       _buildSavedPlaceRow(
         icon: Icons.work_rounded,
@@ -591,17 +543,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     for (var i = 0; i < customPlaces.length; i++) {
       final place = customPlaces[i];
-      children.add(const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
-        child: Divider(color: AppTheme.border, height: 1),
+      children.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Divider(color: AppTheme.border.withValues(alpha: 0.5), height: 1, indent: 44),
       ));
       children.add(_buildCustomPlaceRow(place));
     }
 
     if (customPlaces.length < 5) {
-      children.add(const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
-        child: Divider(color: AppTheme.border, height: 1),
+      children.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Divider(color: AppTheme.border.withValues(alpha: 0.5), height: 1, indent: 44),
       ));
       children.add(_buildSavedPlaceRow(
         icon: Icons.star_rounded,
@@ -611,16 +563,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ));
     }
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: Column(
-        children: children,
-      ),
+    return Column(
+      children: children,
     );
   }
 
@@ -630,44 +574,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     return InkWell(
       onTap: () {}, // Custom places are added via the bottom sheet, not edited directly once added
-      borderRadius: BorderRadius.circular(12),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          children: [
+            const Icon(Icons.star_rounded, size: 24, color: AppTheme.text),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.text),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    address,
+                    style: GoogleFonts.inter(fontSize: 13, color: AppTheme.text2),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-            child: const Icon(Icons.star_rounded, size: 22, color: AppTheme.primary),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.text),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  address,
-                  style: GoogleFonts.inter(fontSize: 12, color: AppTheme.text2),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+            IconButton(
+              icon: const Icon(Icons.close, size: 20, color: AppTheme.text3),
+              onPressed: () => _removeCustomPlace(place),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close, size: 18, color: AppTheme.text3),
-            onPressed: () => _removeCustomPlace(place),
-            tooltip: 'Remove',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -682,47 +619,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     return InkWell(
       onTap: () => _editSavedPlace(label, firestoreKey),
-      borderRadius: BorderRadius.circular(12),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: isSet ? AppTheme.primary.withValues(alpha: 0.1) : AppTheme.bg2,
-              borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(icon, size: 24, color: isSet ? AppTheme.text : AppTheme.text3),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.text),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    isSet ? address : 'Tap to add $label location',
+                    style: GoogleFonts.inter(fontSize: 13, color: isSet ? AppTheme.text2 : AppTheme.text3),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-            child: Icon(icon, size: 22, color: isSet ? AppTheme.primary : AppTheme.text3),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.text),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  isSet ? address : 'Tap to add $label location',
-                  style: GoogleFonts.inter(fontSize: 12, color: isSet ? AppTheme.text2 : AppTheme.text3),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          if (isSet)
-            IconButton(
-              icon: const Icon(Icons.close, size: 18, color: AppTheme.text3),
-              onPressed: () => _removeSavedPlace(firestoreKey, label),
-              tooltip: 'Remove',
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            )
-          else
-            const Icon(Icons.add, size: 20, color: AppTheme.primary),
-        ],
+            if (isSet)
+              IconButton(
+                icon: const Icon(Icons.close, size: 20, color: AppTheme.text3),
+                onPressed: () => _removeSavedPlace(firestoreKey, label),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              )
+            else
+              const Icon(Icons.add, size: 20, color: AppTheme.text),
+          ],
+        ),
       ),
     );
   }

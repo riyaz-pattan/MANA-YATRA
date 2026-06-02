@@ -16,10 +16,11 @@ class SupportScreen extends StatelessWidget {
       appBar: AppBar(
         title: Text(
           'Support',
-          style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+          style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 24, letterSpacing: -0.5, color: AppTheme.text),
         ),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         elevation: 0,
+        centerTitle: true,
       ),
       body: ListView(
         padding: const EdgeInsets.all(24),
@@ -66,8 +67,8 @@ class SupportScreen extends StatelessWidget {
           ),
           const SizedBox(height: 32),
           Text(
-            'FAQs',
-            style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w600),
+            'FAQS',
+            style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.text3, letterSpacing: 1.5),
           ),
           const SizedBox(height: 16),
           _buildFaqItem(
@@ -89,71 +90,49 @@ class SupportScreen extends StatelessWidget {
     required String subtitle,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.border),
+    return Column(
+      children: [
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          onTap: onTap,
+          leading: Icon(icon, color: AppTheme.text, size: 28),
+          title: Text(
+            title,
+            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.text),
+          ),
+          subtitle: Text(
+            subtitle,
+            style: GoogleFonts.inter(fontSize: 13, color: AppTheme.text2),
+          ),
+          trailing: const Icon(Icons.chevron_right, color: AppTheme.text3, size: 20),
         ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: AppTheme.primary),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: GoogleFonts.inter(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: GoogleFonts.inter(
-                      fontSize: 14,
-                      color: AppTheme.text2,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: AppTheme.text3),
-          ],
-        ),
-      ),
+        Divider(height: 1, indent: 48, color: AppTheme.border.withValues(alpha: 0.5)),
+      ],
     );
   }
 
   Widget _buildFaqItem(String question, String answer) {
-    return ExpansionTile(
-      title: Text(
-        question,
-        style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w500),
-      ),
-      childrenPadding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+    return Column(
       children: [
-        Text(
-          answer,
-          style: GoogleFonts.inter(
-            fontSize: 14,
-            color: AppTheme.text2,
-            height: 1.5,
+        ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+          title: Text(
+            question,
+            style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.text),
           ),
+          childrenPadding: const EdgeInsets.only(left: 4, right: 16, bottom: 16),
+          children: [
+            Text(
+              answer,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: AppTheme.text2,
+                height: 1.5,
+              ),
+            ),
+          ],
         ),
+        Divider(height: 1, color: AppTheme.border.withValues(alpha: 0.5)),
       ],
     );
   }

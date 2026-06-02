@@ -55,7 +55,7 @@ class PendingScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: AppTheme.surface,
+                      color: AppTheme.bg,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: AppTheme.border),
                     ),

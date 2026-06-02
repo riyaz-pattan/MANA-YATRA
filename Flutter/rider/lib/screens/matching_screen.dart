@@ -433,7 +433,7 @@ class _MatchingScreenState extends State<MatchingScreen>
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppTheme.surface,
+          color: AppTheme.bg,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppTheme.border),
         ),
@@ -559,7 +559,7 @@ class _MatchingScreenState extends State<MatchingScreen>
                 return Container(
                   margin: const EdgeInsets.only(bottom: 14),
                   decoration: BoxDecoration(
-                    color: AppTheme.surface,
+                    color: AppTheme.bg,
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(color: AppTheme.border),
                     boxShadow: [

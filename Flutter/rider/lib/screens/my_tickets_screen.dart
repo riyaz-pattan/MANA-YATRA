@@ -18,13 +18,15 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
+      backgroundColor: AppTheme.bg,
       appBar: AppBar(
         title: Text(
           'My Tickets',
-          style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+          style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 24, letterSpacing: -0.5, color: AppTheme.text),
         ),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         elevation: 0,
+        centerTitle: true,
         iconTheme: const IconThemeData(color: AppTheme.text),
       ),
       body: user == null
@@ -65,9 +67,12 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
                 }
 
                 return ListView.separated(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
                   itemCount: docs.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 16),
+                  separatorBuilder: (_, __) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12.0),
+                    child: Divider(height: 1, color: AppTheme.border.withValues(alpha: 0.5)),
+                  ),
                   itemBuilder: (context, index) {
                     final data = docs[index].data() as Map<String, dynamic>;
                     return _buildTicketCard(data);
@@ -109,19 +114,7 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
     }
 
     return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          )
-        ],
-      ),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

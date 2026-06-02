@@ -275,10 +275,19 @@ class AuthGate extends StatelessWidget {
         }
 
         if (authSnap.data == null) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            final provider = context.read<DriverProvider>();
-            if (provider.user != null) {
-              provider.setUser(null);
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            if (context.mounted) {
+              final provider = context.read<DriverProvider>();
+              if (provider.user != null) {
+                provider.setUser(null);
+                // The driver just logged out! Delete the FCM token so this
+                // device stops receiving notifications for the old account.
+                try {
+                  await FirebaseMessaging.instance.deleteToken();
+                } catch (e) {
+                  debugPrint('Error deleting FCM token on logout: $e');
+                }
+              }
             }
           });
           return const LoginScreen();

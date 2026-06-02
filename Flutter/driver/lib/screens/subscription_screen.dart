@@ -322,7 +322,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppTheme.bg,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -379,7 +379,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                       decoration: BoxDecoration(
                         color: selected
                             ? AppTheme.primary.withValues(alpha: 0.1)
-                            : AppTheme.surface,
+                            : AppTheme.bg,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
                           color: selected ? AppTheme.primary : AppTheme.border,
@@ -946,7 +946,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.bg,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: AppTheme.border),
       ),
@@ -1055,7 +1055,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: AppTheme.surface,
+                  color: AppTheme.bg,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: AppTheme.border),
                 ),
@@ -1198,7 +1198,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         elevation: 0,
         child: Padding(

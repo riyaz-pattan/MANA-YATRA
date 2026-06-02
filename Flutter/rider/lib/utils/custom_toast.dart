@@ -8,7 +8,8 @@ class CustomToast {
     required String message,
     bool isError = false,
   }) {
-    final overlay = Overlay.of(context);
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
     late OverlayEntry overlayEntry;
 
     overlayEntry = OverlayEntry(

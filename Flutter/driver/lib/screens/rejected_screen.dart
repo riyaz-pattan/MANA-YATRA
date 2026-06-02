@@ -113,7 +113,7 @@ class RejectedScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: AppTheme.surface,
+                      color: AppTheme.bg,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: AppTheme.border),
                     ),

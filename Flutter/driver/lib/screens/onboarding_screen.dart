@@ -234,7 +234,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 20),
         decoration: BoxDecoration(
-          color: AppTheme.surface,
+          color: AppTheme.bg,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: AppTheme.border),
         ),
@@ -509,7 +509,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(10),
                     decoration: const BoxDecoration(
-                      color: AppTheme.surface,
+                      color: AppTheme.bg,
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.arrow_back, size: 22, color: AppTheme.text),
@@ -611,7 +611,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         margin: const EdgeInsets.symmetric(horizontal: 6),
                         padding: const EdgeInsets.symmetric(vertical: 20),
                         decoration: BoxDecoration(
-                          color: selected ? AppTheme.primary : AppTheme.surface,
+                          color: selected ? AppTheme.primary : AppTheme.bg,
                           borderRadius: BorderRadius.circular(16),
                           boxShadow: selected ? [
                             BoxShadow(color: AppTheme.primary.withValues(alpha: 0.3), blurRadius: 12, offset: const Offset(0, 4))
@@ -722,7 +722,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                     decoration: BoxDecoration(
-                      color: AppTheme.surface,
+                      color: AppTheme.bg,
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Row(
@@ -757,7 +757,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     padding: const EdgeInsets.only(top: 12),
                     child: Container(
                       decoration: BoxDecoration(
-                        color: AppTheme.surface,
+                        color: AppTheme.bg,
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: TextField(
@@ -821,7 +821,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   borderRadius: BorderRadius.circular(8),
                   child: LinearProgressIndicator(
                     value: _uploadProgress,
-                    backgroundColor: AppTheme.surface2,
+                    backgroundColor: AppTheme.bg2,
                     color: AppTheme.primary,
                     minHeight: 6,
                   ),
@@ -987,7 +987,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         const SizedBox(height: 8),
         Container(
           decoration: BoxDecoration(
-            color: AppTheme.surface,
+            color: AppTheme.bg,
             borderRadius: BorderRadius.circular(16),
           ),
           child: TextField(
@@ -1041,7 +1041,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         duration: const Duration(milliseconds: 300),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         decoration: BoxDecoration(
-          color: hasFile ? AppTheme.success.withValues(alpha: 0.05) : AppTheme.surface,
+          color: hasFile ? AppTheme.success.withValues(alpha: 0.05) : AppTheme.bg,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: hasFile ? AppTheme.success.withValues(alpha: 0.3) : Colors.transparent,

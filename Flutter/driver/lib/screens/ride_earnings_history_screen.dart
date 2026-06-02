@@ -53,7 +53,7 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return Scaffold(
-              appBar: AppBar(backgroundColor: AppTheme.surface, elevation: 0),
+              appBar: AppBar(backgroundColor: AppTheme.bg, elevation: 0),
               body: ListView.separated(
                 padding: const EdgeInsets.all(16),
                 itemCount: 4,
@@ -111,21 +111,21 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
             slivers: [
               SliverAppBar(
                 title: Text('Earnings History', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: AppTheme.text)),
-                backgroundColor: AppTheme.surface,
+                backgroundColor: AppTheme.bg,
                 elevation: 0,
                 pinned: true,
                 iconTheme: const IconThemeData(color: AppTheme.text),
               ),
               SliverToBoxAdapter(
                 child: Container(
-                  color: AppTheme.surface,
+                  color: AppTheme.bg,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   child: _buildFilters(),
                 ),
               ),
               SliverToBoxAdapter(
                 child: Container(
-                  color: AppTheme.surface,
+                  color: AppTheme.bg,
                   child: Column(
                     children: [
                       _buildEarningsSummary(totalEarnings, filteredDocs.length),
@@ -503,7 +503,7 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
       child: Container(
         padding: const EdgeInsets.all(16),
         width: double.infinity,
-        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.success.withValues(alpha: 0.3)), boxShadow: [BoxShadow(color: AppTheme.success.withValues(alpha: 0.05), blurRadius: 10)]),
+        decoration: BoxDecoration(color: AppTheme.bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.success.withValues(alpha: 0.3)), boxShadow: [BoxShadow(color: AppTheme.success.withValues(alpha: 0.05), blurRadius: 10)]),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -535,7 +535,7 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(color: AppTheme.surface, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 20)]),
+            decoration: BoxDecoration(color: AppTheme.bg, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 20)]),
             child: const Icon(Icons.account_balance_wallet_outlined, size: 48, color: AppTheme.text3),
           ),
           const SizedBox(height: 24),
@@ -570,7 +570,7 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: AppTheme.bg,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppTheme.border),
         boxShadow: [

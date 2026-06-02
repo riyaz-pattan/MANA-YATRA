@@ -94,7 +94,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
         title: Text('Delete Account', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.bg,
         elevation: 0,
       ),
       body: SingleChildScrollView(
@@ -128,7 +128,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                 hintText: 'Please tell us why you are leaving...',
                 hintStyle: GoogleFonts.inter(color: AppTheme.text3),
                 filled: true,
-                fillColor: AppTheme.surface,
+                fillColor: AppTheme.bg,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide(color: AppTheme.border),
