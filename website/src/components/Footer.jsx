@@ -53,8 +53,8 @@ export default function Footer() {
         <div className="footer-bottom">
           <p>© {new Date().getFullYear()} Gaman. All rights reserved. Made in India 🇮🇳</p>
           <div className="footer-bottom-links">
-            <a href="https://manayatra.com/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
-            <a href="https://manayatra.com/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a>
+            <Link to="/privacy-policy">Privacy Policy</Link>
+            <Link to="/terms-of-service">Terms of Service</Link>
             <Link to="/data-deletion">Data Deletion</Link>
           </div>
         </div>

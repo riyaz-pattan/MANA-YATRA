@@ -11,6 +11,8 @@ import About from './pages/About';
 import Support from './pages/Support';
 import DataDeletion from './pages/DataDeletion';
 import ReferralProgram from './pages/ReferralProgram';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfService from './pages/TermsOfService';
 
 export default function App() {
   return (
@@ -28,6 +30,8 @@ export default function App() {
           <Route path="/support" element={<Support />} />
           <Route path="/data-deletion" element={<DataDeletion />} />
           <Route path="/referral" element={<ReferralProgram />} />
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/terms-of-service" element={<TermsOfService />} />
         </Routes>
       </main>
       <Footer />

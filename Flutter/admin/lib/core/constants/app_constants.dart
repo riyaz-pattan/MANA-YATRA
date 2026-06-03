@@ -1,10 +1,10 @@
 // lib/core/constants/app_constants.dart
 
-/// Central configuration constants for Mana Yatra Admin Console.
+/// Central configuration constants for Gaman Admin Console.
 class AppConstants {
   AppConstants._();
 
-  static const String appName = 'Mana Yatra Admin';
+  static const String appName = 'Gaman Admin';
   static const String appVersion = '2.0.0';
 
   // Firebase Cloud Functions base URL

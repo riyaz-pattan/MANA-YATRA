@@ -25,6 +25,8 @@ import 'main_screen.dart';
 import '../widgets/swipe_action.dart';
 import '../utils/skeleton.dart';
 import '../utils/marker_animator.dart';
+import '../widgets/premium_retry_button.dart';
+import '../main.dart';
 
 class ActiveRideScreen extends StatefulWidget {
   final String rideId;
@@ -587,7 +589,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                             _confettiController?.stop();
                             context.read<RideProvider>().resetRide();
                             Navigator.of(context).pushAndRemoveUntil(
-                              MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
+                              MaterialPageRoute(builder: (_) => const AuthGate()),
                               (_) => false,
                             );
                           },
@@ -857,7 +859,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
       }
       context.read<RideProvider>().resetRide();
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
+        MaterialPageRoute(builder: (_) => const AuthGate()),
         (_) => false,
       );
     } catch (e) {

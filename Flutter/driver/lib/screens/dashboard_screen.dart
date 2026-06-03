@@ -23,6 +23,7 @@ import 'profile_screen.dart';
 import 'support_screen.dart';
 import 'settings_screen.dart';
 import 'referral_screen.dart';
+import '../main.dart';
 import '../utils/custom_toast.dart';
 import '../services/sync_engine.dart';
 import '../models/queue_item.dart';
@@ -2321,6 +2322,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     'driverState': 'OFFLINE',
                   });
               await FirebaseAuth.instance.signOut();
+              if (context.mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const AuthGate()),
+                  (_) => false,
+                );
+              }
             },
           ),
           const SizedBox(height: 24),

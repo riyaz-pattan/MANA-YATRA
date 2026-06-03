@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import 'main_screen.dart';
+import '../main.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -72,7 +73,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen>
 
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
+          MaterialPageRoute(builder: (_) => const AuthGate()),
           (route) => false,
         );
       }

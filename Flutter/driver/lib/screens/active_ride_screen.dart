@@ -22,6 +22,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import '../providers/driver_provider.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'dashboard_screen.dart';
+import '../main.dart';
 import '../widgets/swipe_action.dart';
 import '../utils/skeleton.dart';
 
@@ -857,7 +858,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                         _confettiController?.stop();
                         Navigator.of(context).pushAndRemoveUntil(
                           MaterialPageRoute(
-                            builder: (_) => const DashboardScreen(),
+                            builder: (_) => const AuthGate(),
                           ),
                           (_) => false,
                         );

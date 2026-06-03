@@ -7,7 +7,38 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dart_geohash/dart_geohash.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../config/constants.dart';
+
+@pragma('vm:entry-point')
+void startCallback() {
+  FlutterForegroundTask.setTaskHandler(LocationTaskHandler());
+}
+
+class LocationTaskHandler extends TaskHandler {
+  @override
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
+
+  @override
+  void onRepeatEvent(DateTime timestamp) {}
+
+  @override
+  Future<void> onDestroy(DateTime timestamp) async {}
+
+  @override
+  void onReceiveData(Object data) {}
+
+  @override
+  void onNotificationButtonPressed(String id) {}
+
+  @override
+  void onNotificationPressed() {
+    FlutterForegroundTask.launchApp();
+  }
+
+  @override
+  void onNotificationDismissed() {}
+}
 
 enum TrackingMode { offline, discovery, activeRide }
 
@@ -31,7 +62,31 @@ class SmartTracker {
   String? _vehicleType;
   final Set<String> _subscribedTopics = {};
 
-  SmartTracker(this.driverId);
+  SmartTracker(this.driverId) {
+    _initForegroundTask();
+  }
+
+  void _initForegroundTask() {
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'gaman_tracking',
+        channelName: 'Location Tracking',
+        channelDescription: 'Keeps driver online in the background',
+        channelImportance: NotificationChannelImportance.LOW,
+        priority: NotificationPriority.LOW,
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(
+        showNotification: true,
+        playSound: false,
+      ),
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(5000),
+        autoRunOnBoot: false,
+        allowWakeLock: true,
+        allowWifiLock: true,
+      ),
+    );
+  }
 
   String? get currentGeohash5 => _currentGeohash5;
 
@@ -47,14 +102,32 @@ class SmartTracker {
 
     if (mode == TrackingMode.offline) {
       _stopAll();
+      FlutterForegroundTask.stopService();
     } else if (mode == TrackingMode.discovery && prev != TrackingMode.discovery) {
+      _startForegroundService("You are online and ready for rides");
       _startWatching();
       _stopActiveRideTimer();
       if (_currentLat != null) _pushToFirebase(_currentLat!, _currentLng!, _currentHeading ?? 0.0);
     } else if (mode == TrackingMode.activeRide) {
+      _startForegroundService("Actively navigating on a ride");
       _startWatching();
       _startActiveRideTimer();
       if (_currentLat != null) _pushToFirebase(_currentLat!, _currentLng!, _currentHeading ?? 0.0);
+    }
+  }
+
+  Future<void> _startForegroundService(String message) async {
+    if (await FlutterForegroundTask.isRunningService) {
+      await FlutterForegroundTask.updateService(
+        notificationTitle: 'Gaman Driver',
+        notificationText: message,
+      );
+    } else {
+      await FlutterForegroundTask.startService(
+        notificationTitle: 'Gaman Driver',
+        notificationText: message,
+        callback: startCallback,
+      );
     }
   }
 

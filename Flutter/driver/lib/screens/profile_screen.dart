@@ -4,7 +4,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../config/theme.dart';
+import '../main.dart';
 import '../providers/driver_provider.dart';
 import '../utils/skeleton.dart';
 import 'profile_status_screen.dart';
@@ -144,7 +146,15 @@ class ProfileScreen extends StatelessWidget {
                   width: double.infinity,
                   height: 54,
                   child: OutlinedButton.icon(
-                    onPressed: () => FirebaseAuth.instance.signOut(),
+                    onPressed: () async {
+                      await FirebaseAuth.instance.signOut();
+                      if (context.mounted) {
+                        Navigator.of(context).pushAndRemoveUntil(
+                          MaterialPageRoute(builder: (_) => const AuthGate()),
+                          (_) => false,
+                        );
+                      }
+                    },
                     icon: const Icon(Icons.logout, color: AppTheme.danger),
                     label: Text(
                       'Log Out',

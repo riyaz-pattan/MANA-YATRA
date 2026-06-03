@@ -1,7 +1,7 @@
 name: mana_yatra_admin
 description: "Mana Yatra Admin Dashboard - Platform management"
 publish_to: 'none'
-version: 1.0.0+1
+version: 0.0.0+1
 
 environment:
   sdk: ^3.9.2
@@ -41,17 +41,22 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/logo/ashvo_admin.png"
+  image_path: "assets/images/logo/gaman_logo.png"
+  adaptive_icon_foreground: "assets/images/logo/foreground.png"
+  adaptive_icon_background: "assets/images/logo/background.png"
 
 flutter_native_splash:
-  color: "#000000"
-  image: "assets/logo/ashvo_admin_splash.png"
   android: true
   ios: true
+
+  color: "#FFcc00"
+  image: "assets/images/logo/splashscreen.png"
+  
   fullscreen: true
   android_12:
-    image: "assets/logo/ashvo_admin_splash.png"
-    color: "#000000"
+    color: "#FFcc00"
+    image: "assets/images/logo/android12splash.png"
+    
 
 flutter:
   uses-material-design: true

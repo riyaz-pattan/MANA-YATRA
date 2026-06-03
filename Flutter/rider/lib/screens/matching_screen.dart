@@ -11,6 +11,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import '../config/constants.dart';
 import 'active_ride_screen.dart';
+import '../main.dart';
 import '../screens/main_screen.dart';
 import 'package:provider/provider.dart';
 import '../providers/ride_provider.dart';
@@ -98,7 +99,7 @@ class _MatchingScreenState extends State<MatchingScreen>
         if (data['status'] == 'cancelled' || data['status'] == 'expired') {
           context.read<RideProvider>().resetRide();
           Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
+            MaterialPageRoute(builder: (_) => const AuthGate()),
             (_) => false,
           );
         }
@@ -193,7 +194,7 @@ class _MatchingScreenState extends State<MatchingScreen>
       if (mounted) {
         context.read<RideProvider>().resetRide();
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
+          MaterialPageRoute(builder: (_) => const AuthGate()),
           (_) => false,
         );
       }
@@ -222,7 +223,7 @@ class _MatchingScreenState extends State<MatchingScreen>
       if (mounted) {
         context.read<RideProvider>().resetRide();
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
+          MaterialPageRoute(builder: (_) => const AuthGate()),
           (_) => false,
         );
       }
@@ -233,7 +234,7 @@ class _MatchingScreenState extends State<MatchingScreen>
       if (mounted) {
         context.read<RideProvider>().resetRide();
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey)),
+          MaterialPageRoute(builder: (_) => const AuthGate()),
           (_) => false,
         );
       }

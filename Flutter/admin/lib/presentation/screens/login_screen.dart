@@ -92,7 +92,7 @@ class _AdminLoginScreenState extends ConsumerState<AdminLoginScreen> with Single
                   child: const Text('⚙️', style: TextStyle(fontSize: 52)),
                 ),
                 const SizedBox(height: 16),
-                Text('Mana Yatra', style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.w800, color: textColor, letterSpacing: -0.5)),
+                Text('Gaman Admin', style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.w800, color: textColor, letterSpacing: -0.5)),
                 Text('Admin Console', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.brandBlue)),
                 const SizedBox(height: 48),
 

@@ -7,6 +7,7 @@ import 'about_screen.dart';
 import 'delete_account_screen.dart';
 import 'login_screen.dart';
 import '../config/theme.dart';
+import '../main.dart';
 import '../utils/skeleton.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -86,7 +87,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: Icons.description_outlined,
                     title: 'Terms of Service',
                     onTap: () async {
-                      final Uri url = Uri.parse('https://manayatra.com/terms');
+                      final Uri url = Uri.parse('https://gamanrides.netlify.app/terms-of-service');
                       if (await canLaunchUrl(url)) await launchUrl(url);
                     },
                     showDivider: true,
@@ -95,7 +96,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: Icons.privacy_tip_outlined,
                     title: 'Privacy Policy',
                     onTap: () async {
-                      final Uri url = Uri.parse('https://manayatra.com/privacy');
+                      final Uri url = Uri.parse('https://gamanrides.netlify.app/privacy-policy');
                       if (await canLaunchUrl(url)) await launchUrl(url);
                     },
                   ),
@@ -115,7 +116,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       await FirebaseAuth.instance.signOut();
                       if (context.mounted) {
                         Navigator.of(context).pushAndRemoveUntil(
-                          MaterialPageRoute(builder: (_) => const LoginScreen()),
+                          MaterialPageRoute(builder: (_) => const AuthGate()),
                           (_) => false,
                         );
                       }

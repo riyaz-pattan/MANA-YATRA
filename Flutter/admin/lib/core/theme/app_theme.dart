@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Professional design system for Mana Yatra Admin Console.
+/// Professional design system for Gaman Admin Console.
 /// Supports both light and dark modes with a premium blue/teal palette.
 class AppTheme {
   AppTheme._();

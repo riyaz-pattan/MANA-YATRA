@@ -319,7 +319,7 @@ class _AdminShellState extends ConsumerState<AdminShell>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Mana Yatra',
+                          'Gaman Admin',
                           style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
@@ -750,7 +750,7 @@ class _AdminShellState extends ConsumerState<AdminShell>
             ),
             const SizedBox(width: 10),
             Text(
-              'Mana Yatra',
+              'Gaman Admin',
               style: GoogleFonts.inter(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,

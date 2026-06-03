@@ -66,7 +66,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: Icons.description_outlined,
             title: 'Terms & Conditions',
             onTap: () async {
-              final Uri url = Uri.parse('https://manayatra.com/terms');
+              final Uri url = Uri.parse('https://gamanrides.netlify.app/terms-of-service');
               if (await canLaunchUrl(url)) await launchUrl(url);
             },
           ),
@@ -74,7 +74,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: Icons.privacy_tip_outlined,
             title: 'Privacy Policy',
             onTap: () async {
-              final Uri url = Uri.parse('https://manayatra.com/privacy');
+              final Uri url = Uri.parse('https://gamanrides.netlify.app/privacy-policy');
               if (await canLaunchUrl(url)) await launchUrl(url);
             },
           ),

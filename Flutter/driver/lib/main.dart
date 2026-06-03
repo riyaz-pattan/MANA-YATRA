@@ -26,6 +26,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'utils/custom_toast.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'services/action_queue_service.dart';
 import 'services/sync_engine.dart';
 import 'services/error_handler.dart';
@@ -63,6 +64,7 @@ late final AnalyticsService analyticsService;
 
 void main() {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterForegroundTask.initCommunicationPort();
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
   runApp(const AppInitializer());
 }

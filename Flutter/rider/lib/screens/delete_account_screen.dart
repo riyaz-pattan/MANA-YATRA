@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import '../utils/custom_toast.dart';
 import 'login_screen.dart';
+import '../main.dart';
 
 class DeleteAccountScreen extends StatefulWidget {
   const DeleteAccountScreen({super.key});
@@ -76,7 +77,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           message: 'Account deleted successfully.',
         );
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          MaterialPageRoute(builder: (_) => const AuthGate()),
           (_) => false,
         );
       }

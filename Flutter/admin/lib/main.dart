@@ -30,7 +30,7 @@ class ManaYatraAdminApp extends ConsumerWidget {
     final themeMode = ref.watch(themeModeProvider);
 
     return MaterialApp.router(
-      title: 'Mana Yatra Admin Console',
+      title: 'Gaman Admin Console',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
