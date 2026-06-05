@@ -25,6 +25,7 @@
       }
     },
     "liveLocations": {
+      ".read": "auth != null && auth.token.admin === true",
       "$driverId": {
         ".read": "auth != null",
         ".write": "auth != null && auth.uid === $driverId",
@@ -36,6 +37,10 @@
         ".read": "auth != null",
         ".write": "auth != null && auth.uid === $uid"
       }
+    },
+    "dashboard_stats": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
     }
   }
 }

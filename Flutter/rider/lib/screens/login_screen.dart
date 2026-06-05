@@ -449,6 +449,14 @@ class _LoginScreenState extends State<LoginScreen>
 
 /// Implements Pinput's [SmsRetriever] using the [SmartAuth] package
 /// to automatically read incoming OTP SMS and extract the code.
+///
+/// Uses the SMS User Consent API which shows a native system prompt asking
+/// the user to share the incoming SMS. This does NOT require the 11-char
+/// hash in the SMS body, so it works immediately.
+///
+/// Once Google's backend starts including the hash (after production
+/// propagation), Firebase's own verificationCompleted callback will handle
+/// fully-automatic zero-tap verification — no code changes needed.
 class _SmsRetrieverImpl implements SmsRetriever {
   const _SmsRetrieverImpl(this._smartAuth);
 
@@ -456,9 +464,15 @@ class _SmsRetrieverImpl implements SmsRetriever {
 
   @override
   Future<String?> getSmsCode() async {
-    final res = await _smartAuth.getSmsWithRetrieverApi();
-    if (res.hasData) {
-      return res.requireData.code;
+    try {
+      final res = await _smartAuth.getSmsWithUserConsentApi();
+      if (res.hasData) {
+        return res.requireData.code;
+      }
+    } catch (e) {
+      // SMS User Consent may fail if activity is destroyed (e.g. reCAPTCHA
+      // redirect) or user denies permission — silently ignore.
+      debugPrint('SmartAuth: getSmsWithUserConsentApi failed: $e');
     }
     return null;
   }
@@ -468,6 +482,7 @@ class _SmsRetrieverImpl implements SmsRetriever {
 
   @override
   Future<void> dispose() async {
-    _smartAuth.removeSmsRetrieverApiListener();
+    _smartAuth.removeUserConsentApiListener();
   }
 }
+

@@ -60,6 +60,7 @@ class SmartTracker {
   // FCM zone topic tracking
   String? _currentGeohash5;
   String? _vehicleType;
+  String? _rideId;
   final Set<String> _subscribedTopics = {};
 
   SmartTracker(this.driverId) {
@@ -94,6 +95,10 @@ class SmartTracker {
     _vehicleType = type;
   }
 
+  void setRideId(String? rideId) {
+    _rideId = rideId;
+  }
+
   TrackingMode get mode => _mode;
 
   void setMode(TrackingMode mode) {
@@ -101,17 +106,23 @@ class SmartTracker {
     _mode = mode;
 
     if (mode == TrackingMode.offline) {
+      // Push offline status before stopping if we have a location
+      if (_currentLat != null) {
+        _pushToFirebase(_currentLat!, _currentLng!, _currentHeading ?? 0.0);
+      }
       _stopAll();
       FlutterForegroundTask.stopService();
     } else if (mode == TrackingMode.discovery && prev != TrackingMode.discovery) {
       _startForegroundService("You are online and ready for rides");
       _startWatching();
       _stopActiveRideTimer();
+      // Force push status change
       if (_currentLat != null) _pushToFirebase(_currentLat!, _currentLng!, _currentHeading ?? 0.0);
-    } else if (mode == TrackingMode.activeRide) {
+    } else if (mode == TrackingMode.activeRide && prev != TrackingMode.activeRide) {
       _startForegroundService("Actively navigating on a ride");
       _startWatching();
       _startActiveRideTimer();
+      // Force push status change
       if (_currentLat != null) _pushToFirebase(_currentLat!, _currentLng!, _currentHeading ?? 0.0);
     }
   }
@@ -228,10 +239,25 @@ class SmartTracker {
     _lastLng = lng;
 
     try {
+      String statusStr = 'offline';
+      if (_mode == TrackingMode.discovery) statusStr = 'idle';
+      if (_mode == TrackingMode.activeRide) statusStr = 'in_ride';
+
       // 1. Realtime DB
+      final Map<String, dynamic> rtdbPayload = {
+        'lat': lat,
+        'lng': lng,
+        'heading': heading,
+        'status': statusStr,
+        'updatedAt': ServerValue.timestamp,
+      };
+      if (_rideId != null) {
+        rtdbPayload['rideId'] = _rideId;
+      }
+
       await FirebaseDatabase.instance
           .ref('liveLocations/$driverId')
-          .set({'lat': lat, 'lng': lng, 'heading': heading, 'updatedAt': ServerValue.timestamp});
+          .set(rtdbPayload);
 
       // 2. Firestore with geohash
       final geohash = GeoHasher().encode(lng, lat, precision: 6);

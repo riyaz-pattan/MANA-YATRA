@@ -170,6 +170,7 @@ class RideProvider extends ChangeNotifier {
   /// Persist the active ride ID to local storage so we can recover
   /// after an unexpected app kill.
   Future<void> _persistRideId(String? rideId) async {
+    _persistedRideId = rideId;
     try {
       final prefs = await SharedPreferences.getInstance();
       if (rideId != null) {

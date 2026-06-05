@@ -6,6 +6,7 @@ import 'package:fl_chart/fl_chart.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/dashboard_provider.dart';
+import '../widgets/dashboard_live_map.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -63,24 +64,26 @@ class DashboardScreen extends ConsumerWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(child: _buildRidesChart(isDark)),
+                    Expanded(child: _buildRidesChart(isDark, stats)),
                     const SizedBox(width: 20),
-                    Expanded(child: _buildRevenueChart(isDark)),
+                    Expanded(child: _buildRevenueChart(isDark, stats)),
                   ],
                 )
               else
                 Column(
                   children: [
-                    _buildRidesChart(isDark),
+                    _buildRidesChart(isDark, stats),
                     const SizedBox(height: 20),
-                    _buildRevenueChart(isDark),
+                    _buildRevenueChart(isDark, stats),
                   ],
                 ),
 
               const SizedBox(height: 24),
 
-              // ── Quick Stats Row ──
-              _buildQuickStats(isDark, stats, isDesktop),
+              // ── God Mode Live Map ──
+              const DashboardLiveMap(),
+
+              const SizedBox(height: 48),
             ],
           ),
         ),
@@ -127,12 +130,12 @@ class DashboardScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 12),
-          Row(
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
             children: [
               _bannerChip(Icons.route_rounded, '${stats.ongoingRides} ongoing rides'),
-              const SizedBox(width: 12),
               _bannerChip(Icons.local_taxi, '${stats.onlineDrivers} drivers online'),
-              const SizedBox(width: 12),
               _bannerChip(Icons.trending_up, '₹${stats.todayRevenue.toStringAsFixed(0)} today'),
             ],
           ),
@@ -274,13 +277,36 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildRidesChart(bool isDark) {
+  Widget _buildRidesChart(bool isDark, DashboardStats stats) {
     final bg = isDark ? AppTheme.darkSurface : AppTheme.lightSurface;
     final borderColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
     final textColor = isDark ? AppTheme.darkText : AppTheme.lightText;
     final text2Color = isDark ? AppTheme.darkText2 : AppTheme.lightText2;
     final text3Color = isDark ? AppTheme.darkText3 : AppTheme.lightText3;
     final gridColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
+
+    final List<FlSpot> spots = [];
+    final List<String> days = [];
+    double maxY = 10;
+    
+    if (stats.dailyStats.isEmpty) {
+      spots.add(const FlSpot(0, 0));
+      days.add('Today');
+    } else {
+      for (int i = 0; i < stats.dailyStats.length; i++) {
+        final stat = stats.dailyStats[i];
+        spots.add(FlSpot(i.toDouble(), stat.ridesCount.toDouble()));
+        final parts = stat.date.split('-');
+        if (parts.length == 3) {
+          days.add('${parts[2]}/${parts[1]}');
+        } else {
+          days.add(stat.date);
+        }
+        if (stat.ridesCount > maxY) maxY = stat.ridesCount.toDouble();
+      }
+    }
+    maxY = (maxY * 1.2).ceilToDouble();
+    if (maxY < 10) maxY = 10;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -324,7 +350,7 @@ class DashboardScreen extends ConsumerWidget {
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
-                  horizontalInterval: 10,
+                  horizontalInterval: maxY > 50 ? maxY / 5 : 10,
                   getDrawingHorizontalLine: (value) => FlLine(
                     color: gridColor,
                     strokeWidth: 0.5,
@@ -345,8 +371,7 @@ class DashboardScreen extends ConsumerWidget {
                     sideTitles: SideTitles(
                       showTitles: true,
                       getTitlesWidget: (value, meta) {
-                        final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-                        if (value.toInt() < days.length) {
+                        if (value.toInt() >= 0 && value.toInt() < days.length) {
                           return Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Text(
@@ -365,15 +390,7 @@ class DashboardScreen extends ConsumerWidget {
                 borderData: FlBorderData(show: false),
                 lineBarsData: [
                   LineChartBarData(
-                    spots: const [
-                      FlSpot(0, 15),
-                      FlSpot(1, 22),
-                      FlSpot(2, 18),
-                      FlSpot(3, 30),
-                      FlSpot(4, 25),
-                      FlSpot(5, 35),
-                      FlSpot(6, 28),
-                    ],
+                    spots: spots,
                     isCurved: true,
                     color: AppTheme.brandBlue,
                     barWidth: 2.5,
@@ -401,7 +418,7 @@ class DashboardScreen extends ConsumerWidget {
                   ),
                 ],
                 minY: 0,
-                maxY: 45,
+                maxY: maxY,
               ),
             ),
           ),
@@ -410,12 +427,35 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildRevenueChart(bool isDark) {
+  Widget _buildRevenueChart(bool isDark, DashboardStats stats) {
     final bg = isDark ? AppTheme.darkSurface : AppTheme.lightSurface;
     final borderColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
     final textColor = isDark ? AppTheme.darkText : AppTheme.lightText;
     final text3Color = isDark ? AppTheme.darkText3 : AppTheme.lightText3;
     final gridColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
+
+    final List<BarChartGroupData> barGroups = [];
+    final List<String> days = [];
+    double maxY = 1000;
+    
+    if (stats.dailyStats.isEmpty) {
+      barGroups.add(_barGroup(0, 0, isDark));
+      days.add('Today');
+    } else {
+      for (int i = 0; i < stats.dailyStats.length; i++) {
+        final stat = stats.dailyStats[i];
+        barGroups.add(_barGroup(i, stat.revenue, isDark));
+        final parts = stat.date.split('-');
+        if (parts.length == 3) {
+          days.add('${parts[2]}/${parts[1]}');
+        } else {
+          days.add(stat.date);
+        }
+        if (stat.revenue > maxY) maxY = stat.revenue;
+      }
+    }
+    maxY = (maxY * 1.2).ceilToDouble();
+    if (maxY < 1000) maxY = 1000;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -459,7 +499,7 @@ class DashboardScreen extends ConsumerWidget {
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
-                  horizontalInterval: 5000,
+                  horizontalInterval: maxY / 4,
                   getDrawingHorizontalLine: (value) => FlLine(
                     color: gridColor,
                     strokeWidth: 0.5,
@@ -471,7 +511,7 @@ class DashboardScreen extends ConsumerWidget {
                       showTitles: true,
                       reservedSize: 42,
                       getTitlesWidget: (value, meta) => Text(
-                        '₹${(value / 1000).toStringAsFixed(0)}k',
+                        value >= 1000 ? '₹${(value / 1000).toStringAsFixed(0)}k' : '₹${value.toInt()}',
                         style: GoogleFonts.inter(fontSize: 10, color: text3Color),
                       ),
                     ),
@@ -480,8 +520,7 @@ class DashboardScreen extends ConsumerWidget {
                     sideTitles: SideTitles(
                       showTitles: true,
                       getTitlesWidget: (value, meta) {
-                        final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-                        if (value.toInt() < days.length) {
+                        if (value.toInt() >= 0 && value.toInt() < days.length) {
                           return Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Text(
@@ -498,16 +537,8 @@ class DashboardScreen extends ConsumerWidget {
                   rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 ),
                 borderData: FlBorderData(show: false),
-                barGroups: [
-                  _barGroup(0, 3200, isDark),
-                  _barGroup(1, 4500, isDark),
-                  _barGroup(2, 3800, isDark),
-                  _barGroup(3, 6200, isDark),
-                  _barGroup(4, 5100, isDark),
-                  _barGroup(5, 7800, isDark),
-                  _barGroup(6, 5500, isDark),
-                ],
-                maxY: 10000,
+                barGroups: barGroups,
+                maxY: maxY,
               ),
             ),
           ),
@@ -536,73 +567,6 @@ class DashboardScreen extends ConsumerWidget {
       ],
     );
   }
-
-  Widget _buildQuickStats(bool isDark, DashboardStats stats, bool isDesktop) {
-    final bg = isDark ? AppTheme.darkSurface : AppTheme.lightSurface;
-    final borderColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
-    final textColor = isDark ? AppTheme.darkText : AppTheme.lightText;
-    final text2Color = isDark ? AppTheme.darkText2 : AppTheme.lightText2;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: borderColor),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Driver Overview',
-            style: GoogleFonts.inter(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: textColor,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              _miniStat('Total', '${stats.totalDrivers}', AppTheme.brandBlue, isDark),
-              const SizedBox(width: 16),
-              _miniStat('Approved', '${stats.approvedDrivers}', AppTheme.success, isDark),
-              const SizedBox(width: 16),
-              _miniStat('Online', '${stats.onlineDrivers}', AppTheme.info, isDark),
-              const SizedBox(width: 16),
-              _miniStat('Pending', '${stats.pendingDrivers}', AppTheme.warning, isDark),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _miniStat(String label, String value, Color color, bool isDark) {
-    final text2Color = isDark ? AppTheme.darkText2 : AppTheme.lightText2;
-    final textColor = isDark ? AppTheme.darkText : AppTheme.lightText;
-
-    return Expanded(
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: GoogleFonts.inter(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              color: color,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: GoogleFonts.inter(fontSize: 12, color: text2Color),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ── Skeleton Loader ──
   Widget _buildSkeleton(bool isDark) {
     final bg = isDark ? AppTheme.darkSurface : AppTheme.lightSurface;

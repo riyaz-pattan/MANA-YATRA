@@ -236,6 +236,15 @@ service cloud.firestore {
     }
 
     // ============================================================
+    // ADMIN STATS (new collection)
+    // All admin roles: R | Cloud Functions: W
+    // ============================================================
+    match /admin_stats/{statId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ============================================================
     // INCENTIVES (new collection)
     // Super Admin: RW | Ops: RW | Finance: RW | Analyst: R
     // ============================================================

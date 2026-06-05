@@ -1746,7 +1746,7 @@ exports.cleanupExpiredRides = functions.pubsub
  * and marks them as "cancelled" due to staleness.
  */
 exports.cleanupStaleAcceptedRides = functions.pubsub
-  .schedule("*/5 * * * *") // Every 5 minutes
+  .schedule("*/15 * * * *") // Every 15 minutes
   .onRun(async (context) => {
     const staleTimeMs = Date.now() - (60 * 60 * 1000); // 60 minutes ago
     const staleDate = new Date(staleTimeMs);
@@ -1819,54 +1819,75 @@ exports.dailyEarningsSummary = functions.pubsub
 
 /**
  * autoOfflineIdleDrivers
- * Scheduled Cron Job (Runs every 5 minutes)
- * Finds drivers who are marked ONLINE in Firestore but have been disconnected
- * from the Realtime Database (WebSocket closed) for more than 2 hours, and safely
- * sets them to OFFLINE. This allows drivers to briefly close the app without dropping offline.
+ * Scheduled Cron Job (Runs every 60 minutes)
+ * Uses RTDB-first approach: queries RTDB presence nodes for drivers who have been
+ * disconnected for more than 2 hours, then updates only those specific drivers in
+ * Firestore. This avoids reading ALL online drivers from Firestore every execution,
+ * reducing Firestore reads from ~200/execution to ~0-5/execution.
  */
 exports.autoOfflineIdleDrivers = functions.pubsub
-  .schedule("every 5 minutes")
+  .schedule("every 60 minutes")
   .onRun(async (context) => {
     const db = admin.firestore();
     const rtdb = admin.database();
 
     try {
-      const onlineDriversSnap = await db.collection("drivers")
-        .where("isOnline", "==", true)
-        .get();
-
-      if (onlineDriversSnap.empty) return null;
-
       const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+
+      // Step 1: Query RTDB for stale presence nodes (bandwidth-based = essentially free)
+      const presenceSnap = await rtdb.ref("presence")
+        .orderByChild("updatedAt")
+        .endAt(twoHoursAgo)
+        .once("value");
+
+      if (!presenceSnap.exists()) return null;
+
       const batch = db.batch();
       let count = 0;
+      const cleanupPromises = [];
 
-      for (const doc of onlineDriversSnap.docs) {
-        const driverId = doc.id;
-        const data = doc.data();
-        
-        // Don't auto-offline drivers who are actively on a ride
-        if (data.driverState === "ON_RIDE") continue;
+      // Step 2: For each stale presence node, check the specific Firestore driver doc
+      const staleEntries = [];
+      presenceSnap.forEach((child) => {
+        const presence = child.val();
+        if (presence && presence.isOnline === false) {
+          staleEntries.push({ driverId: child.key, presence });
+        }
+      });
 
-        // Check their Realtime Database presence node
-        const presenceSnap = await rtdb.ref(`presence/${driverId}`).once("value");
-        const presence = presenceSnap.val();
+      for (const entry of staleEntries) {
+        const driverId = entry.driverId;
 
-        // If the socket has been disconnected for more than 2 hours
-        if (presence && presence.isOnline === false && presence.updatedAt) {
-          if (presence.updatedAt < twoHoursAgo) {
-            batch.update(doc.ref, {
+        // Step 3: Read only THIS specific driver from Firestore (1 read, not 200)
+        const driverDoc = await db.collection("drivers").doc(driverId).get();
+
+        if (driverDoc.exists) {
+          const data = driverDoc.data();
+
+          // Only update if still marked online and not actively on a ride
+          if (data.isOnline === true && data.driverState !== "ON_RIDE") {
+            batch.update(driverDoc.ref, {
               isOnline: false,
               driverState: "OFFLINE",
             });
             count++;
           }
         }
+
+        // Step 4: Remove processed presence node so we don't re-check next time.
+        // The driver's app will recreate it via onDisconnect when they go online again.
+        cleanupPromises.push(rtdb.ref(`presence/${driverId}`).remove());
       }
 
       if (count > 0) {
         await batch.commit();
         console.log(`Auto-offlined ${count} idle drivers who were disconnected for > 2 hours.`);
+      }
+
+      // Cleanup processed RTDB presence nodes
+      if (cleanupPromises.length > 0) {
+        await Promise.all(cleanupPromises);
+        console.log(`Cleaned up ${cleanupPromises.length} stale RTDB presence nodes.`);
       }
     } catch (e) {
       console.error("Error in autoOfflineIdleDrivers:", e);
@@ -2331,9 +2352,10 @@ const SUBSCRIPTION_PLANS = [
   { days: 30, label: "30 Days", amount: 540, amountPaise: 54000 },
 ];
 
-// Razorpay credentials — swap to live keys for production
-const RAZORPAY_KEY_ID = "rzp_test_StTUBd9Fsqxj8F";
-const RAZORPAY_KEY_SECRET = "K0U2rHZExjyKSfhOGGzI7nzj";
+// Razorpay credentials — stored securely in Google Cloud Secret Manager.
+// Set via: firebase functions:secrets:set RAZORPAY_KEY_ID
+//          firebase functions:secrets:set RAZORPAY_KEY_SECRET
+// Accessed at runtime via process.env.RAZORPAY_KEY_ID / process.env.RAZORPAY_KEY_SECRET
 
 /**
  * createRazorpayOrder (Callable)
@@ -2345,7 +2367,9 @@ const RAZORPAY_KEY_SECRET = "K0U2rHZExjyKSfhOGGzI7nzj";
  * Input:  { planIndex: 0|1|2 }
  * Output: { orderId, amount, currency }
  */
-exports.createRazorpayOrder = functions.https.onCall(async (data, context) => {
+exports.createRazorpayOrder = functions
+  .runWith({ secrets: ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"] })
+  .https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError(
       "unauthenticated",
@@ -2372,8 +2396,8 @@ exports.createRazorpayOrder = functions.https.onCall(async (data, context) => {
 
   try {
     const rzp = new Razorpay({
-      key_id: RAZORPAY_KEY_ID,
-      key_secret: RAZORPAY_KEY_SECRET,
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
     });
 
     const order = await rzp.orders.create({
@@ -2413,7 +2437,9 @@ exports.createRazorpayOrder = functions.https.onCall(async (data, context) => {
  * Input:  { razorpay_order_id, razorpay_payment_id, razorpay_signature, planIndex, operationId }
  * Output: { success, validUntil }
  */
-exports.verifyRazorpayPayment = functions.https.onCall(async (data, context) => {
+exports.verifyRazorpayPayment = functions
+  .runWith({ secrets: ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"] })
+  .https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError(
       "unauthenticated",
@@ -2454,7 +2480,7 @@ exports.verifyRazorpayPayment = functions.https.onCall(async (data, context) => 
 
   // Step 1: Verify HMAC SHA256 signature
   const expectedSignature = crypto
-    .createHmac("sha256", RAZORPAY_KEY_SECRET)
+    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
     .update(razorpay_order_id + "|" + razorpay_payment_id)
     .digest("hex");
 
@@ -2474,10 +2500,10 @@ exports.verifyRazorpayPayment = functions.https.onCall(async (data, context) => 
   // Fetch payment details to get the payment method
   let paymentMethod = "online";
   try {
-    const Razorpay = require("razorpay");
-    const rzp = new Razorpay({
-      key_id: RAZORPAY_KEY_ID,
-      key_secret: RAZORPAY_KEY_SECRET,
+    const RazorpayClient = require("razorpay");
+    const rzp = new RazorpayClient({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
     });
     const paymentDetails = await rzp.payments.fetch(razorpay_payment_id);
     if (paymentDetails && paymentDetails.method) {
@@ -2563,7 +2589,7 @@ exports.verifyRazorpayPayment = functions.https.onCall(async (data, context) => 
  * Runs every 5 minutes to check for expired subscriptions and upcoming expirations.
  */
 exports.checkSubscriptions = functions.pubsub
-  .schedule("every 5 minutes")
+  .schedule("every 15 minutes")
   .onRun(async (context) => {
     const db = admin.firestore();
     const now = new Date();
@@ -2695,3 +2721,244 @@ exports.onRideReviewed = functions.firestore
 
     return null;
   });
+
+
+// --- Daily Stats Function ---
+exports.updateDailyStats = functions.firestore
+  .document("rides/{rideId}")
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+
+    // Only proceed if status changed to 'completed'
+    if (before.status !== "completed" && after.status === "completed") {
+      const db = admin.firestore();
+      
+      // Calculate date in IST (+05:30) since the user is based in India
+      const date = new Date();
+      date.setHours(date.getHours() + 5);
+      date.setMinutes(date.getMinutes() + 30);
+      
+      const yyyy = date.getUTCFullYear();
+      const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(date.getUTCDate()).padStart(2, '0');
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+      
+      const statsRef = db.collection('admin_stats').doc(`daily_stats_${dateStr}`);
+      const price = Number(after.finalPrice) || 0;
+      
+      try {
+        await statsRef.set({
+          date: dateStr,
+          ridesCount: admin.firestore.FieldValue.increment(1),
+          revenue: admin.firestore.FieldValue.increment(price),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        console.log(`Updated daily stats for ${dateStr}: +1 ride, +${price} revenue`);
+      } catch (err) {
+        console.error("Error updating daily stats:", err);
+      }
+    }
+    return null;
+  });
+// ============================================================
+// REAL-TIME DASHBOARD STATS MAINTENANCE
+// ============================================================
+
+/**
+ * maintainDriverStats
+ * Maintains RTDB dashboard counters for drivers.
+ */
+exports.maintainDriverStats = functions.firestore
+  .document("drivers/{driverId}")
+  .onWrite(async (change, context) => {
+    const rtdb = admin.database().ref("dashboard_stats");
+    const updates = {};
+    const increment = admin.database.ServerValue.increment(1);
+    const decrement = admin.database.ServerValue.increment(-1);
+
+    if (!change.before.exists && change.after.exists) {
+      // New driver created
+      updates.totalDrivers = increment;
+      const after = change.after.data();
+      if (after.isApproved) updates.approvedDrivers = increment;
+      if (after.isBlocked) updates.blockedDrivers = increment;
+      if (after.isOnline) updates.onlineDrivers = increment;
+    } else if (change.before.exists && !change.after.exists) {
+      // Driver deleted
+      updates.totalDrivers = decrement;
+      const before = change.before.data();
+      if (before.isApproved) updates.approvedDrivers = decrement;
+      if (before.isBlocked) updates.blockedDrivers = decrement;
+      if (before.isOnline) updates.onlineDrivers = decrement;
+    } else {
+      // Driver updated
+      const before = change.before.data();
+      const after = change.after.data();
+
+      if (!before.isApproved && after.isApproved) updates.approvedDrivers = increment;
+      if (before.isApproved && !after.isApproved) updates.approvedDrivers = decrement;
+
+      if (!before.isBlocked && after.isBlocked) updates.blockedDrivers = increment;
+      if (before.isBlocked && !after.isBlocked) updates.blockedDrivers = decrement;
+
+      if (!before.isOnline && after.isOnline) updates.onlineDrivers = increment;
+      if (before.isOnline && !after.isOnline) updates.onlineDrivers = decrement;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await rtdb.update(updates);
+    }
+  });
+
+/**
+ * maintainRideStats
+ * Maintains RTDB dashboard counters for rides.
+ */
+exports.maintainRideStats = functions.firestore
+  .document("rides/{rideId}")
+  .onWrite(async (change, context) => {
+    const rtdb = admin.database().ref("dashboard_stats");
+    const updates = {};
+    const increment = admin.database.ServerValue.increment(1);
+    const decrement = admin.database.ServerValue.increment(-1);
+
+    const ongoingStatuses = ["matched", "started", "payment_pending"];
+
+    if (!change.before.exists && change.after.exists) {
+      // New ride created
+      updates.totalRides = increment;
+      const after = change.after.data();
+      if (after.status === "completed") {
+        updates.completedRides = increment;
+        if (after.finalPrice) updates.totalRevenue = admin.database.ServerValue.increment(after.finalPrice);
+      } else if (after.status === "cancelled" || after.status === "expired") {
+        updates.cancelledRides = increment;
+      }
+      
+      if (ongoingStatuses.includes(after.status)) {
+        updates.ongoingRides = increment;
+      }
+    } else if (change.before.exists && !change.after.exists) {
+      // Ride deleted
+      updates.totalRides = decrement;
+      const before = change.before.data();
+      if (before.status === "completed") {
+        updates.completedRides = decrement;
+        if (before.finalPrice) updates.totalRevenue = admin.database.ServerValue.increment(-before.finalPrice);
+      } else if (before.status === "cancelled" || before.status === "expired") {
+        updates.cancelledRides = decrement;
+      }
+      
+      if (ongoingStatuses.includes(before.status)) {
+        updates.ongoingRides = decrement;
+      }
+    } else {
+      // Ride updated
+      const before = change.before.data();
+      const after = change.after.data();
+
+      if (before.status !== after.status) {
+        // Handle transitions OUT of old status
+        if (before.status === "completed") {
+          updates.completedRides = decrement;
+          if (before.finalPrice) updates.totalRevenue = admin.database.ServerValue.increment(-before.finalPrice);
+        } else if (before.status === "cancelled" || before.status === "expired") {
+          updates.cancelledRides = decrement;
+        }
+
+        // Handle transitions INTO new status
+        if (after.status === "completed") {
+          updates.completedRides = increment;
+          if (after.finalPrice) updates.totalRevenue = admin.database.ServerValue.increment(after.finalPrice);
+        } else if (after.status === "cancelled" || after.status === "expired") {
+          updates.cancelledRides = increment;
+        }
+
+        const wasOngoing = ongoingStatuses.includes(before.status);
+        const isOngoing = ongoingStatuses.includes(after.status);
+        if (wasOngoing && !isOngoing) {
+          updates.ongoingRides = decrement;
+        } else if (!wasOngoing && isOngoing) {
+          updates.ongoingRides = increment;
+        }
+      } else if (before.status === "completed" && after.status === "completed") {
+        // Edge case: ride already completed but finalPrice changed
+        const bPrice = before.finalPrice || 0;
+        const aPrice = after.finalPrice || 0;
+        if (bPrice !== aPrice) {
+          updates.totalRevenue = admin.database.ServerValue.increment(aPrice - bPrice);
+        }
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await rtdb.update(updates);
+    }
+  });
+
+/**
+ * maintainUserStats
+ * Maintains RTDB dashboard counters for riders (users).
+ */
+exports.maintainUserStats = functions.firestore
+  .document("users/{userId}")
+  .onWrite(async (change, context) => {
+    const rtdb = admin.database().ref("dashboard_stats");
+    const increment = admin.database.ServerValue.increment(1);
+    const decrement = admin.database.ServerValue.increment(-1);
+
+    if (!change.before.exists && change.after.exists) {
+      await rtdb.update({ totalRiders: increment });
+    } else if (change.before.exists && !change.after.exists) {
+      await rtdb.update({ totalRiders: decrement });
+    }
+  });
+
+exports.initDashboardStats = functions.https.onRequest(async (req, res) => {
+  const db = admin.firestore();
+  const rtdb = admin.database();
+
+  try {
+    const aggregateResults = await Promise.all([
+      db.collection('rides').count().get(), // 0: allRides
+      db.collection('rides').where('status', '==', 'completed').count().get(), // 1: completedRides
+      db.collection('rides').where('status', 'in', ['cancelled', 'expired']).count().get(), // 2: cancelledRides
+      db.collection('rides').where('status', 'in', ['matched', 'started', 'payment_pending']).count().get(), // 3: ongoingRides
+      db.collection('drivers').count().get(), // 4: allDrivers
+      db.collection('drivers').where('isOnline', '==', true).count().get(), // 5: onlineDrivers
+      db.collection('users').count().get(), // 6: allRiders
+      db.collection('drivers').where('isApproved', '==', true).count().get(), // 7: approvedDrivers
+      db.collection('drivers').where('isBlocked', '==', true).count().get(), // 8: blockedDrivers
+    ]);
+
+    // Sum needs a separate try block since it might fail if index is missing
+    let totalRevenue = 0;
+    try {
+      const revenueRes = await db.collection('rides').where('status', '==', 'completed').aggregate({
+        totalRevenue: admin.firestore.AggregateField.sum('finalPrice')
+      }).get();
+      totalRevenue = revenueRes.data().totalRevenue || 0;
+    } catch(e) {
+      console.log('Sum failed, maybe index is missing', e);
+    }
+
+    const stats = {
+      totalRides: aggregateResults[0].data().count || 0,
+      completedRides: aggregateResults[1].data().count || 0,
+      cancelledRides: aggregateResults[2].data().count || 0,
+      ongoingRides: aggregateResults[3].data().count || 0,
+      totalDrivers: aggregateResults[4].data().count || 0,
+      onlineDrivers: aggregateResults[5].data().count || 0,
+      totalRiders: aggregateResults[6].data().count || 0,
+      approvedDrivers: aggregateResults[7].data().count || 0,
+      blockedDrivers: aggregateResults[8].data().count || 0,
+      totalRevenue: totalRevenue,
+    };
+
+    await rtdb.ref('dashboard_stats').set(stats);
+    res.status(200).send('Successfully seeded RTDB dashboard_stats: ' + JSON.stringify(stats));
+  } catch (e) {
+    res.status(500).send('Error seeding stats: ' + e.message);
+  }
+});

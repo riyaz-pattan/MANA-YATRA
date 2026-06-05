@@ -182,8 +182,10 @@ class DriverProvider extends ChangeNotifier {
 
   void setActiveRide(Map<String, dynamic>? ride) {
     _activeRide = ride;
-    _persistRideId(ride?['id'] as String?);
+    final rideId = ride?['id'] as String?;
+    _persistRideId(rideId);
     if (_tracker != null) {
+      _tracker!.setRideId(rideId);
       _tracker!.setMode(ride != null
           ? TrackingMode.activeRide
           : (isOnline ? TrackingMode.discovery : TrackingMode.offline));
@@ -192,6 +194,7 @@ class DriverProvider extends ChangeNotifier {
   }
 
   Future<void> _persistRideId(String? rideId) async {
+    _persistedRideId = rideId;
     try {
       final prefs = await SharedPreferences.getInstance();
       if (rideId != null) {
