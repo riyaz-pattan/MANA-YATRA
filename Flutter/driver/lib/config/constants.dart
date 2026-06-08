@@ -46,6 +46,6 @@ class AppConstants {
     'bike': 20,
   };
 
-  // Razorpay — swap this to rzp_live_... for production
-  static const String razorpayKeyId = 'rzp_test_StTUBd9Fsqxj8F';
+  // Razorpay — live key (public identifier, safe for client-side)
+  static const String razorpayKeyId = 'rzp_live_SxrYK0cDCc2o9i';
 }

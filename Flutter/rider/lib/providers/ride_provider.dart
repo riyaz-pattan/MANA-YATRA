@@ -106,9 +106,6 @@ class RideProvider extends ChangeNotifier {
         if (remoteDeviceId != null && remoteDeviceId != localDeviceId) {
           debugPrint('[RideProvider] Logged in from another device. Forcing logout.');
           
-          // Clean up stream subscriptions before logging out
-          setUser(null);
-          
           SharedPreferences.getInstance().then((prefs) {
             prefs.setBool('kicked_out', true);
             FirebaseAuth.instance.signOut();

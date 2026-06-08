@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
+import 'rider_pdf_export.dart';
 
-// Provider to manage the selected filter
 final userFilterProvider = StateProvider<String>((ref) => 'all');
+final userSearchProvider = StateProvider<String>((ref) => '');
+final selectedRidersProvider = StateProvider<Set<String>>((ref) => {});
 
 class UsersScreen extends ConsumerWidget {
   const UsersScreen({super.key});
@@ -16,6 +19,8 @@ class UsersScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
     final filter = ref.watch(userFilterProvider);
+    final searchQuery = ref.watch(userSearchProvider).toLowerCase();
+    final selectedRiders = ref.watch(selectedRidersProvider);
     final width = MediaQuery.of(context).size.width;
     final isDesktop = width >= 1024;
 
@@ -23,7 +28,7 @@ class UsersScreen extends ConsumerWidget {
       stream: FirebaseFirestore.instance
           .collection('users')
           .orderBy('updatedAt', descending: true)
-          .limit(200)
+          .limit(500)
           .snapshots(),
       builder: (context, snap) {
         if (snap.hasError) {
@@ -36,23 +41,33 @@ class UsersScreen extends ConsumerWidget {
         }
 
         final allUsers = snap.data!.docs;
+        int activeCount = 0;
+        int blockedCount = 0;
 
-        final activeCount = allUsers.where((d) {
+        for (var d in allUsers) {
           final data = d.data() as Map<String, dynamic>;
-          return data['isBlocked'] != true && data['isBlocked'] != 'true';
-        }).length;
-
-        final blockedCount = allUsers.where((d) {
-          final data = d.data() as Map<String, dynamic>;
-          return data['isBlocked'] == true || data['isBlocked'] == 'true';
-        }).length;
+          final isBlk = data['isBlocked'] == true || data['isBlocked'] == 'true';
+          if (!isBlk) activeCount++;
+          if (isBlk) blockedCount++;
+        }
 
         final filteredUsers = allUsers.where((d) {
           final data = d.data() as Map<String, dynamic>;
           final isBlk = data['isBlocked'] == true || data['isBlocked'] == 'true';
-          if (filter == 'active') return !isBlk;
-          if (filter == 'blocked') return isBlk;
-          return true;
+
+          bool matchesFilter = true;
+          if (filter == 'active') matchesFilter = !isBlk;
+          if (filter == 'blocked') matchesFilter = isBlk;
+
+          bool matchesSearch = true;
+          if (searchQuery.isNotEmpty) {
+            final name = (data['name'] ?? '').toString().toLowerCase();
+            final phone = (data['phone'] ?? '').toString().toLowerCase();
+            final uid = d.id.toLowerCase();
+            matchesSearch = name.contains(searchQuery) || phone.contains(searchQuery) || uid.contains(searchQuery);
+          }
+
+          return matchesFilter && matchesSearch;
         }).toList();
 
         return SingleChildScrollView(
@@ -60,7 +75,7 @@ class UsersScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Header ──
+              // ── Header & PDF Export ──
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -72,34 +87,64 @@ class UsersScreen extends ConsumerWidget {
                       color: isDark ? AppTheme.darkText : AppTheme.lightText,
                     ),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Downloading CSV... (Coming soon on Web)')),
-                      );
-                    },
-                    icon: const Icon(Icons.download, size: 16),
-                    label: const Text('Export CSV'),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 40),
+                  if (selectedRiders.isNotEmpty)
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        final selectedData = filteredUsers
+                            .where((d) => selectedRiders.contains(d.id))
+                            .map((d) => d.data() as Map<String, dynamic>)
+                            .toList();
+                        await RiderPdfExport.generateAndPrint(selectedData);
+                      },
+                      icon: const Icon(Icons.picture_as_pdf, size: 16),
+                      label: Text('Save to PDF (${selectedRiders.length})'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.danger,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(150, 40),
+                      ),
                     ),
-                  ),
                 ],
               ),
               const SizedBox(height: 24),
 
-              // ── Filter Tabs ──
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _FilterTab(label: 'All Riders', count: allUsers.length, value: 'all', groupValue: filter),
-                    const SizedBox(width: 8),
-                    _FilterTab(label: 'Active', count: activeCount, value: 'active', groupValue: filter),
-                    const SizedBox(width: 8),
-                    _FilterTab(label: 'Blocked', count: blockedCount, value: 'blocked', groupValue: filter),
-                  ],
-                ),
+              // ── Search & Filter Tabs ──
+              Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  SizedBox(
+                    width: isDesktop ? 300 : double.infinity,
+                    child: TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Search by Name, Phone, or ID...',
+                        prefixIcon: const Icon(Icons.search),
+                        filled: true,
+                        fillColor: isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      onChanged: (val) {
+                        ref.read(userSearchProvider.notifier).state = val;
+                      },
+                    ),
+                  ),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _FilterTab(label: 'All Riders', count: allUsers.length, value: 'all', groupValue: filter),
+                        const SizedBox(width: 8),
+                        _FilterTab(label: 'Active', count: activeCount, value: 'active', groupValue: filter),
+                        const SizedBox(width: 8),
+                        _FilterTab(label: 'Blocked', count: blockedCount, value: 'blocked', groupValue: filter),
+                      ],
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 24),
 
@@ -123,16 +168,17 @@ class UsersScreen extends ConsumerWidget {
                         ),
                         dataRowMinHeight: 64,
                         dataRowMaxHeight: 64,
-                        columns: const [
-                          DataColumn(label: Text('Rider Profile')),
-                          DataColumn(label: Text('Phone Number')),
-                          DataColumn(label: Text('Status')),
-                          DataColumn(label: Text('Total Rides')),
-                          DataColumn(label: Text('Actions')),
+                        showCheckboxColumn: true,
+                        columns: [
+                          const DataColumn(label: Text('Rider Profile')),
+                          const DataColumn(label: Text('Phone Number')),
+                          const DataColumn(label: Text('Status')),
+                          const DataColumn(label: Text('Total Rides')),
+                          const DataColumn(label: Text('Actions')),
                         ],
                         rows: filteredUsers.map((doc) {
                           final data = doc.data() as Map<String, dynamic>;
-                          return _buildDataRow(context, doc.id, data, isDark);
+                          return _buildDataRow(context, ref, doc.id, data, isDark, selectedRiders);
                         }).toList(),
                       ),
                     ),
@@ -146,7 +192,7 @@ class UsersScreen extends ConsumerWidget {
     );
   }
 
-  DataRow _buildDataRow(BuildContext context, String id, Map<String, dynamic> data, bool isDark) {
+  DataRow _buildDataRow(BuildContext context, WidgetRef ref, String id, Map<String, dynamic> data, bool isDark, Set<String> selectedRiders) {
     final name = data['name'] ?? 'Guest Rider';
     final phone = data['phone'] ?? 'Hidden (Phone Auth)';
     final totalRides = data['totalCompletedRides'] ?? 0;
@@ -159,22 +205,37 @@ class UsersScreen extends ConsumerWidget {
     final text2Color = isDark ? AppTheme.darkText2 : AppTheme.lightText2;
 
     return DataRow(
+      selected: selectedRiders.contains(id),
+      onSelectChanged: (selected) {
+        final current = Set<String>.from(ref.read(selectedRidersProvider));
+        if (selected == true) {
+          current.add(id);
+        } else {
+          current.remove(id);
+        }
+        ref.read(selectedRidersProvider.notifier).state = current;
+      },
       cells: [
         // Rider Profile
-        DataCell(Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              name,
-              style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: textColor),
+        DataCell(
+          InkWell(
+            onTap: () => context.push('/rider/$id'),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: textColor),
+                ),
+                Text(
+                  id,
+                  style: TextStyle(fontFamily: 'monospace', fontSize: 11, color: text2Color),
+                ),
+              ],
             ),
-            Text(
-              id.substring(0, 10).toUpperCase(),
-              style: TextStyle(fontFamily: 'monospace', fontSize: 11, color: text2Color),
-            ),
-          ],
-        )),
+          ),
+        ),
         // Phone
         DataCell(Text(
           phone,

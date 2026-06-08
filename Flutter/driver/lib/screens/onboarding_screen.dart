@@ -147,6 +147,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       backgroundColor: AppTheme.bg,
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -278,6 +279,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       backgroundColor: AppTheme.bg,
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -586,6 +588,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 hint: 'As per Aadhaar/PAN',
                 controller: _nameController,
                 icon: Icons.person_outline,
+                formatters: [UpperCaseTextFormatter()],
+                textCapitalization: TextCapitalization.characters,
               ),
               const SizedBox(height: 24),
               _buildTextField(
@@ -763,6 +767,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       child: TextField(
                         controller: _referralCodeController,
                         textCapitalization: TextCapitalization.characters,
+                        inputFormatters: [UpperCaseTextFormatter()],
                         maxLength: 6,
                         onChanged: (val) {
                           final upper = val.toUpperCase();

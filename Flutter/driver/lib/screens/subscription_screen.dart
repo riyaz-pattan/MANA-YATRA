@@ -323,6 +323,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: AppTheme.bg,
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -334,7 +335,6 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                 24,
                 24,
                 MediaQuery.of(ctx).viewInsets.bottom +
-                    MediaQuery.of(ctx).padding.bottom +
                     20),
             child: Column(
               mainAxisSize: MainAxisSize.min,

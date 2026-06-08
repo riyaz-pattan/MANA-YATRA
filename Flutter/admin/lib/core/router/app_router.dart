@@ -15,6 +15,8 @@ import '../../presentation/screens/operations_hub_screen.dart';
 import '../../presentation/screens/support_hub_screen.dart';
 import '../../presentation/screens/system_hub_screen.dart';
 import '../../presentation/screens/login_screen.dart';
+import '../../presentation/screens/driver_profile_screen.dart';
+import '../../presentation/screens/rider_profile_screen.dart';
 
 // Create a GlobalKey for the root navigator
 final rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -77,8 +79,22 @@ final routerProvider = Provider<GoRouter>((ref) {
             builder: (context, state) => const DriversScreen(),
           ),
           GoRoute(
+            path: '/driver/:id',
+            builder: (context, state) {
+              final id = state.pathParameters['id']!;
+              return DriverProfileScreen(driverId: id);
+            },
+          ),
+          GoRoute(
             path: '/riders',
             builder: (context, state) => const UsersScreen(),
+          ),
+          GoRoute(
+            path: '/rider/:id',
+            builder: (context, state) {
+              final id = state.pathParameters['id']!;
+              return RiderProfileScreen(riderId: id);
+            },
           ),
           GoRoute(
             path: '/rides',

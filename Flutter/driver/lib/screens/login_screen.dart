@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pinput/pinput.dart';
-import 'package:smart_auth/smart_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/theme.dart';
 
@@ -24,9 +23,6 @@ class _LoginScreenState extends State<LoginScreen>
   int? _resendToken;
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
-  late final _smsRetriever = _SmsRetrieverImpl(SmartAuth.instance);
-
-
   @override
   void initState() {
     super.initState();
@@ -51,13 +47,11 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-
   @override
   void dispose() {
     _phoneController.dispose();
     _otpController.dispose();
     _animController.dispose();
-    _smsRetriever.dispose();
     super.dispose();
   }
 
@@ -71,15 +65,32 @@ class _LoginScreenState extends State<LoginScreen>
       _loading = true;
       _error = '';
     });
+    debugPrint('Sending OTP to +91$phone');
     try {
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: '+91$phone',
         verificationCompleted: (cred) async {
+          debugPrint(
+            'FirebaseAuth: verificationCompleted! Auto-retrieval successful. smsCode: ${cred.smsCode}',
+          );
+          if (cred.smsCode != null && mounted) {
+            _otpController.text = cred.smsCode!;
+          }
           try {
             await FirebaseAuth.instance.signInWithCredential(cred);
-          } catch (_) {}
+            debugPrint(
+              'FirebaseAuth: Successfully signed in via auto-retrieval.',
+            );
+          } catch (e) {
+            debugPrint(
+              'FirebaseAuth: Error signing in after auto-retrieval: $e',
+            );
+          }
         },
         verificationFailed: (e) {
+          debugPrint(
+            'FirebaseAuth: verificationFailed! Error: ${e.code} - ${e.message}',
+          );
           if (!mounted) return;
           setState(() {
             _error = e.message ?? 'Failed to send OTP';
@@ -87,6 +98,7 @@ class _LoginScreenState extends State<LoginScreen>
           });
         },
         codeSent: (verificationId, resendToken) {
+          debugPrint('FirebaseAuth: codeSent! verificationId: $verificationId');
           if (!mounted) return;
           setState(() {
             _verificationId = verificationId;
@@ -95,11 +107,15 @@ class _LoginScreenState extends State<LoginScreen>
             _loading = false;
           });
         },
-        codeAutoRetrievalTimeout: (id) => _verificationId = id,
+        codeAutoRetrievalTimeout: (id) {
+          debugPrint('FirebaseAuth: codeAutoRetrievalTimeout! id: $id');
+          _verificationId = id;
+        },
         forceResendingToken: _resendToken,
         timeout: const Duration(seconds: 60),
       );
     } catch (e) {
+      debugPrint('FirebaseAuth: Exception in verifyPhoneNumber: $e');
       if (!mounted) return;
       setState(() {
         _error = 'Failed to send OTP';
@@ -283,7 +299,6 @@ class _LoginScreenState extends State<LoginScreen>
                               length: 6,
                               controller: _otpController,
                               autofocus: true,
-                              smsRetriever: _smsRetriever,
                               onChanged: (_) => setState(() {}),
                               onCompleted: (_) => _verifyOtp(),
                               defaultPinTheme: PinTheme(
@@ -426,43 +441,3 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 }
-
-/// Implements Pinput's [SmsRetriever] using the [SmartAuth] package
-/// to automatically read incoming OTP SMS and extract the code.
-///
-/// Uses the SMS User Consent API which shows a native system prompt asking
-/// the user to share the incoming SMS. This does NOT require the 11-char
-/// hash in the SMS body, so it works immediately.
-///
-/// Once Google's backend starts including the hash (after production
-/// propagation), Firebase's own verificationCompleted callback will handle
-/// fully-automatic zero-tap verification — no code changes needed.
-class _SmsRetrieverImpl implements SmsRetriever {
-  const _SmsRetrieverImpl(this._smartAuth);
-
-  final SmartAuth _smartAuth;
-
-  @override
-  Future<String?> getSmsCode() async {
-    try {
-      final res = await _smartAuth.getSmsWithUserConsentApi();
-      if (res.hasData) {
-        return res.requireData.code;
-      }
-    } catch (e) {
-      // SMS User Consent may fail if activity is destroyed (e.g. reCAPTCHA
-      // redirect) or user denies permission — silently ignore.
-      debugPrint('SmartAuth: getSmsWithUserConsentApi failed: $e');
-    }
-    return null;
-  }
-
-  @override
-  bool get listenForMultipleSms => false;
-
-  @override
-  Future<void> dispose() async {
-    _smartAuth.removeUserConsentApiListener();
-  }
-}
-

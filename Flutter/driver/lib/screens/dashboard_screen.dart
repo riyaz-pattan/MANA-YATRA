@@ -39,7 +39,8 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingObserver, TickerProviderStateMixin {
+class _DashboardScreenState extends State<DashboardScreen>
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   GoogleMapController? _mapController;
   BitmapDescriptor? _autoIcon;
   BitmapDescriptor? _bikeIcon;
@@ -71,7 +72,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   // Auto-offline: track last user activity to disconnect idle drivers
   DateTime _lastActiveTime = DateTime.now();
   Timer? _autoOfflineTimer;
-  
+
   late final MarkerAnimator _driverAnimator;
   DriverProvider? _driverProvider;
 
@@ -84,7 +85,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     _requestPermissionsSequentially();
     _listenForActiveRide();
     _loadCustomMarkers();
-    
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _driverProvider = context.read<DriverProvider>();
       _driverProvider?.addListener(_onDriverLocationChanged);
@@ -93,7 +94,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       _resumeIfOnline();
     });
   }
-  
+
   void _onDriverLocationChanged() {
     if (_driverProvider?.lat != null && _driverProvider?.lng != null) {
       final newPos = LatLng(_driverProvider!.lat!, _driverProvider!.lng!);
@@ -138,8 +139,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
   Future<void> _loadCustomMarkers() async {
     const config = ImageConfiguration(size: Size(48, 48));
-    _autoIcon = await BitmapDescriptor.asset(config, 'assets/images/map_icons/auto.png');
-    _bikeIcon = await BitmapDescriptor.asset(config, 'assets/images/map_icons/bike.png');
+    _autoIcon = await BitmapDescriptor.asset(
+      config,
+      'assets/images/map_icons/auto.png',
+    );
+    _bikeIcon = await BitmapDescriptor.asset(
+      config,
+      'assets/images/map_icons/bike.png',
+    );
 
     if (mounted) setState(() {});
   }
@@ -311,7 +318,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     await Geolocator.openAppSettings();
                     // After returning from settings, check again
                     final perm = await Geolocator.checkPermission();
-                    final granted = perm == LocationPermission.whileInUse ||
+                    final granted =
+                        perm == LocationPermission.whileInUse ||
                         perm == LocationPermission.always;
                     if (ctx.mounted) Navigator.pop(ctx, granted);
                   },
@@ -414,11 +422,13 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         // Re-check permission after returning from settings
         permission = await Geolocator.checkPermission();
       }
-      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
         if (mounted) {
           CustomToast.show(
             context: context,
-            message: 'Location permission is required. Please enable in settings.',
+            message:
+                'Location permission is required. Please enable in settings.',
             isError: true,
           );
           setState(() {
@@ -459,9 +469,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       if (mounted) {
         final provider = context.read<DriverProvider>();
         provider.updateLocation(pos.latitude, pos.longitude, pos.heading);
-        _mapController?.animateCamera(CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 15));
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 15),
+        );
         setState(() => _locating = false);
-        
+
         // If online, start RTDB signal listener
         if (provider.isOnline) {
           _startSignalService(provider);
@@ -524,27 +536,30 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         .where('driverId', isEqualTo: uid)
         .where('status', whereIn: ['matched', 'started'])
         .snapshots()
-        .listen((snap) {
-      if (snap.docs.isNotEmpty) {
-        if (!mounted) return;
-        try {
-          final ride = snap.docs.first;
-          final data = Map<String, dynamic>.from(ride.data() as Map);
-          data['id'] = ride.id;
+        .listen(
+          (snap) {
+            if (snap.docs.isNotEmpty) {
+              if (!mounted) return;
+              try {
+                final ride = snap.docs.first;
+                final data = Map<String, dynamic>.from(ride.data() as Map);
+                data['id'] = ride.id;
 
-          context.read<DriverProvider>().setActiveRide(data);
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => ActiveRideScreen(rideId: ride.id),
-            ),
-          );
-        } catch (e) {
-          debugPrint('Error in DashboardScreen _listenForActiveRide: $e');
-        }
-      }
-    }, onError: (error) {
-      debugPrint('Firestore stream error in DashboardScreen: $error');
-    });
+                context.read<DriverProvider>().setActiveRide(data);
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (_) => ActiveRideScreen(rideId: ride.id),
+                  ),
+                );
+              } catch (e) {
+                debugPrint('Error in DashboardScreen _listenForActiveRide: $e');
+              }
+            }
+          },
+          onError: (error) {
+            debugPrint('Firestore stream error in DashboardScreen: $error');
+          },
+        );
   }
 
   /// Shows a beautiful floating dialog when the driver's subscription is expired
@@ -576,7 +591,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                         ? [const Color(0xFF6C63FF), const Color(0xFF9B59B6)]
                         : [const Color(0xFFFF6B6B), const Color(0xFFFF8E53)],
                   ),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(28),
+                  ),
                 ),
                 child: Column(
                   children: [
@@ -623,7 +640,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     const SizedBox(height: 8),
                     // Per-day starting price hint
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
                         color: AppTheme.primary.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(10),
@@ -649,10 +669,15 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                           Navigator.pop(ctx);
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+                            MaterialPageRoute(
+                              builder: (_) => const SubscriptionScreen(),
+                            ),
                           );
                         },
-                        icon: Icon(hasTrial ? Icons.star : Icons.rocket_launch_rounded, size: 20),
+                        icon: Icon(
+                          hasTrial ? Icons.star : Icons.rocket_launch_rounded,
+                          size: 20,
+                        ),
                         label: Text(
                           hasTrial ? 'Get Free Trial' : 'Renew Plan',
                           style: GoogleFonts.inter(
@@ -713,7 +738,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           if (mounted) {
             CustomToast.show(
               context: context,
-              message: 'Location permission is required to go online. Please allow location access.',
+              message:
+                  'Location permission is required to go online. Please allow location access.',
               isError: true,
             );
           }
@@ -724,13 +750,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
     final newDriverState = goingOnline ? 'ONLINE_IDLE' : 'OFFLINE';
 
-    await FirebaseFirestore.instance
-        .collection('drivers')
-        .doc(uid)
-        .update({
-          'driverState': newDriverState,
-          'isOnline': goingOnline, // Keep for backward compat during migration
-        });
+    await FirebaseFirestore.instance.collection('drivers').doc(uid).update({
+      'driverState': newDriverState,
+      'isOnline': goingOnline, // Keep for backward compat during migration
+    });
 
     provider.setOnline(goingOnline);
 
@@ -752,15 +775,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   /// Fires every 60 seconds to see if 2 hours have elapsed since last activity.
   void _startAutoOfflineTimer() {
     _autoOfflineTimer?.cancel();
-    _autoOfflineTimer = Timer.periodic(
-      const Duration(minutes: 1),
-      (_) {
-        final elapsed = DateTime.now().difference(_lastActiveTime);
-        if (elapsed.inMinutes >= AppConstants.autoOfflineMinutes) {
-          _autoOffline();
-        }
-      },
-    );
+    _autoOfflineTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      final elapsed = DateTime.now().difference(_lastActiveTime);
+      if (elapsed.inMinutes >= AppConstants.autoOfflineMinutes) {
+        _autoOffline();
+      }
+    });
   }
 
   void _stopAutoOfflineTimer() {
@@ -778,13 +798,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     if (uid == null) return;
 
     try {
-      await FirebaseFirestore.instance
-          .collection('drivers')
-          .doc(uid)
-          .update({
-            'driverState': 'OFFLINE',
-            'isOnline': false,
-          });
+      await FirebaseFirestore.instance.collection('drivers').doc(uid).update({
+        'driverState': 'OFFLINE',
+        'isOnline': false,
+      });
 
       provider.setOnline(false);
       _signalSub?.cancel();
@@ -823,16 +840,13 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   void _startSignalService(DriverProvider provider) {
     if (_signalService != null) return; // already running
 
-    final vehicleType = (provider.profile?['vehicleType'] as String?)?.toLowerCase() ?? 'auto';
+    final vehicleType =
+        (provider.profile?['vehicleType'] as String?)?.toLowerCase() ?? 'auto';
     _signalService = RideSignalService(
       vehicleType: vehicleType,
       onErrorCallback: (errorMsg) {
         if (mounted) {
-          CustomToast.show(
-            context: context,
-            message: errorMsg,
-            isError: true,
-          );
+          CustomToast.show(context: context, message: errorMsg, isError: true);
         }
       },
     );
@@ -872,15 +886,16 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         }
       }
 
-      enriched.sort((a, b) =>
-          ((a['distance'] as double?) ?? 0).compareTo((b['distance'] as double?) ?? 0));
+      enriched.sort(
+        (a, b) => ((a['distance'] as double?) ?? 0).compareTo(
+          (b['distance'] as double?) ?? 0,
+        ),
+      );
 
       final bool wasEmpty = _nearbyRides.isEmpty;
 
       setState(() {
-        _nearbyRides = enriched
-            .take(AppConstants.maxVisibleRides)
-            .toList();
+        _nearbyRides = enriched.take(AppConstants.maxVisibleRides).toList();
         _loadingRides = false;
         // Reset carousel to first card when ride list refreshes
         _focusedRideIndex = 0;
@@ -924,7 +939,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
     final ride = _nearbyRides[idx];
     final pickup = ride['pickup'];
-    if (pickup == null || pickup['lat'] == null || pickup['lng'] == null) return;
+    if (pickup == null || pickup['lat'] == null || pickup['lng'] == null)
+      return;
 
     final double driverLat = provider.lat!;
     final double driverLng = provider.lng!;
@@ -934,16 +950,19 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     final driverPos = LatLng(driverLat, driverLng);
     final pickupPos = LatLng(pickupLat, pickupLng);
 
-    // Build the curved polyline
-    final curvePoints = _generateCurvePoints(driverPos, pickupPos);
-
     // Calculate distance for the label
     final distMeters = Geolocator.distanceBetween(
-      driverLat, driverLng, pickupLat, pickupLng,
+      driverLat,
+      driverLng,
+      pickupLat,
+      pickupLng,
     );
     final distLabel = distMeters < 1000
         ? '${distMeters.toInt()} m'
         : '${(distMeters / 1000).toStringAsFixed(1)} km';
+
+    // Build the curved polyline (straight if distance < 100m)
+    final curvePoints = _generateCurvePoints(driverPos, pickupPos, isStraight: distMeters < 100);
 
     // Build the dotted polyline from curve points
     final dottedSegments = _buildDottedPolyline(curvePoints);
@@ -988,21 +1007,25 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     });
   }
 
-  void _removeRideLocally(String rideId, {bool markDeclined = false, bool removeBid = false}) {
+  void _removeRideLocally(
+    String rideId, {
+    bool markDeclined = false,
+    bool removeBid = false,
+  }) {
     if (!mounted) return;
     setState(() {
       if (removeBid) _biddedRides.remove(rideId);
       if (markDeclined) _declinedRides.add(rideId);
-      
+
       _nearbyRides.removeWhere((r) => r['id'] == rideId);
-      
+
       if (_focusedRideIndex >= _nearbyRides.length) {
         _focusedRideIndex = (_nearbyRides.length - 1).clamp(0, 999);
       }
     });
-    
+
     _rebuildFareBubbles();
-    
+
     if (_nearbyRides.isNotEmpty) {
       _frameDriverAndPickup(rideIndex: _focusedRideIndex, animateCamera: false);
     } else {
@@ -1012,7 +1035,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
   /// Generate a smooth quadratic Bézier curve between two points.
   /// The control point is offset perpendicular to the line, creating an arc.
-  List<LatLng> _generateCurvePoints(LatLng start, LatLng end) {
+  List<LatLng> _generateCurvePoints(LatLng start, LatLng end, {bool isStraight = false}) {
     const int segments = 40;
     final points = <LatLng>[];
 
@@ -1025,7 +1048,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     final double dist = math.sqrt(dLat * dLat + dLng * dLng);
 
     // Arc height proportional to distance (clamped)
-    final double arcHeight = (dist * 0.25).clamp(0.001, 0.02);
+    final double arcHeight = isStraight ? 0.0 : (dist * 0.25).clamp(0.001, 0.02);
 
     // Perpendicular direction (rotate 90°)
     final double perpLat = -dLng / dist * arcHeight;
@@ -1040,10 +1063,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       final double oneMinusT = 1 - t;
 
       // Quadratic Bézier: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
-      final double lat = oneMinusT * oneMinusT * start.latitude +
+      final double lat =
+          oneMinusT * oneMinusT * start.latitude +
           2 * oneMinusT * t * ctrlLat +
           t * t * end.latitude;
-      final double lng = oneMinusT * oneMinusT * start.longitude +
+      final double lng =
+          oneMinusT * oneMinusT * start.longitude +
           2 * oneMinusT * t * ctrlLng +
           t * t * end.longitude;
 
@@ -1058,7 +1083,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   Set<Polyline> _buildDottedPolyline(List<LatLng> points) {
     final polylines = <Polyline>{};
     const int dashLength = 3; // points per dash
-    const int gapLength = 2;  // points per gap
+    const int gapLength = 2; // points per gap
     int idx = 0;
     int segmentId = 0;
 
@@ -1066,13 +1091,15 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       // Dash segment
       final dashEnd = math.min(idx + dashLength, points.length);
       if (dashEnd > idx + 1) {
-        polylines.add(Polyline(
-          polylineId: PolylineId('route_dash_$segmentId'),
-          points: points.sublist(idx, dashEnd),
-          color: const Color(0xFF4285F4), // Google blue
-          width: 4,
-          patterns: [],
-        ));
+        polylines.add(
+          Polyline(
+            polylineId: PolylineId('route_dash_$segmentId'),
+            points: points.sublist(idx, dashEnd),
+            color: const Color(0xFF4285F4), // Google blue
+            width: 4,
+            patterns: [],
+          ),
+        );
       }
       segmentId++;
       idx = dashEnd;
@@ -1115,16 +1142,16 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       text: TextSpan(
         text: label,
         style: const TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
           color: Colors.white,
-          letterSpacing: 0.3,
+          letterSpacing: 0.2,
         ),
       ),
     )..layout();
 
-    const double hPad = 16;
-    const double vPad = 8;
+    const double hPad = 10;
+    const double vPad = 5;
     final double w = textPainter.width + hPad * 2;
     final double h = textPainter.height + vPad * 2;
 
@@ -1151,7 +1178,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     // Text
     textPainter.paint(canvas, Offset(hPad, vPad));
 
-    final image = await recorder.endRecording().toImage(w.ceil() + 2, h.ceil() + 3);
+    final image = await recorder.endRecording().toImage(
+      w.ceil() + 2,
+      h.ceil() + 3,
+    );
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
     return BitmapDescriptor.bytes(bytes!.buffer.asUint8List());
   }
@@ -1190,21 +1220,24 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     _declineSubs[rideId] = FirebaseDatabase.instance
         .ref('ride_declines/$rideId/$uid')
         .onValue
-        .listen((event) {
-      if (event.snapshot.value == true) {
-        _removeRideLocally(rideId, markDeclined: true, removeBid: true);
-        CustomToast.show(
-          context: context,
-          message: '⚠️ Rider declined your bid.',
-          isError: true,
+        .listen(
+          (event) {
+            if (event.snapshot.value == true) {
+              _removeRideLocally(rideId, markDeclined: true, removeBid: true);
+              CustomToast.show(
+                context: context,
+                message: '⚠️ Rider declined your bid.',
+                isError: true,
+              );
+              // Clean up this listener — no longer needed
+              _declineSubs[rideId]?.cancel();
+              _declineSubs.remove(rideId);
+            }
+          },
+          onError: (error) {
+            debugPrint('Error listening to ride declines: $error');
+          },
         );
-        // Clean up this listener — no longer needed
-        _declineSubs[rideId]?.cancel();
-        _declineSubs.remove(rideId);
-      }
-    }, onError: (error) {
-      debugPrint('Error listening to ride declines: $error');
-    });
   }
 
   Future<void> _placeBid(Map<String, dynamic> ride, int bidPrice) async {
@@ -1224,7 +1257,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     if (_biddedRides.length >= AppConstants.maxActiveBids) {
       CustomToast.show(
         context: context,
-        message: '⚠️ Maximum ${AppConstants.maxActiveBids} active bids reached.',
+        message:
+            '⚠️ Maximum ${AppConstants.maxActiveBids} active bids reached.',
         isError: true,
       );
       return;
@@ -1244,10 +1278,13 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           'price': bidPrice,
           'driverName': provider.profile?['name'] ?? 'Driver',
           'driverPhone': provider.profile?['phone'] ?? '',
-          'vehicleType': (provider.profile?['vehicleType'] as String?)?.toLowerCase() ?? 'auto',
+          'vehicleType':
+              (provider.profile?['vehicleType'] as String?)?.toLowerCase() ??
+              'auto',
           'vehicleNumber': provider.profile?['vehicleNumber'] ?? '',
           'driverImageUrl': provider.profile?['documents']?['selfieUrl'] ?? '',
-          'vehicleImageUrl': provider.profile?['documents']?['vehicleUrl'] ?? '',
+          'vehicleImageUrl':
+              provider.profile?['documents']?['vehicleUrl'] ?? '',
           'driverLat': provider.lat,
           'driverLng': provider.lng,
         },
@@ -1304,6 +1341,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       context: context,
       backgroundColor: AppTheme.bg,
       isScrollControlled: true,
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -1312,7 +1350,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           builder: (ctx, setSheetState) {
             return Padding(
               padding: EdgeInsets.fromLTRB(
-                  24, 20, 24, MediaQuery.of(ctx).viewInsets.bottom + MediaQuery.of(ctx).padding.bottom + 20),
+                24,
+                20,
+                24,
+                MediaQuery.of(ctx).viewInsets.bottom + 20,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1325,26 +1367,37 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     ),
                   ),
                   const SizedBox(height: 20),
-                  Text('Place Your Bid',
-                      style: GoogleFonts.inter(
-                          fontSize: 20, fontWeight: FontWeight.w700)),
+                  Text(
+                    'Place Your Bid',
+                    style: GoogleFonts.inter(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   Text(
                     '${ride['pickup']?['short_name']} → ${ride['drop']?['short_name']}',
                     style: GoogleFonts.inter(
-                        fontSize: 14, color: AppTheme.text2),
+                      fontSize: 14,
+                      color: AppTheme.text2,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 4),
                   Text(
                     '${ride['distanceKm']} km ride · $distLabel away · ~$etaLabel pickup',
                     style: GoogleFonts.inter(
-                        fontSize: 13, color: AppTheme.text3),
+                      fontSize: 13,
+                      color: AppTheme.text3,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   // Rider's bid reference
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: AppTheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
@@ -1377,10 +1430,15 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                           decoration: BoxDecoration(
                             color: AppTheme.danger.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppTheme.danger.withValues(alpha: 0.3)),
+                            border: Border.all(
+                              color: AppTheme.danger.withValues(alpha: 0.3),
+                            ),
                           ),
-                          child: const Icon(Icons.remove,
-                              color: AppTheme.danger, size: 22),
+                          child: const Icon(
+                            Icons.remove,
+                            color: AppTheme.danger,
+                            size: 22,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 16),
@@ -1403,14 +1461,19 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                               fontWeight: FontWeight.w800,
                               color: AppTheme.success,
                             ),
-                            contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 12,
+                            ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(14),
                               borderSide: BorderSide(color: AppTheme.border),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(14),
-                              borderSide: const BorderSide(color: AppTheme.success, width: 2),
+                              borderSide: const BorderSide(
+                                color: AppTheme.success,
+                                width: 2,
+                              ),
                             ),
                             filled: true,
                             fillColor: AppTheme.bg,
@@ -1420,7 +1483,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                             if (parsed != null && parsed > 0) {
                               bidPrice = parsed;
                               if (parsed > maxBid) {
-                                capWarning = 'Max counter price is ₹$maxBid (2× rider offer)';
+                                capWarning =
+                                    'Max counter price is ₹$maxBid (2× rider offer)';
                               } else {
                                 capWarning = null;
                               }
@@ -1442,10 +1506,15 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                           decoration: BoxDecoration(
                             color: AppTheme.success.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppTheme.success.withValues(alpha: 0.3)),
+                            border: Border.all(
+                              color: AppTheme.success.withValues(alpha: 0.3),
+                            ),
                           ),
-                          child: const Icon(Icons.add,
-                              color: AppTheme.success, size: 22),
+                          child: const Icon(
+                            Icons.add,
+                            color: AppTheme.success,
+                            size: 22,
+                          ),
                         ),
                       ),
                     ],
@@ -1454,18 +1523,31 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   if (capWarning != null) ...[
                     const SizedBox(height: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
                         color: AppTheme.danger.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.warning_amber_rounded, color: AppTheme.danger, size: 18),
+                          const Icon(
+                            Icons.warning_amber_rounded,
+                            color: AppTheme.danger,
+                            size: 18,
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: Text(capWarning!,
-                                style: GoogleFonts.inter(fontSize: 12, color: AppTheme.danger, fontWeight: FontWeight.w600)),
+                            child: Text(
+                              capWarning!,
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: AppTheme.danger,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -1479,17 +1561,24 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                       onPressed: (_bidding || bidPrice > maxBid)
                           ? null
                           : () {
-                              final finalPrice = int.tryParse(bidController.text) ?? bidPrice;
+                              final finalPrice =
+                                  int.tryParse(bidController.text) ?? bidPrice;
                               if (finalPrice > maxBid) return;
                               Navigator.pop(ctx);
                               _placeBid(ride, finalPrice);
                             },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: bidPrice > maxBid ? AppTheme.text3 : AppTheme.success,
+                        backgroundColor: bidPrice > maxBid
+                            ? AppTheme.text3
+                            : AppTheme.success,
                       ),
-                      child: Text('Place Bid ₹$bidPrice',
-                          style: GoogleFonts.inter(
-                              fontWeight: FontWeight.w700, fontSize: 16)),
+                      child: Text(
+                        'Place Bid ₹$bidPrice',
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -1505,7 +1594,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   Widget build(BuildContext context) {
     final provider = context.watch<DriverProvider>();
 
-    // Calculate dynamic bottom padding so native Google Map controls 
+    // Calculate dynamic bottom padding so native Google Map controls
     // (Zoom buttons, Location button, Google logo) stay above the bottom sheet
     final double mapBottomPadding = !provider.isOnline
         ? 120.0
@@ -1520,8 +1609,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
             style: lightMapStyle,
             // Top padding keeps compass below status bar, bottom padding keeps controls above sheet
             padding: EdgeInsets.only(top: 90, bottom: mapBottomPadding),
-            myLocationEnabled: false, // Turn off blue dot as we have our own marker
-            myLocationButtonEnabled: false, // Disable native location button since we use a custom one
+            myLocationEnabled:
+                false, // Turn off blue dot as we have our own marker
+            myLocationButtonEnabled:
+                false, // Disable native location button since we use a custom one
             zoomControlsEnabled: true, // Keep zoom buttons
             initialCameraPosition: CameraPosition(
               target: provider.lat != null
@@ -1539,8 +1630,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   markerId: const MarkerId('driver'),
                   position: _driverAnimator.currentPos!,
                   rotation: _driverAnimator.currentHeading,
-                  anchor: const Offset(0.5, 0.5), // Forces rotation exactly around the center of the image
-                  icon: _getVehicleIcon((provider.profile?['vehicleType'] as String?)?.toLowerCase()),
+                  anchor: const Offset(
+                    0.5,
+                    0.5,
+                  ), // Forces rotation exactly around the center of the image
+                  icon: _getVehicleIcon(
+                    (provider.profile?['vehicleType'] as String?)
+                        ?.toLowerCase(),
+                  ),
                 ),
               ..._buildRideMarkers(),
               if (_distanceLabelMarker != null) _distanceLabelMarker!,
@@ -1562,8 +1659,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.bg,
                   borderRadius: BorderRadius.circular(16),
@@ -1578,7 +1677,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                 child: Row(
                   children: [
                     Text(
-                      AppConstants.vehicleTypes[(provider.profile?['vehicleType'] as String?)?.toLowerCase()]
+                      AppConstants
+                              .vehicleTypes[(provider.profile?['vehicleType']
+                                      as String?)
+                                  ?.toLowerCase()]
                               ?.icon ??
                           '🚗',
                       style: const TextStyle(fontSize: 28),
@@ -1592,12 +1694,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                           Text(
                             provider.profile?['name'] ?? 'Driver',
                             style: GoogleFonts.inter(
-                                fontWeight: FontWeight.w700, fontSize: 16),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
                           ),
                           Text(
-                            provider.isOnline
-                                ? '🟢 Online'
-                                : '⚫ Offline',
+                            provider.isOnline ? '🟢 Online' : '⚫ Offline',
                             style: GoogleFonts.inter(
                               color: provider.isOnline
                                   ? AppTheme.success
@@ -1616,7 +1718,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     ),
                     Builder(
                       builder: (ctx) => IconButton(
-                        icon: const Icon(Icons.menu, color: AppTheme.text3, size: 24),
+                        icon: const Icon(
+                          Icons.menu,
+                          color: AppTheme.text3,
+                          size: 24,
+                        ),
                         onPressed: () => Scaffold.of(ctx).openDrawer(),
                       ),
                     ),
@@ -1652,11 +1758,15 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
           // Custom Location Button
           Positioned(
-            bottom: mapBottomPadding + 115, // Places it right above the native zoom controls
+            bottom:
+                mapBottomPadding +
+                115, // Places it right above the native zoom controls
             right: 12,
             child: InkWell(
               onTap: () {
-                if (provider.lat != null && provider.lng != null && _mapController != null) {
+                if (provider.lat != null &&
+                    provider.lng != null &&
+                    _mapController != null) {
                   _mapController!.animateCamera(
                     CameraUpdate.newLatLngZoom(
                       LatLng(provider.lat!, provider.lng!),
@@ -1680,7 +1790,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     ),
                   ],
                 ),
-                child: const Icon(Icons.my_location_rounded, color: Colors.black54, size: 22),
+                child: const Icon(
+                  Icons.my_location_rounded,
+                  color: Colors.black54,
+                  size: 22,
+                ),
               ),
             ),
           ),
@@ -1710,27 +1824,27 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       final lat = (ride['pickup']?['lat'] as num?)?.toDouble();
       final lng = (ride['pickup']?['lng'] as num?)?.toDouble();
       if (lat == null || lng == null) continue;
-      markers.add(Marker(
-        markerId: MarkerId(rideId),
-        position: LatLng(lat, lng),
-        icon: icon,
-        anchor: const Offset(0.5, 54/62),
-        onTap: () {
-          _ridePageController.animateToPage(
-            i,
-            duration: const Duration(milliseconds: 350),
-            curve: Curves.easeInOut,
-          );
-        },
-      ));
+      markers.add(
+        Marker(
+          markerId: MarkerId(rideId),
+          position: LatLng(lat, lng),
+          icon: icon,
+          anchor: const Offset(0.5, 54 / 62),
+          onTap: () {
+            _ridePageController.animateToPage(
+              i,
+              duration: const Duration(milliseconds: 350),
+              curve: Curves.easeInOut,
+            );
+          },
+        ),
+      );
     }
     return markers;
   }
 
   Widget _buildBottomPanel(DriverProvider provider) {
     return Container(
-      padding: EdgeInsets.fromLTRB(
-          0, 12, 0, MediaQuery.of(context).padding.bottom + 8),
       decoration: BoxDecoration(
         color: AppTheme.bg,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -1743,388 +1857,527 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           ),
         ],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Drag handle
-          Container(
-            width: 40,
-            height: 4,
-            margin: const EdgeInsets.only(bottom: 10),
-            decoration: BoxDecoration(
-              color: AppTheme.text3,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-
-          if (provider.isOnline) ...[
-            // Header row
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Row(
-                children: [
-                  Text(
-                    'Nearby Rides',
-                    style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w700, fontSize: 16),
-                  ),
-                  const Spacer(),
-                  Text('${_nearbyRides.length} rides',
-                      style: GoogleFonts.inter(
-                          color: AppTheme.text3, fontSize: 13)),
-                ],
-              ),
-            ),
-
-            if (_nearbyRides.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
-                child: Text(
-                  provider.lat == null
-                      ? 'Getting your location...'
-                      : 'No rides nearby. Stay online!',
-                  style: GoogleFonts.inter(color: AppTheme.text3, fontSize: 14),
-                  textAlign: TextAlign.center,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(0, 12, 0, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Drag handle
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  color: AppTheme.text3,
+                  borderRadius: BorderRadius.circular(2),
                 ),
-              )
-            else
-              // ── Snap Carousel ──────────────────────────────────────
-              SizedBox(
-                height: 270,
-                child: PageView.builder(
-                  controller: _ridePageController,
-                  itemCount: _nearbyRides.length,
-                  onPageChanged: (index) {
-                    setState(() => _focusedRideIndex = index);
-                    // Rebuild markers so active glow switches correctly
-                    _rebuildFareBubbles();
-                    // Fit map to show both driver and focused pickup with curve
-                    _frameDriverAndPickup(rideIndex: index);
-                  },
-                  itemBuilder: (context, index) {
-                    final ride = _nearbyRides[index];
-                    final distMeters = (ride['distance'] as double);
-                    final distLabel = distMeters < 1000
-                        ? '${distMeters.toInt()}m'
-                        : '${(distMeters / 1000).toStringAsFixed(1)} km';
-                    final etaMin =
-                        ((distMeters / 1000) / AppConstants.avgSpeedKmh * 60)
-                            .ceil();
-                    final etaLabel = etaMin < 1 ? '<1 min' : '$etaMin min';
-                    final rideId = ride['id'] as String;
-                    final isBidded = _biddedRides.containsKey(rideId);
-                    final isFocused = index == _focusedRideIndex;
+              ),
 
-                    return AnimatedScale(
-                      scale: isFocused ? 1.0 : 0.93,
-                      duration: const Duration(milliseconds: 280),
-                      curve: Curves.easeOut,
-                      child: AnimatedOpacity(
-                        opacity: isFocused ? 1.0 : 0.60,
-                        duration: const Duration(milliseconds: 280),
-                        child: Align(
-                          alignment: Alignment.bottomCenter,
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 8),
-                            decoration: BoxDecoration(
-                              color: AppTheme.bg,
-                              borderRadius: BorderRadius.circular(18),
-                              border: Border.all(
-                                  color: isBidded
-                                      ? AppTheme.primary
-                                      : isFocused
-                                          ? AppTheme.border
-                                          : AppTheme.border.withValues(alpha: 0.5),
-                                  width: isBidded ? 2 : 1),
-                              boxShadow: isFocused
-                                  ? [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(alpha: 0.18),
-                                        blurRadius: 16,
-                                        offset: const Offset(0, 6),
-                                      )
-                                    ]
-                                  : [],
-                            ),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                              // Card header — fare + distance
-                              Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(16, 14, 16, 10),
-                                child: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(children: [
-                                          Text(
-                                            'Ride ${index + 1} of ${_nearbyRides.length}',
-                                            style: GoogleFonts.inter(
-                                                fontSize: 11,
-                                                color: AppTheme.text3,
-                                                fontWeight: FontWeight.w600),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          const Icon(Icons.timer_outlined,
-                                              size: 13, color: AppTheme.primary),
-                                          const SizedBox(width: 3),
-                                          RideTimerText(
-                                            createdAtMs:
-                                                (ride['createdAt'] as num?)
-                                                        ?.toInt() ??
-                                                    DateTime.now()
-                                                        .millisecondsSinceEpoch,
-                                            onExpired: () {
-                                              if (mounted) {
-                                                _removeRideLocally(rideId);
-                                              }
-                                            },
-                                          ),
-                                        ]),
-                                        const SizedBox(height: 4),
-                                        Row(children: [
-                                          const Icon(Icons.electric_rickshaw,
-                                              color: AppTheme.primary, size: 18),
-                                          const SizedBox(width: 5),
-                                          Text(
-                                            '${ride['distanceKm']} km',
-                                            style: GoogleFonts.inter(
-                                                fontWeight: FontWeight.w800,
-                                                fontSize: 17),
-                                          ),
-                                        ]),
-                                      ],
-                                    ),
-                                    Column(
-                                      crossAxisAlignment: CrossAxisAlignment.end,
-                                      children: [
-                                        Text(
-                                          isBidded ? 'Your Bid' : 'Offered',
-                                          style: GoogleFonts.inter(
-                                              fontSize: 11,
-                                              color: isBidded
-                                                  ? AppTheme.primary
-                                                  : AppTheme.text3,
-                                              fontWeight: FontWeight.w600),
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          isBidded
-                                              ? '₹${_biddedRides[rideId]}'
-                                              : '₹${ride['riderBid']}',
-                                          style: GoogleFonts.inter(
-                                              fontSize: 20,
-                                              fontWeight: FontWeight.w800,
-                                              color: isBidded
-                                                  ? AppTheme.primary
-                                                  : AppTheme.success),
-                                        ),
-                                        if (isBidded &&
-                                            _biddedRides[rideId] !=
-                                                ride['riderBid'])
-                                          Text(
-                                            'Offer: ₹${ride['riderBid']}',
-                                            style: GoogleFonts.inter(
-                                              fontSize: 11,
-                                              color: AppTheme.text3,
-                                              decoration:
-                                                  TextDecoration.lineThrough,
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ],
+              if (provider.isOnline) ...[
+                // Header row
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Row(
+                    children: [
+                      Text(
+                        'Nearby Rides',
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${_nearbyRides.length} rides',
+                        style: GoogleFonts.inter(
+                          color: AppTheme.text3,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                if (_nearbyRides.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 20,
+                      horizontal: 20,
+                    ),
+                    child: Text(
+                      provider.lat == null
+                          ? 'Getting your location...'
+                          : 'No rides nearby. Stay online!',
+                      style: GoogleFonts.inter(
+                        color: AppTheme.text3,
+                        fontSize: 14,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  )
+                else
+                  // ── Snap Carousel ──────────────────────────────────────
+                  SizedBox(
+                    height: 270,
+                    child: PageView.builder(
+                      controller: _ridePageController,
+                      itemCount: _nearbyRides.length,
+                      onPageChanged: (index) {
+                        setState(() => _focusedRideIndex = index);
+                        // Rebuild markers so active glow switches correctly
+                        _rebuildFareBubbles();
+                        // Fit map to show both driver and focused pickup with curve
+                        _frameDriverAndPickup(rideIndex: index);
+                      },
+                      itemBuilder: (context, index) {
+                        final ride = _nearbyRides[index];
+                        final distMeters = (ride['distance'] as double);
+                        final distLabel = distMeters < 1000
+                            ? '${distMeters.toInt()}m'
+                            : '${(distMeters / 1000).toStringAsFixed(1)} km';
+                        final etaMin =
+                            ((distMeters / 1000) /
+                                    AppConstants.avgSpeedKmh *
+                                    60)
+                                .ceil();
+                        final etaLabel = etaMin < 1 ? '<1 min' : '$etaMin min';
+                        final rideId = ride['id'] as String;
+                        final isBidded = _biddedRides.containsKey(rideId);
+                        final isFocused = index == _focusedRideIndex;
+
+                        return AnimatedScale(
+                          scale: isFocused ? 1.0 : 0.93,
+                          duration: const Duration(milliseconds: 280),
+                          curve: Curves.easeOut,
+                          child: AnimatedOpacity(
+                            opacity: isFocused ? 1.0 : 0.60,
+                            duration: const Duration(milliseconds: 280),
+                            child: Align(
+                              alignment: Alignment.bottomCenter,
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 8,
                                 ),
-                              ),
-
-                              // ETA chip
-                              Builder(builder: (_) {
-                                final chipColor = etaMin < 3
-                                    ? AppTheme.success
-                                    : etaMin <= 7
-                                        ? AppTheme.warning
-                                        : AppTheme.danger;
-                                return Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: chipColor.withValues(alpha: 0.07),
-                                    border: Border.symmetric(
-                                        horizontal: BorderSide(
-                                            color: AppTheme.border)),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.bg,
+                                  borderRadius: BorderRadius.circular(18),
+                                  border: Border.all(
+                                    color: isBidded
+                                        ? AppTheme.primary
+                                        : isFocused
+                                        ? AppTheme.border
+                                        : AppTheme.border.withValues(
+                                            alpha: 0.5,
+                                          ),
+                                    width: isBidded ? 2 : 1,
                                   ),
-                                  child: Row(children: [
-                                    Icon(Icons.near_me_rounded,
-                                        size: 13, color: chipColor),
-                                    const SizedBox(width: 5),
-                                    Text(
-                                      '$distLabel to pickup  ·  ~$etaLabel',
-                                      style: GoogleFonts.inter(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                          color: chipColor),
-                                    ),
-                                  ]),
-                                );
-                              }),
-
-                              // Route preview
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  boxShadow: isFocused
+                                      ? [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(
+                                              alpha: 0.18,
+                                            ),
+                                            blurRadius: 16,
+                                            offset: const Offset(0, 6),
+                                          ),
+                                        ]
+                                      : [],
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Column(children: [
-                                      const Icon(Icons.my_location,
-                                          color: AppTheme.primary, size: 18),
-                                      Container(
-                                          width: 2,
-                                          height: 20,
-                                          margin: const EdgeInsets.symmetric(
-                                              vertical: 3),
-                                          color: AppTheme.border),
-                                      const Icon(Icons.location_on,
-                                          color: AppTheme.danger, size: 18),
-                                    ]),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
+                                    // Card header — fare + distance
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        16,
+                                        14,
+                                        16,
+                                        10,
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          Text(
-                                            ride['pickup']?['short_name'] ??
-                                                ride['pickup']?['display_name'] ??
-                                                'Pickup',
-                                            style: GoogleFonts.inter(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w600),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
+                                          Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  Text(
+                                                    'Ride ${index + 1} of ${_nearbyRides.length}',
+                                                    style: GoogleFonts.inter(
+                                                      fontSize: 11,
+                                                      color: AppTheme.text3,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  const Icon(
+                                                    Icons.timer_outlined,
+                                                    size: 13,
+                                                    color: AppTheme.primary,
+                                                  ),
+                                                  const SizedBox(width: 3),
+                                                  RideTimerText(
+                                                    createdAtMs:
+                                                        (ride['createdAt']
+                                                                as num?)
+                                                            ?.toInt() ??
+                                                        DateTime.now()
+                                                            .millisecondsSinceEpoch,
+                                                    onExpired: () {
+                                                      if (mounted) {
+                                                        _removeRideLocally(
+                                                          rideId,
+                                                        );
+                                                      }
+                                                    },
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Row(
+                                                children: [
+                                                  const Icon(
+                                                    Icons.electric_rickshaw,
+                                                    color: AppTheme.primary,
+                                                    size: 18,
+                                                  ),
+                                                  const SizedBox(width: 5),
+                                                  Text(
+                                                    '${ride['distanceKm']} km',
+                                                    style: GoogleFonts.inter(
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      fontSize: 17,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
                                           ),
-                                          const SizedBox(height: 14),
-                                          Text(
-                                            ride['drop']?['short_name'] ??
-                                                ride['drop']?['display_name'] ??
-                                                'Drop',
-                                            style: GoogleFonts.inter(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w600),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
+                                          Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.end,
+                                            children: [
+                                              Text(
+                                                isBidded
+                                                    ? 'Your Bid'
+                                                    : 'Offered',
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 11,
+                                                  color: isBidded
+                                                      ? AppTheme.primary
+                                                      : AppTheme.text3,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 3),
+                                              Text(
+                                                isBidded
+                                                    ? '₹${_biddedRides[rideId]}'
+                                                    : '₹${ride['riderBid']}',
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 20,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: isBidded
+                                                      ? AppTheme.primary
+                                                      : AppTheme.success,
+                                                ),
+                                              ),
+                                              if (isBidded &&
+                                                  _biddedRides[rideId] !=
+                                                      ride['riderBid'])
+                                                Text(
+                                                  'Offer: ₹${ride['riderBid']}',
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 11,
+                                                    color: AppTheme.text3,
+                                                    decoration: TextDecoration
+                                                        .lineThrough,
+                                                  ),
+                                                ),
+                                            ],
                                           ),
                                         ],
                                       ),
                                     ),
+
+                                    // ETA chip
+                                    Builder(
+                                      builder: (_) {
+                                        final chipColor = etaMin < 3
+                                            ? AppTheme.success
+                                            : etaMin <= 7
+                                            ? AppTheme.warning
+                                            : AppTheme.danger;
+                                        return Container(
+                                          width: double.infinity,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 6,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: chipColor.withValues(
+                                              alpha: 0.07,
+                                            ),
+                                            border: Border.symmetric(
+                                              horizontal: BorderSide(
+                                                color: AppTheme.border,
+                                              ),
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.near_me_rounded,
+                                                size: 13,
+                                                color: chipColor,
+                                              ),
+                                              const SizedBox(width: 5),
+                                              Text(
+                                                '$distLabel to pickup  ·  ~$etaLabel',
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: chipColor,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    ),
+
+                                    // Route preview
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        14,
+                                        10,
+                                        14,
+                                        8,
+                                      ),
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Column(
+                                            children: [
+                                              const Icon(
+                                                Icons.my_location,
+                                                color: AppTheme.primary,
+                                                size: 18,
+                                              ),
+                                              Container(
+                                                width: 2,
+                                                height: 20,
+                                                margin:
+                                                    const EdgeInsets.symmetric(
+                                                      vertical: 3,
+                                                    ),
+                                                color: AppTheme.border,
+                                              ),
+                                              const Icon(
+                                                Icons.location_on,
+                                                color: AppTheme.danger,
+                                                size: 18,
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  ride['pickup']?['short_name'] ??
+                                                      ride['pickup']?['display_name'] ??
+                                                      'Pickup',
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                                const SizedBox(height: 14),
+                                                Text(
+                                                  ride['drop']?['short_name'] ??
+                                                      ride['drop']?['display_name'] ??
+                                                      'Drop',
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+
+                                    // Action buttons
+                                    Container(
+                                      decoration: const BoxDecoration(
+                                        color: AppTheme.bg,
+                                        borderRadius: BorderRadius.vertical(
+                                          bottom: Radius.circular(18),
+                                        ),
+                                      ),
+                                      child: isBidded
+                                          ? Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 12,
+                                                  ),
+                                              child: Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  const Icon(
+                                                    Icons.check_circle,
+                                                    color: AppTheme.success,
+                                                    size: 18,
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Text(
+                                                    'Bid placed · waiting for rider',
+                                                    style: GoogleFonts.inter(
+                                                      color: AppTheme.success,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      fontSize: 13,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            )
+                                          : Row(
+                                              children: [
+                                                Expanded(
+                                                  child: InkWell(
+                                                    onTap: () {
+                                                      _removeRideLocally(
+                                                        rideId,
+                                                        markDeclined: true,
+                                                      );
+                                                    },
+                                                    borderRadius:
+                                                        const BorderRadius.only(
+                                                          bottomLeft:
+                                                              Radius.circular(
+                                                                18,
+                                                              ),
+                                                        ),
+                                                    child: Container(
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            vertical: 14,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: AppTheme.danger
+                                                            .withValues(
+                                                              alpha: 0.1,
+                                                            ),
+                                                        borderRadius:
+                                                            const BorderRadius.only(
+                                                              bottomLeft:
+                                                                  Radius.circular(
+                                                                    18,
+                                                                  ),
+                                                            ),
+                                                      ),
+                                                      alignment:
+                                                          Alignment.center,
+                                                      child: Text(
+                                                        'Decline',
+                                                        style:
+                                                            GoogleFonts.inter(
+                                                              color: AppTheme
+                                                                  .danger,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
+                                                              fontSize: 15,
+                                                            ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  child: InkWell(
+                                                    onTap: () =>
+                                                        _showBidDialog(ride),
+                                                    borderRadius:
+                                                        const BorderRadius.only(
+                                                          bottomRight:
+                                                              Radius.circular(
+                                                                18,
+                                                              ),
+                                                        ),
+                                                    child: Container(
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            vertical: 14,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: AppTheme.primary
+                                                            .withValues(
+                                                              alpha: 0.1,
+                                                            ),
+                                                        borderRadius:
+                                                            const BorderRadius.only(
+                                                              bottomRight:
+                                                                  Radius.circular(
+                                                                    18,
+                                                                  ),
+                                                            ),
+                                                      ),
+                                                      alignment:
+                                                          Alignment.center,
+                                                      child: Text(
+                                                        'Place Bid',
+                                                        style:
+                                                            GoogleFonts.inter(
+                                                              color: AppTheme
+                                                                  .primary,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
+                                                              fontSize: 15,
+                                                            ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                    ),
                                   ],
                                 ),
                               ),
-
-                              // Action buttons
-                              Container(
-                                decoration: const BoxDecoration(
-                                  color: AppTheme.bg,
-                                  borderRadius: BorderRadius.vertical(
-                                      bottom: Radius.circular(18)),
-                                ),
-                                child: isBidded
-                                    ? Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 12),
-                                        child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            const Icon(Icons.check_circle,
-                                                color: AppTheme.success,
-                                                size: 18),
-                                            const SizedBox(width: 6),
-                                            Text(
-                                              'Bid placed · waiting for rider',
-                                              style: GoogleFonts.inter(
-                                                  color: AppTheme.success,
-                                                  fontWeight: FontWeight.w700,
-                                                  fontSize: 13),
-                                            ),
-                                          ],
-                                        ),
-                                      )
-                                    : Row(children: [
-                                        Expanded(
-                                          child: InkWell(
-                                            onTap: () {
-                                              _removeRideLocally(rideId, markDeclined: true);
-                                            },
-                                            borderRadius: const BorderRadius.only(
-                                                bottomLeft: Radius.circular(18)),
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 14),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.danger
-                                                    .withValues(alpha: 0.1),
-                                                borderRadius:
-                                                    const BorderRadius.only(
-                                                        bottomLeft:
-                                                            Radius.circular(18)),
-                                              ),
-                                              alignment: Alignment.center,
-                                              child: Text('Decline',
-                                                  style: GoogleFonts.inter(
-                                                      color: AppTheme.danger,
-                                                      fontWeight: FontWeight.w700,
-                                                      fontSize: 15)),
-                                            ),
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: InkWell(
-                                            onTap: () => _showBidDialog(ride),
-                                            borderRadius: const BorderRadius.only(
-                                                bottomRight:
-                                                    Radius.circular(18)),
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 14),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.primary
-                                                    .withValues(alpha: 0.1),
-                                                borderRadius:
-                                                    const BorderRadius.only(
-                                                        bottomRight:
-                                                            Radius.circular(18)),
-                                              ),
-                                              alignment: Alignment.center,
-                                              child: Text('Place Bid',
-                                                  style: GoogleFonts.inter(
-                                                      color: AppTheme.primary,
-                                                      fontWeight: FontWeight.w700,
-                                                      fontSize: 15)),
-                                            ),
-                                          ),
-                                        ),
-                                      ]),
-                              ),
-                            ],
+                            ),
                           ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
-                  );
-                },
-                ),
-              ),
-          ],
-        ],
+                  ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -2138,7 +2391,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
             decoration: const BoxDecoration(color: AppTheme.bg),
             accountName: Text(
               provider.profile?['name'] ?? 'Driver',
-              style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppTheme.text),
+              style: GoogleFonts.inter(
+                fontWeight: FontWeight.bold,
+                color: AppTheme.text,
+              ),
             ),
             accountEmail: Text(
               provider.profile?['phone'] ?? '',
@@ -2146,7 +2402,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
             ),
             currentAccountPicture: CircleAvatar(
               backgroundColor: AppTheme.primary,
-              backgroundImage: provider.profile?['documents']?['selfieUrl'] != null
+              backgroundImage:
+                  provider.profile?['documents']?['selfieUrl'] != null
                   ? NetworkImage(provider.profile!['documents']['selfieUrl'])
                   : null,
               child: provider.profile?['documents']?['selfieUrl'] == null
@@ -2165,7 +2422,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   .collection('rides')
                   .where('driverId', isEqualTo: uid)
                   .where('status', isEqualTo: 'completed')
-                  .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart))
+                  .where(
+                    'completedAt',
+                    isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart),
+                  )
                   .snapshots();
             }(),
             builder: (context, snapshot) {
@@ -2174,11 +2434,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
               if (snapshot.hasData) {
                 for (final doc in snapshot.data!.docs) {
                   final data = doc.data() as Map<String, dynamic>;
-                  todayEarnings += double.tryParse(data['finalPrice']?.toString() ?? '0') ?? 0.0;
+                  todayEarnings +=
+                      double.tryParse(data['finalPrice']?.toString() ?? '0') ??
+                      0.0;
                   todayRides++;
                 }
               }
-              final isLoading = snapshot.connectionState == ConnectionState.waiting;
+              final isLoading =
+                  snapshot.connectionState == ConnectionState.waiting;
               return Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 padding: const EdgeInsets.all(16),
@@ -2196,8 +2459,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                         color: AppTheme.success.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Icon(Icons.account_balance_wallet_rounded,
-                          color: AppTheme.success, size: 22),
+                      child: const Icon(
+                        Icons.account_balance_wallet_rounded,
+                        color: AppTheme.success,
+                        size: 22,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -2261,66 +2527,107 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
           ListTile(
             leading: const Icon(Icons.history, color: AppTheme.text),
-            title: Text('Earnings History', style: GoogleFonts.inter(color: AppTheme.text)),
+            title: Text(
+              'Earnings History',
+              style: GoogleFonts.inter(color: AppTheme.text),
+            ),
             onTap: () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const RideEarningsHistoryScreen()));
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const RideEarningsHistoryScreen(),
+                ),
+              );
             },
           ),
           ListTile(
             leading: const Icon(Icons.person, color: AppTheme.text),
-            title: Text('My Profile', style: GoogleFonts.inter(color: AppTheme.text)),
+            title: Text(
+              'My Profile',
+              style: GoogleFonts.inter(color: AppTheme.text),
+            ),
             onTap: () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfileScreen()),
+              );
             },
           ),
           ListTile(
             leading: const Icon(Icons.card_membership, color: AppTheme.text),
-            title: Text('Subscription', style: GoogleFonts.inter(color: AppTheme.text)),
+            title: Text(
+              'Subscription',
+              style: GoogleFonts.inter(color: AppTheme.text),
+            ),
             onTap: () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const SubscriptionScreen()));
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+              );
             },
           ),
           ListTile(
             leading: const Icon(Icons.card_giftcard, color: AppTheme.text),
-            title: Text('Refer & Earn', style: GoogleFonts.inter(color: AppTheme.text)),
+            title: Text(
+              'Refer & Earn',
+              style: GoogleFonts.inter(color: AppTheme.text),
+            ),
             onTap: () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const ReferralScreen()));
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ReferralScreen()),
+              );
             },
           ),
           ListTile(
             leading: const Icon(Icons.support_agent, color: AppTheme.text),
-            title: Text('Support', style: GoogleFonts.inter(color: AppTheme.text)),
+            title: Text(
+              'Support',
+              style: GoogleFonts.inter(color: AppTheme.text),
+            ),
             onTap: () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen()));
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SupportScreen()),
+              );
             },
           ),
           ListTile(
             leading: const Icon(Icons.settings, color: AppTheme.text),
-            title: Text('Settings', style: GoogleFonts.inter(color: AppTheme.text)),
+            title: Text(
+              'Settings',
+              style: GoogleFonts.inter(color: AppTheme.text),
+            ),
             onTap: () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
             },
           ),
           const Spacer(),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.logout, color: AppTheme.danger),
-            title: Text('Log Out', style: GoogleFonts.inter(color: AppTheme.danger, fontWeight: FontWeight.bold)),
+            title: Text(
+              'Log Out',
+              style: GoogleFonts.inter(
+                color: AppTheme.danger,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             onTap: () async {
               provider.setOnline(false);
               await FirebaseFirestore.instance
                   .collection('drivers')
                   .doc(FirebaseAuth.instance.currentUser!.uid)
-                  .update({
-                    'isOnline': false,
-                    'driverState': 'OFFLINE',
-                  });
+                  .update({'isOnline': false, 'driverState': 'OFFLINE'});
               await FirebaseAuth.instance.signOut();
               if (context.mounted) {
                 Navigator.of(context).pushAndRemoveUntil(
@@ -2341,7 +2648,11 @@ class RideTimerText extends StatefulWidget {
   final int createdAtMs;
   final VoidCallback onExpired;
 
-  const RideTimerText({super.key, required this.createdAtMs, required this.onExpired});
+  const RideTimerText({
+    super.key,
+    required this.createdAtMs,
+    required this.onExpired,
+  });
 
   @override
   State<RideTimerText> createState() => _RideTimerTextState();

@@ -1,0 +1,405 @@
+--- lib/presentation/screens/driver_profile_screen.dart
++++ lib/presentation/screens/driver_profile_screen.dart
+@@ -109,6 +109,14 @@
+         return Dialog(
+           backgroundColor: Colors.transparent,
+           insetPadding: const EdgeInsets.all(16),
+           child: Stack(
+             alignment: Alignment.center,
+             children: [
+               InteractiveViewer(
+                 panEnabled: true,
+                 minScale: 0.5,
+                 maxScale: 4.0,
+                 child: ClipRRect(
+                   borderRadius: BorderRadius.circular(12),
+                   child: Image.network(
+                     url,
+                     fit: BoxFit.contain,
++                    loadingBuilder: (context, child, loadingProgress) {
++                      if (loadingProgress == null) return child;
++                      return Container(
++                        color: AppTheme.darkSurface,
++                        padding: const EdgeInsets.all(32),
++                        child: const Center(child: CircularProgressIndicator()),
++                      );
++                    },
+                     errorBuilder: (_, __, ___) => Container(
+                       color: AppTheme.darkSurface,
+                       padding: const EdgeInsets.all(32),
+@@ -253,137 +261,164 @@
+               child: Column(
+                 crossAxisAlignment: CrossAxisAlignment.start,
+                 children: [
+-                  // --- PROFILE HEADER CARD ---
+-                  Container(
+-                    padding: const EdgeInsets.all(24),
+-                    decoration: BoxDecoration(
+-                      color: surfaceColor,
+-                      borderRadius: BorderRadius.circular(16),
+-                      border: Border.all(color: borderColor),
+-                    ),
+-                    child: Row(
+-                      crossAxisAlignment: CrossAxisAlignment.start,
+-                      children: [
+-                        // Selfie
+-                        GestureDetector(
+-                          onTap: () {
+-                            if (selfieUrl != null && selfieUrl.isNotEmpty) {
+-                              _showImagePreview('Profile Photo', selfieUrl);
+-                            }
+-                          },
+-                          child: Container(
+-                            width: 120,
+-                            height: 120,
+-                            decoration: BoxDecoration(
+-                              color: isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2,
+-                              borderRadius: BorderRadius.circular(16),
+-                              border: Border.all(color: borderColor),
+-                            ),
+-                            child: (selfieUrl != null && selfieUrl.isNotEmpty)
+-                                ? ClipRRect(
+-                                    borderRadius: BorderRadius.circular(16),
+-                                    child: Image.network(selfieUrl, fit: BoxFit.cover),
+-                                  )
+-                                : Icon(Icons.person, size: 48, color: text2Color),
+-                          ),
+-                        ),
+-                        const SizedBox(width: 24),
+-                        // Details
+-                        Expanded(
+-                          child: Column(
+-                            crossAxisAlignment: CrossAxisAlignment.start,
+-                            children: [
+-                              _buildProfileField('Name', _nameController, textColor, isEditing: _isEditing),
+-                              const SizedBox(height: 12),
+-                              Row(
+-                                children: [
+-                                  Expanded(child: _buildProfileField('Phone', _phoneController, textColor, isEditing: _isEditing)),
+-                                  const SizedBox(width: 16),
+-                                  Expanded(child: _buildProfileField('Vehicle Type', _vehicleTypeController, textColor, isEditing: _isEditing)),
+-                                ],
+-                              ),
+-                              const SizedBox(height: 12),
+-                              Row(
+-                                children: [
+-                                  Expanded(child: _buildProfileField('Vehicle Number', _vehicleNumberController, textColor, isEditing: _isEditing)),
+-                                  const SizedBox(width: 16),
+-                                  Expanded(child: _buildProfileField('UPI ID', _upiIdController, textColor, isEditing: _isEditing)),
+-                                ],
+-                              ),
+-                            ],
+-                          ),
+-                        ),
+-                      ],
+-                    ),
+-                  ),
+-
+-                  const SizedBox(height: 24),
+-
+-                  // --- HISTORY AND STATUS ---
+-                  Row(
+-                    crossAxisAlignment: CrossAxisAlignment.start,
+-                    children: [
+-                      // History Card
+-                      Expanded(
+-                        child: Container(
+-                          padding: const EdgeInsets.all(24),
+-                          decoration: BoxDecoration(
+-                            color: surfaceColor,
+-                            borderRadius: BorderRadius.circular(16),
+-                            border: Border.all(color: borderColor),
+-                          ),
+-                          child: Column(
+-                            crossAxisAlignment: CrossAxisAlignment.start,
+-                            children: [
+-                              Text('History', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+-                              const SizedBox(height: 16),
+-                              Row(
+-                                children: [
+-                                  _buildStatItem('Total Rides', totalRides.toString(), Icons.route, AppTheme.brandBlue, textColor, text2Color),
+-                                  const SizedBox(width: 32),
+-                                  _buildStatItem('Total Earnings', '₹$totalEarnings', Icons.account_balance_wallet, AppTheme.success, textColor, text2Color),
+-                                ],
+-                              ),
+-                            ],
+-                          ),
+-                        ),
+-                      ),
+-                      const SizedBox(width: 24),
+-                      // Status Card
+-                      Expanded(
+-                        child: Container(
+-                          padding: const EdgeInsets.all(24),
+-                          decoration: BoxDecoration(
+-                            color: surfaceColor,
+-                            borderRadius: BorderRadius.circular(16),
+-                            border: Border.all(color: borderColor),
+-                          ),
+-                          child: Column(
+-                            crossAxisAlignment: CrossAxisAlignment.start,
+-                            children: [
+-                              Text('Account Status', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+-                              const SizedBox(height: 16),
+-                              Row(
+-                                children: [
+-                                  Container(
+-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+-                                    decoration: BoxDecoration(
+-                                      color: isBlk
+-                                          ? AppTheme.danger.withValues(alpha: 0.1)
+-                                          : (isAppr ? AppTheme.success.withValues(alpha: 0.1) : AppTheme.warning.withValues(alpha: 0.1)),
+-                                      borderRadius: BorderRadius.circular(20),
+-                                    ),
+-                                    child: Text(
+-                                      isBlk ? 'Blocked' : (isAppr ? 'Approved' : 'Pending'),
+-                                      style: TextStyle(
+-                                        color: isBlk ? AppTheme.danger : (isAppr ? AppTheme.success : AppTheme.warning),
+-                                        fontWeight: FontWeight.bold,
+-                                      ),
+-                                    ),
+-                                  ),
+-                                  const Spacer(),
+-                                  if (!isAppr && !isBlk)
+-                                    ElevatedButton.icon(
+-                                      onPressed: () => _updateStatus(true, false),
+-                                      icon: const Icon(Icons.check_circle_outline, size: 18),
+-                                      label: const Text('Approve'),
+-                                      style: ElevatedButton.styleFrom(
+-                                        backgroundColor: AppTheme.success,
+-                                        foregroundColor: Colors.white,
+-                                        minimumSize: const Size(0, 40),
+-                                      ),
+-                                    ),
+-                                  if (isAppr && !isBlk)
+-                                    ElevatedButton.icon(
+-                                      onPressed: () => _updateStatus(true, true),
+-                                      icon: const Icon(Icons.block, size: 18),
+-                                      label: const Text('Block'),
+-                                      style: ElevatedButton.styleFrom(
+-                                        backgroundColor: AppTheme.danger,
+-                                        foregroundColor: Colors.white,
+-                                        minimumSize: const Size(0, 40),
+-                                      ),
+-                                    ),
+-                                  if (isBlk)
+-                                    ElevatedButton.icon(
+-                                      onPressed: () => _updateStatus(true, false),
+-                                      icon: const Icon(Icons.lock_open, size: 18),
+-                                      label: const Text('Unblock'),
+-                                      style: ElevatedButton.styleFrom(
+-                                        backgroundColor: AppTheme.success,
+-                                        foregroundColor: Colors.white,
+-                                        minimumSize: const Size(0, 40),
+-                                      ),
+-                                    ),
+-                                ],
+-                              ),
+-                            ],
+-                          ),
+-                        ),
+-                      ),
+-                    ],
+-                  ),
+-
++                  LayoutBuilder(
++                    builder: (context, constraints) {
++                      final isMobile = constraints.maxWidth < 800;
++                      
++                      return Column(
++                        crossAxisAlignment: CrossAxisAlignment.start,
++                        children: [
++                          // --- PROFILE HEADER CARD ---
++                          Container(
++                            padding: const EdgeInsets.all(24),
++                            decoration: BoxDecoration(
++                              color: surfaceColor,
++                              borderRadius: BorderRadius.circular(16),
++                              border: Border.all(color: borderColor),
++                            ),
++                            child: Flex(
++                              direction: isMobile ? Axis.vertical : Axis.horizontal,
++                              crossAxisAlignment: isMobile ? CrossAxisAlignment.center : CrossAxisAlignment.start,
++                              children: [
++                                // Selfie
++                                GestureDetector(
++                                  onTap: () {
++                                    if (selfieUrl != null && selfieUrl.isNotEmpty) {
++                                      _showImagePreview('Profile Photo', selfieUrl);
++                                    }
++                                  },
++                                  child: Container(
++                                    width: 120,
++                                    height: 120,
++                                    decoration: BoxDecoration(
++                                      color: isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2,
++                                      borderRadius: BorderRadius.circular(16),
++                                      border: Border.all(color: borderColor),
++                                    ),
++                                    child: (selfieUrl != null && selfieUrl.isNotEmpty)
++                                        ? ClipRRect(
++                                            borderRadius: BorderRadius.circular(16),
++                                            child: Image.network(
++                                              selfieUrl,
++                                              fit: BoxFit.cover,
++                                              loadingBuilder: (context, child, loadingProgress) {
++                                                if (loadingProgress == null) return child;
++                                                return const Center(child: CircularProgressIndicator());
++                                              },
++                                            ),
++                                          )
++                                        : Icon(Icons.person, size: 48, color: text2Color),
++                                  ),
++                                ),
++                                SizedBox(width: isMobile ? 0 : 24, height: isMobile ? 24 : 0),
++                                // Details
++                                Expanded(
++                                  flex: isMobile ? 0 : 1,
++                                  child: Column(
++                                    crossAxisAlignment: isMobile ? CrossAxisAlignment.center : CrossAxisAlignment.start,
++                                    children: [
++                                      _buildProfileField('Name', _nameController, textColor, isEditing: _isEditing),
++                                      const SizedBox(height: 12),
++                                      Wrap(
++                                        spacing: 16,
++                                        runSpacing: 12,
++                                        children: [
++                                          SizedBox(width: isMobile ? double.infinity : 200, child: _buildProfileField('Phone', _phoneController, textColor, isEditing: _isEditing)),
++                                          SizedBox(width: isMobile ? double.infinity : 200, child: _buildProfileField('Vehicle Type', _vehicleTypeController, textColor, isEditing: _isEditing)),
++                                        ],
++                                      ),
++                                      const SizedBox(height: 12),
++                                      Wrap(
++                                        spacing: 16,
++                                        runSpacing: 12,
++                                        children: [
++                                          SizedBox(width: isMobile ? double.infinity : 200, child: _buildProfileField('Vehicle Number', _vehicleNumberController, textColor, isEditing: _isEditing)),
++                                          SizedBox(width: isMobile ? double.infinity : 200, child: _buildProfileField('UPI ID', _upiIdController, textColor, isEditing: _isEditing)),
++                                        ],
++                                      ),
++                                    ],
++                                  ),
++                                ),
++                              ],
++                            ),
++                          ),
++        
++                          const SizedBox(height: 24),
++        
++                          // --- HISTORY AND STATUS ---
++                          Flex(
++                            direction: isMobile ? Axis.vertical : Axis.horizontal,
++                            crossAxisAlignment: CrossAxisAlignment.start,
++                            children: [
++                              // History Card
++                              Expanded(
++                                flex: isMobile ? 0 : 1,
++                                child: Container(
++                                  width: isMobile ? double.infinity : null,
++                                  padding: const EdgeInsets.all(24),
++                                  decoration: BoxDecoration(
++                                    color: surfaceColor,
++                                    borderRadius: BorderRadius.circular(16),
++                                    border: Border.all(color: borderColor),
++                                  ),
++                                  child: Column(
++                                    crossAxisAlignment: CrossAxisAlignment.start,
++                                    children: [
++                                      Text('History', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
++                                      const SizedBox(height: 16),
++                                      Wrap(
++                                        spacing: 32,
++                                        runSpacing: 16,
++                                        children: [
++                                          _buildStatItem('Total Rides', totalRides.toString(), Icons.route, AppTheme.brandBlue, textColor, text2Color),
++                                          _buildStatItem('Total Earnings', '₹$totalEarnings', Icons.account_balance_wallet, AppTheme.success, textColor, text2Color),
++                                        ],
++                                      ),
++                                    ],
++                                  ),
++                                ),
++                              ),
++                              SizedBox(width: isMobile ? 0 : 24, height: isMobile ? 24 : 0),
++                              // Status Card
++                              Expanded(
++                                flex: isMobile ? 0 : 1,
++                                child: Container(
++                                  width: isMobile ? double.infinity : null,
++                                  padding: const EdgeInsets.all(24),
++                                  decoration: BoxDecoration(
++                                    color: surfaceColor,
++                                    borderRadius: BorderRadius.circular(16),
++                                    border: Border.all(color: borderColor),
++                                  ),
++                                  child: Column(
++                                    crossAxisAlignment: CrossAxisAlignment.start,
++                                    children: [
++                                      Text('Account Status', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
++                                      const SizedBox(height: 16),
++                                      Wrap(
++                                        spacing: 16,
++                                        runSpacing: 16,
++                                        crossAxisAlignment: WrapCrossAlignment.center,
++                                        children: [
++                                          Container(
++                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
++                                            decoration: BoxDecoration(
++                                              color: isBlk
++                                                  ? AppTheme.danger.withValues(alpha: 0.1)
++                                                  : (isAppr ? AppTheme.success.withValues(alpha: 0.1) : AppTheme.warning.withValues(alpha: 0.1)),
++                                              borderRadius: BorderRadius.circular(20),
++                                            ),
++                                            child: Text(
++                                              isBlk ? 'Blocked' : (isAppr ? 'Approved' : 'Pending'),
++                                              style: TextStyle(
++                                                color: isBlk ? AppTheme.danger : (isAppr ? AppTheme.success : AppTheme.warning),
++                                                fontWeight: FontWeight.bold,
++                                              ),
++                                            ),
++                                          ),
++                                          if (!isAppr && !isBlk)
++                                            ElevatedButton.icon(
++                                              onPressed: () => _updateStatus(true, false),
++                                              icon: const Icon(Icons.check_circle_outline, size: 18),
++                                              label: const Text('Approve'),
++                                              style: ElevatedButton.styleFrom(
++                                                backgroundColor: AppTheme.success,
++                                                foregroundColor: Colors.white,
++                                                minimumSize: const Size(0, 40),
++                                              ),
++                                            ),
++                                          if (isAppr && !isBlk)
++                                            ElevatedButton.icon(
++                                              onPressed: () => _updateStatus(true, true),
++                                              icon: const Icon(Icons.block, size: 18),
++                                              label: const Text('Block'),
++                                              style: ElevatedButton.styleFrom(
++                                                backgroundColor: AppTheme.danger,
++                                                foregroundColor: Colors.white,
++                                                minimumSize: const Size(0, 40),
++                                              ),
++                                            ),
++                                          if (isBlk)
++                                            ElevatedButton.icon(
++                                              onPressed: () => _updateStatus(true, false),
++                                              icon: const Icon(Icons.lock_open, size: 18),
++                                              label: const Text('Unblock'),
++                                              style: ElevatedButton.styleFrom(
++                                                backgroundColor: AppTheme.success,
++                                                foregroundColor: Colors.white,
++                                                minimumSize: const Size(0, 40),
++                                              ),
++                                            ),
++                                        ],
++                                      ),
++                                    ],
++                                  ),
++                                ),
++                              ),
++                            ],
++                          ),
++                        ],
++                      );
++                    },
++                  ),
+                   const SizedBox(height: 24),

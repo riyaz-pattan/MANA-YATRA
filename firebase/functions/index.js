@@ -1432,6 +1432,20 @@ exports.onRideStatusChanged = functions.firestore
       await admin.database().ref(`ride_declines/${rideId}`).remove();
     }
 
+    // 3. Track driver earnings and rider completed rides when a ride is completed
+    if (before.status !== "completed" && after.status === "completed") {
+      if (after.driverId && after.finalPrice) {
+        await admin.firestore().collection("drivers").doc(after.driverId).update({
+          totalEarnings: admin.firestore.FieldValue.increment(Number(after.finalPrice) || 0)
+        });
+      }
+      if (after.riderId) {
+        await admin.firestore().collection("users").doc(after.riderId).update({
+          totalCompletedRides: admin.firestore.FieldValue.increment(1)
+        });
+      }
+    }
+
     // 3. Status change notifications
     if (before.status !== after.status && after.status !== "expired") {
       if (after.riderId) {
@@ -2962,3 +2976,5 @@ exports.initDashboardStats = functions.https.onRequest(async (req, res) => {
     res.status(500).send('Error seeding stats: ' + e.message);
   }
 });
+
+

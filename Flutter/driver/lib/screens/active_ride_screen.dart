@@ -240,26 +240,27 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     }
 
     if (status == 'started') {
-      if (_ride!['pickup'] != null) {
-        includePoint(
+      LatLng? targetPos = _lastDriverPos;
+      if (targetPos == null && _ride!['pickup'] != null) {
+        targetPos = LatLng(
           (_ride!['pickup']['lat'] as num).toDouble(),
           (_ride!['pickup']['lng'] as num).toDouble(),
         );
       }
-      if (_ride!['drop'] != null) {
-        includePoint(
-          (_ride!['drop']['lat'] as num).toDouble(),
-          (_ride!['drop']['lng'] as num).toDouble(),
+
+      if (targetPos != null) {
+        _mapController?.animateCamera(
+          CameraUpdate.newCameraPosition(
+            CameraPosition(
+              target: targetPos,
+              zoom: 17.5,
+              bearing: 0.0,
+            ),
+          ),
         );
+        _cameraFitted = true;
       }
-      if (_ride!['routeCoordinates'] != null) {
-        for (final c in _ride!['routeCoordinates']) {
-          includePoint(
-            (c['lat'] as num).toDouble(),
-            (c['lng'] as num).toDouble(),
-          );
-        }
-      }
+      return;
     } else {
       if (_ride!['pickup'] != null) {
         includePoint(
@@ -440,13 +441,14 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetContext) {
         return Padding(
-          padding: EdgeInsets.only(
-            left: 20, right: 20, top: 16, bottom: MediaQuery.of(context).padding.bottom + 20,
+          padding: const EdgeInsets.only(
+            left: 20, right: 20, top: 16, bottom: 20,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -597,13 +599,14 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) {
         return Padding(
-          padding: EdgeInsets.only(
-            left: 20, right: 20, top: 24, bottom: MediaQuery.of(context).padding.bottom + 20,
+          padding: const EdgeInsets.only(
+            left: 20, right: 20, top: 24, bottom: 20,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1190,12 +1193,6 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
 
   Widget _buildBottomPanel(String status) {
     return Container(
-      padding: EdgeInsets.fromLTRB(
-        16,
-        12,
-        16,
-        MediaQuery.of(context).padding.bottom + 12,
-      ),
       decoration: BoxDecoration(
         color: AppTheme.bg,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -1208,10 +1205,14 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
           ),
         ],
       ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
             Container(
               width: 40,
               height: 4,
@@ -1430,6 +1431,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
             ],
 
           ],
+        ),
+        ),
         ),
       ),
     );
