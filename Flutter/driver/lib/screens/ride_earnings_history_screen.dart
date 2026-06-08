@@ -21,38 +21,178 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
   String _selectedFilter = 'Today';
   final List<String> _filters = ['Today', 'This Week', 'This Month', 'All Time'];
   int _touchedIndex = -1;
-  Stream<QuerySnapshot>? _ridesStream;
 
   // Calendar State
   DateTime _focusedDay = DateTime.utc(DateTime.now().year, DateTime.now().month, DateTime.now().day);
   DateTime? _selectedDay;
 
+  // Data State
+  bool _isLoading = true;
+  bool _isLoadingMore = false;
+  List<DocumentSnapshot> _rides = [];
+  double _totalEarnings = 0;
+  int _totalRides = 0;
+  
+  // Pagination
+  DocumentSnapshot? _lastDocument;
+  bool _hasMore = true;
+  final int _limit = 20;
+  
+  // Scroll Controller
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
+    _loadData();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      if (_selectedFilter == 'All Time' && !_isLoadingMore && _hasMore) {
+        _loadMoreAllTime();
+      }
+    }
+  }
+
+  Future<void> _loadData() async {
+    setState(() {
+      _isLoading = true;
+      _rides = [];
+      _totalEarnings = 0;
+      _totalRides = 0;
+      _lastDocument = null;
+      _hasMore = true;
+    });
+
     final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      _ridesStream = FirebaseFirestore.instance
+    if (user == null) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    final now = DateTime.now();
+    DateTime? startDate;
+    
+    if (_selectedFilter == 'Today') {
+      startDate = DateTime(now.year, now.month, now.day);
+    } else if (_selectedFilter == 'This Week') {
+      startDate = DateTime(now.year, now.month, now.day).subtract(Duration(days: now.weekday - 1));
+    } else if (_selectedFilter == 'This Month') {
+      startDate = DateTime(now.year, now.month, 1);
+    }
+
+    try {
+      if (_selectedFilter != 'All Time') {
+        // Fetch all rides for bounded timeframe
+        final snapshot = await FirebaseFirestore.instance
+            .collection('rides')
+            .where('driverId', isEqualTo: user.uid)
+            .where('status', isEqualTo: 'completed')
+            .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate!))
+            .orderBy('completedAt', descending: true)
+            .get();
+
+        _rides = snapshot.docs;
+        _totalRides = _rides.length;
+        _totalEarnings = 0;
+        
+        for (var doc in _rides) {
+          final data = doc.data() as Map<String, dynamic>;
+          final fareStr = (data['finalPrice'] ?? data['riderBid'] ?? 0).toString();
+          _totalEarnings += double.tryParse(fareStr) ?? 0.0;
+        }
+      } else {
+        // All Time: Use aggregation for totals, pagination for list
+        final baseQuery = FirebaseFirestore.instance
+            .collection('rides')
+            .where('driverId', isEqualTo: user.uid)
+            .where('status', isEqualTo: 'completed');
+            
+        // 1. Get Totals via Aggregation
+        final aggSnapshot = await baseQuery.aggregate(
+          sum('finalPrice'),
+          count(),
+        ).get();
+        
+        _totalEarnings = aggSnapshot.getSum('finalPrice') ?? 0.0;
+        _totalRides = aggSnapshot.count ?? 0;
+        
+        // 2. Fetch first page of rides
+        final snapshot = await baseQuery
+            .orderBy('completedAt', descending: true)
+            .limit(_limit)
+            .get();
+            
+        _rides = snapshot.docs;
+        if (_rides.isNotEmpty) {
+          _lastDocument = _rides.last;
+        }
+        if (_rides.length < _limit) {
+          _hasMore = false;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading earnings: $e');
+    }
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadMoreAllTime() async {
+    if (!_hasMore || _isLoadingMore || _lastDocument == null) return;
+    
+    setState(() => _isLoadingMore = true);
+    
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
           .collection('rides')
           .where('driverId', isEqualTo: user.uid)
           .where('status', isEqualTo: 'completed')
-          .snapshots();
+          .orderBy('completedAt', descending: true)
+          .startAfterDocument(_lastDocument!)
+          .limit(_limit)
+          .get();
+
+      final newDocs = snapshot.docs;
+      if (newDocs.isNotEmpty) {
+        setState(() {
+          _rides.addAll(newDocs);
+          _lastDocument = newDocs.last;
+          if (newDocs.length < _limit) {
+            _hasMore = false;
+          }
+        });
+      } else {
+        setState(() => _hasMore = false);
+      }
+    } catch (e) {
+      debugPrint('Error loading more rides: $e');
+    }
+    
+    if (mounted) {
+      setState(() => _isLoadingMore = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_ridesStream == null) {
-      return const Scaffold(body: Center(child: Text("Not logged in")));
-    }
-
     return Scaffold(
       backgroundColor: AppTheme.bg,
-      body: StreamBuilder<QuerySnapshot>(
-        stream: _ridesStream,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return Scaffold(
+      body: _isLoading
+          ? Scaffold(
               appBar: AppBar(backgroundColor: AppTheme.bg, elevation: 0),
               body: ListView.separated(
                 padding: const EdgeInsets.all(16),
@@ -60,106 +200,67 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
                 itemBuilder: (_, __) => const RideHistoryCardSkeleton(),
               ),
-            );
-          }
-
-          if (snapshot.hasError) {
-            return Center(child: Text('Error loading history: ${snapshot.error}'));
-          }
-
-          final allDocs = snapshot.data?.docs.toList() ?? [];
-          final now = DateTime.now();
-
-          // Filter documents
-          final filteredDocs = allDocs.where((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            final timestamp = (data['completedAt'] ?? data['createdAt']) as Timestamp?;
-            if (timestamp == null) return false;
-            final dt = timestamp.toDate().toLocal();
-
-            if (_selectedFilter == 'Today') {
-              return dt.year == now.year && dt.month == now.month && dt.day == now.day;
-            } else if (_selectedFilter == 'This Week') {
-              final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
-              return dt.isAfter(DateTime(startOfWeek.year, startOfWeek.month, startOfWeek.day)) || 
-                     (dt.year == startOfWeek.year && dt.month == startOfWeek.month && dt.day == startOfWeek.day);
-            } else if (_selectedFilter == 'This Month') {
-              return dt.year == now.year && dt.month == now.month;
-            }
-            return true; // All Time
-          }).toList();
-
-          filteredDocs.sort((a, b) {
-            final aData = a.data() as Map<String, dynamic>;
-            final bData = b.data() as Map<String, dynamic>;
-            final aTime = (aData['completedAt'] ?? aData['createdAt']) as Timestamp?;
-            final bTime = (bData['completedAt'] ?? bData['createdAt']) as Timestamp?;
-            if (aTime == null && bTime == null) return 0;
-            if (aTime == null) return 1;
-            if (bTime == null) return -1;
-            return bTime.compareTo(aTime);
-          });
-
-          double totalEarnings = 0;
-          for (var doc in filteredDocs) {
-            final data = doc.data() as Map<String, dynamic>;
-            final fareStr = (data['finalPrice'] ?? data['riderBid'] ?? 0).toString();
-            totalEarnings += double.tryParse(fareStr) ?? 0.0;
-          }
-
-          return CustomScrollView(
-            slivers: [
-              SliverAppBar(
-                title: Text('Earnings History', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: AppTheme.text)),
-                backgroundColor: AppTheme.bg,
-                elevation: 0,
-                pinned: true,
-                iconTheme: const IconThemeData(color: AppTheme.text),
-              ),
-              SliverToBoxAdapter(
-                child: Container(
-                  color: AppTheme.bg,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  child: _buildFilters(),
+            )
+          : CustomScrollView(
+              controller: _scrollController,
+              slivers: [
+                SliverAppBar(
+                  title: Text('Earnings History', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: AppTheme.text)),
+                  backgroundColor: AppTheme.bg,
+                  elevation: 0,
+                  pinned: true,
+                  iconTheme: const IconThemeData(color: AppTheme.text),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: Container(
-                  color: AppTheme.bg,
-                  child: Column(
-                    children: [
-                      _buildEarningsSummary(totalEarnings, filteredDocs.length),
-                      if (filteredDocs.isNotEmpty) _buildDataVisualizer(filteredDocs, totalEarnings),
-                      const Divider(color: AppTheme.border, height: 1),
-                    ],
+                SliverToBoxAdapter(
+                  child: Container(
+                    color: AppTheme.bg,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: _buildFilters(),
                   ),
                 ),
-              ),
-              if (filteredDocs.isEmpty)
-                SliverFillRemaining(
-                  child: _buildEmptyState(),
-                )
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.all(16),
-                  sliver: SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        final ride = filteredDocs[index].data() as Map<String, dynamic>;
-                        ride['id'] = filteredDocs[index].id;
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _buildRideCard(ride),
-                        );
-                      },
-                      childCount: filteredDocs.length,
+                SliverToBoxAdapter(
+                  child: Container(
+                    color: AppTheme.bg,
+                    child: Column(
+                      children: [
+                        _buildEarningsSummary(_totalEarnings, _totalRides),
+                        if (_rides.isNotEmpty) _buildDataVisualizer(_rides, _totalEarnings),
+                        const Divider(color: AppTheme.border, height: 1),
+                      ],
                     ),
                   ),
                 ),
-            ],
-          );
-        },
-      ),
+                if (_rides.isEmpty)
+                  SliverFillRemaining(
+                    child: _buildEmptyState(),
+                  )
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.all(16),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          if (index == _rides.length) {
+                            return const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(16.0),
+                                child: CircularProgressIndicator(),
+                              ),
+                            );
+                          }
+                          final ride = _rides[index].data() as Map<String, dynamic>;
+                          ride['id'] = _rides[index].id;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _buildRideCard(ride),
+                          );
+                        },
+                        childCount: _rides.length + (_isLoadingMore ? 1 : 0),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
     );
   }
 
@@ -186,13 +287,14 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: isSelected ? AppTheme.primary : AppTheme.border)),
               showCheckmark: false,
               onSelected: (selected) {
-                if (selected) {
+                if (selected && _selectedFilter != filter) {
                   setState(() {
                     _selectedFilter = filter;
                     _touchedIndex = -1; // reset chart touch when filtering
                     _selectedDay = null; // reset calendar selection
-                    _focusedDay = DateTime.utc(DateTime.now().year, DateTime.now().month, DateTime.now().day); // reset calendar focus
+                    _focusedDay = DateTime.utc(DateTime.now().year, DateTime.now().month, DateTime.now().day);
                   });
+                  _loadData(); // Re-fetch on filter change
                 }
               },
             ),
@@ -287,6 +389,7 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
 
   Widget _buildDataVisualizer(List<DocumentSnapshot> docs, double totalEarnings) {
     if (_selectedFilter == 'Today') return const SizedBox(height: 16);
+    if (_selectedFilter == 'All Time') return const SizedBox(height: 16); // No visualizer for all time
     if (_selectedFilter == 'This Week') return _buildDynamicChart(docs);
     return _buildCalendarView(docs);
   }
@@ -297,7 +400,9 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
 
     for (var doc in docs) {
       final data = doc.data() as Map<String, dynamic>;
-      final dt = ((data['completedAt'] ?? data['createdAt']) as Timestamp).toDate().toLocal();
+      final timestamp = (data['completedAt'] ?? data['createdAt']) as Timestamp?;
+      if (timestamp == null) continue;
+      final dt = timestamp.toDate().toLocal();
       final fare = double.tryParse((data['finalPrice'] ?? data['riderBid'] ?? 0).toString()) ?? 0;
       final dayIndex = dt.weekday - 1; // 0 = Mon, 6 = Sun
       
@@ -401,7 +506,9 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
     Map<DateTime, Map<String, dynamic>> calendarData = {};
     for (var doc in docs) {
       final data = doc.data() as Map<String, dynamic>;
-      final dt = ((data['completedAt'] ?? data['createdAt']) as Timestamp).toDate().toLocal();
+      final timestamp = (data['completedAt'] ?? data['createdAt']) as Timestamp?;
+      if (timestamp == null) continue;
+      final dt = timestamp.toDate().toLocal();
       final cleanDay = DateTime.utc(dt.year, dt.month, dt.day); // ignore time
       final fare = double.tryParse((data['finalPrice'] ?? data['riderBid'] ?? 0).toString()) ?? 0;
       

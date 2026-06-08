@@ -689,8 +689,11 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     final durationMin = _ride?['actualDurationMin'] ?? _ride?['durationMin'];
 
     final cancelledBy = _ride?['cancelledBy'];
+    final cancelReasonDb = _ride?['cancelReason'];
     String cancelReason = 'The ride was cancelled.';
-    if (cancelledBy == 'driver') {
+    if (cancelReasonDb == 'Admin Force Cancellation') {
+      cancelReason = 'The ride was cancelled by the Admin.';
+    } else if (cancelledBy == 'driver') {
       cancelReason = 'The ride was cancelled by you (Driver).';
     } else if (cancelledBy == 'rider') {
       cancelReason = 'The ride was cancelled by the Rider.';
@@ -859,6 +862,9 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                     child: ElevatedButton(
                       onPressed: () {
                         _confettiController?.stop();
+                        // Clear the active ride state so we don't get stuck here
+                        context.read<DriverProvider>().setActiveRide(null);
+                        
                         Navigator.of(context).pushAndRemoveUntil(
                           MaterialPageRoute(
                             builder: (_) => const AuthGate(),

@@ -29,12 +29,13 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
       ),
       body: user == null
           ? Center(child: Text('Please log in to view tickets', style: GoogleFonts.inter(color: AppTheme.text2)))
-          : StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
+          : FutureBuilder<QuerySnapshot>(
+              future: FirebaseFirestore.instance
                   .collection('support_tickets')
                   .where('uid', isEqualTo: user.uid)
                   .orderBy('createdAt', descending: true)
-                  .snapshots(),
+                  .limit(20)
+                  .get(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());

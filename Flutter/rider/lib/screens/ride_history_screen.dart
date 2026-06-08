@@ -23,6 +23,116 @@ class RideHistoryScreen extends StatefulWidget {
 class _RideHistoryScreenState extends State<RideHistoryScreen> {
   String _selectedFilter = 'All'; // 'All', 'Completed', 'Cancelled'
 
+  bool _isLoading = true;
+  bool _isLoadingMore = false;
+  List<DocumentSnapshot> _rides = [];
+  DocumentSnapshot? _lastDocument;
+  bool _hasMore = true;
+  final int _limit = 15;
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    _loadData();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      if (!_isLoadingMore && _hasMore) {
+        _loadMore();
+      }
+    }
+  }
+
+  Query _buildQuery(String uid) {
+    Query query = FirebaseFirestore.instance
+        .collection('rides')
+        .where('riderId', isEqualTo: uid);
+
+    if (_selectedFilter == 'Completed') {
+      query = query.where('status', isEqualTo: 'completed');
+    } else if (_selectedFilter == 'Cancelled') {
+      query = query.where('status', whereIn: ['cancelled', 'declined']);
+    }
+
+    return query.orderBy('createdAt', descending: true);
+  }
+
+  Future<void> _loadData() async {
+    setState(() {
+      _isLoading = true;
+      _rides = [];
+      _lastDocument = null;
+      _hasMore = true;
+    });
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      final snapshot = await _buildQuery(user.uid).limit(_limit).get();
+      _rides = snapshot.docs;
+      if (_rides.isNotEmpty) {
+        _lastDocument = _rides.last;
+      }
+      if (_rides.length < _limit) {
+        _hasMore = false;
+      }
+    } catch (e) {
+      debugPrint('Error loading rider history: $e');
+    }
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (!_hasMore || _isLoadingMore || _lastDocument == null) return;
+    
+    setState(() => _isLoadingMore = true);
+    
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final snapshot = await _buildQuery(user.uid)
+          .startAfterDocument(_lastDocument!)
+          .limit(_limit)
+          .get();
+
+      final newDocs = snapshot.docs;
+      if (newDocs.isNotEmpty) {
+        setState(() {
+          _rides.addAll(newDocs);
+          _lastDocument = newDocs.last;
+          if (newDocs.length < _limit) {
+            _hasMore = false;
+          }
+        });
+      } else {
+        setState(() => _hasMore = false);
+      }
+    } catch (e) {
+      debugPrint('Error loading more rides: $e');
+    }
+    
+    if (mounted) {
+      setState(() => _isLoadingMore = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -57,72 +167,37 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
           ),
           
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('rides')
-                  .where('riderId', isEqualTo: user.uid)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return ListView.separated(
+            child: _isLoading
+                ? ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: 4,
                     separatorBuilder: (_, __) => const SizedBox(height: 12),
                     itemBuilder: (_, __) => const RideHistoryCardSkeleton(),
-                  );
-                }
-
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error loading history: ${snapshot.error}'));
-                }
-
-                var docs = snapshot.data?.docs.toList() ?? [];
-                
-                // Filter locally
-                if (_selectedFilter != 'All') {
-                  docs = docs.where((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    final status = data['status']?.toString().toLowerCase() ?? '';
-                    if (_selectedFilter == 'Completed') {
-                      return status == 'completed';
-                    } else if (_selectedFilter == 'Cancelled') {
-                      return status == 'cancelled' || status == 'declined';
-                    }
-                    return true;
-                  }).toList();
-                }
-
-                // Sort locally to avoid needing a composite index
-                docs.sort((a, b) {
-                   final aData = a.data() as Map<String, dynamic>;
-                   final bData = b.data() as Map<String, dynamic>;
-                   final aTime = (aData['completedAt'] ?? aData['createdAt']) as Timestamp?;
-                   final bTime = (bData['completedAt'] ?? bData['createdAt']) as Timestamp?;
-                   if (aTime == null && bTime == null) return 0;
-                   if (aTime == null) return 1;
-                   if (bTime == null) return -1;
-                   return bTime.compareTo(aTime);
-                });
-
-                if (docs.isEmpty) {
-                  return _buildEmptyState();
-                }
-
-                return ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 16),
-                  itemCount: docs.length,
-                  separatorBuilder: (_, __) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: Divider(height: 1, color: AppTheme.border.withValues(alpha: 0.5)),
-                  ),
-                  itemBuilder: (context, index) {
-                    final ride = docs[index].data() as Map<String, dynamic>;
-                    ride['id'] = docs[index].id;
-                    return _buildRideCard(ride);
-                  },
-                );
-              },
-            ),
+                  )
+                : _rides.isEmpty
+                    ? _buildEmptyState()
+                    : ListView.separated(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 16),
+                        itemCount: _rides.length + (_isLoadingMore ? 1 : 0),
+                        separatorBuilder: (_, __) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Divider(height: 1, color: AppTheme.border.withValues(alpha: 0.5)),
+                        ),
+                        itemBuilder: (context, index) {
+                          if (index == _rides.length) {
+                            return const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(16.0),
+                                child: CircularProgressIndicator(),
+                              ),
+                            );
+                          }
+                          final ride = _rides[index].data() as Map<String, dynamic>;
+                          ride['id'] = _rides[index].id;
+                          return _buildRideCard(ride);
+                        },
+                      ),
           ),
         ],
       ),
@@ -133,9 +208,12 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
     final isSelected = _selectedFilter == label;
     return GestureDetector(
       onTap: () {
-        setState(() {
-          _selectedFilter = label;
-        });
+        if (_selectedFilter != label) {
+          setState(() {
+            _selectedFilter = label;
+          });
+          _loadData();
+        }
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),

@@ -14,12 +14,22 @@ class DriverApprovalsScreen extends ConsumerStatefulWidget {
 }
 
 class _DriverApprovalsScreenState extends ConsumerState<DriverApprovalsScreen> {
-  Future<void> _updateDriverStatus(String uid, String status) async {
+  Future<void> _updateDriverStatus(String uid, String status, {String? reason}) async {
     try {
-      await FirebaseFirestore.instance.collection('drivers').doc(uid).update({
+      final updates = <String, dynamic>{
         'status': status,
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      };
+      if (status == 'rejected') {
+        updates['isRejected'] = true;
+        updates['rejectionReason'] = reason;
+      } else if (status == 'approved') {
+        updates['isApproved'] = true;
+        updates['isRejected'] = false;
+        updates['rejectionReason'] = null;
+      }
+
+      await FirebaseFirestore.instance.collection('drivers').doc(uid).update(updates);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Driver marked as $status')),
@@ -124,9 +134,79 @@ class _DriverApprovalsScreenState extends ConsumerState<DriverApprovalsScreen> {
     );
   }
 
+  void _showRejectionDialog(BuildContext context, String uid, bool isDark) {
+    final bg = isDark ? AppTheme.darkSurface : AppTheme.lightSurface;
+    final textColor = isDark ? AppTheme.darkText : AppTheme.lightText;
+    final reasonController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: bg,
+        title: Text('Reject Driver', style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: textColor)),
+        content: TextField(
+          controller: reasonController,
+          maxLines: 3,
+          style: TextStyle(color: textColor),
+          decoration: const InputDecoration(
+            hintText: 'Enter reason (e.g. Blurry Aadhar card)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.danger, foregroundColor: Colors.white),
+            onPressed: () {
+              if (reasonController.text.trim().isEmpty) return;
+              Navigator.pop(ctx);
+              _updateDriverStatus(uid, 'rejected', reason: reasonController.text.trim());
+            },
+            child: const Text('Confirm Rejection'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showDocumentDialog(BuildContext context, String uid, Map<String, dynamic> data, bool isDark) {
     final bg = isDark ? AppTheme.darkSurface : AppTheme.lightSurface;
     final textColor = isDark ? AppTheme.darkText : AppTheme.lightText;
+    final borderColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
+    
+    final documents = data['documents'] as Map<String, dynamic>? ?? {};
+    final selfieUrl = documents['selfieUrl'] as String?;
+    final aadharUrl = documents['aadharUrl'] as String?;
+    final licenseUrl = documents['licenseUrl'] as String?;
+    final vehicleUrl = documents['vehicleUrl'] as String?;
+
+    Widget buildImageSection(String title, String? url) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 16)),
+          const SizedBox(height: 8),
+          if (url != null && url.isNotEmpty)
+            Container(
+              height: 250,
+              width: double.infinity,
+              decoration: BoxDecoration(border: Border.all(color: borderColor), borderRadius: BorderRadius.circular(8)),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: InteractiveViewer(
+                  child: Image.network(url, fit: BoxFit.contain, loadingBuilder: (ctx, child, progress) {
+                    if (progress == null) return child;
+                    return const Center(child: CircularProgressIndicator());
+                  }, errorBuilder: (ctx, err, stack) => const Center(child: Icon(Icons.broken_image, size: 50, color: Colors.grey))),
+                ),
+              ),
+            )
+          else
+            Text('Not provided', style: TextStyle(color: textColor, fontStyle: FontStyle.italic)),
+          const SizedBox(height: 24),
+        ],
+      );
+    }
 
     showDialog(
       context: context,
@@ -134,19 +214,18 @@ class _DriverApprovalsScreenState extends ConsumerState<DriverApprovalsScreen> {
         backgroundColor: bg,
         title: Text('Driver Documents', style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: textColor)),
         content: SizedBox(
-          width: 500,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Aadhar Number: ${data['aadharNumber'] ?? 'Not provided'}', style: TextStyle(color: textColor)),
-              const SizedBox(height: 8),
-              Text('License Number: ${data['licenseNumber'] ?? 'Not provided'}', style: TextStyle(color: textColor)),
-              const SizedBox(height: 8),
-              Text('Vehicle RC: ${data['rcNumber'] ?? 'Not provided'}', style: TextStyle(color: textColor)),
-              const SizedBox(height: 24),
-              const Text('In a production app, actual document image URLs would be rendered here.'),
-            ],
+          width: 600,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                buildImageSection('Selfie Photo', selfieUrl),
+                buildImageSection('Aadhar Card', aadharUrl),
+                buildImageSection('Driving License', licenseUrl),
+                buildImageSection('Vehicle Photo', vehicleUrl),
+              ],
+            ),
           ),
         ),
         actions: [
@@ -154,7 +233,7 @@ class _DriverApprovalsScreenState extends ConsumerState<DriverApprovalsScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _updateDriverStatus(uid, 'rejected');
+              _showRejectionDialog(context, uid, isDark);
             }, 
             child: const Text('Reject Driver', style: TextStyle(color: AppTheme.danger)),
           ),

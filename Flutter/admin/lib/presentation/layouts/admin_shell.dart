@@ -268,7 +268,7 @@ class _AdminShellState extends ConsumerState<AdminShell>
   }
 
   // ── Sidebar ──
-  Widget _buildSidebar(List<NavItem> items, bool isDark, bool collapsed) {
+  Widget _buildSidebar(List<NavItem> items, bool isDark, bool collapsed, {VoidCallback? onNavItemTapped}) {
     final adminUser = ref.watch(adminUserProvider).valueOrNull;
     final bg = isDark ? AppTheme.sidebarDark : AppTheme.sidebarLight;
     final borderColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
@@ -281,7 +281,8 @@ class _AdminShellState extends ConsumerState<AdminShell>
         color: bg,
         border: Border(right: BorderSide(color: borderColor, width: 1)),
       ),
-      child: Column(
+      child: SafeArea(
+        child: Column(
         children: [
           // ── Logo Area ──
           Container(
@@ -364,14 +365,21 @@ class _AdminShellState extends ConsumerState<AdminShell>
                 ...List.generate(items.length, (i) {
                   final item = items[i];
                   final isActive = widget.selectedIndex == allNavItems.indexOf(item);
-                  return _sidebarNavItem(
-                    item: item,
-                    isActive: isActive,
-                    collapsed: collapsed,
-                    isDark: isDark,
-                    onTap: () => widget.onDestinationSelected(
-                      allNavItems.indexOf(item),
-                    ),
+                  return Column(
+                    children: [
+                      _sidebarNavItem(
+                        item: item,
+                        isActive: isActive,
+                        collapsed: collapsed,
+                        isDark: isDark,
+                        onTap: () {
+                          widget.onDestinationSelected(allNavItems.indexOf(item));
+                          onNavItemTapped?.call();
+                        },
+                      ),
+                      if (i < items.length - 1)
+                        Divider(color: borderColor.withValues(alpha: 0.5), height: 12),
+                    ],
                   );
                 }),
               ],
@@ -386,21 +394,22 @@ class _AdminShellState extends ConsumerState<AdminShell>
             child: Column(
               children: [
                 // Collapse button
-                _sidebarNavItem(
-                  item: const NavItem(
-                    icon: Icons.menu_open_rounded,
-                    activeIcon: Icons.menu_rounded,
-                    label: 'Collapse',
-                    routeKey: '',
+                if (MediaQuery.of(context).size.width >= 768) ...[
+                  _sidebarNavItem(
+                    item: const NavItem(
+                      icon: Icons.menu_open_rounded,
+                      activeIcon: Icons.menu_rounded,
+                      label: 'Collapse',
+                      routeKey: '',
+                    ),
+                    isActive: false,
+                    collapsed: collapsed,
+                    isDark: isDark,
+                    onTap: _toggleSidebar,
+                    customIcon: collapsed ? Icons.menu_rounded : Icons.menu_open_rounded,
                   ),
-                  isActive: false,
-                  collapsed: collapsed,
-                  isDark: isDark,
-                  onTap: _toggleSidebar,
-                  customIcon: collapsed ? Icons.menu_rounded : Icons.menu_open_rounded,
-                ),
-
-                const SizedBox(height: 4),
+                  const SizedBox(height: 4),
+                ],
 
                 // Sign out
                 _sidebarNavItem(
@@ -420,6 +429,7 @@ class _AdminShellState extends ConsumerState<AdminShell>
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -456,7 +466,7 @@ class _AdminShellState extends ConsumerState<AdminShell>
             hoverColor: isActive ? null : hoverBg,
             onTap: onTap,
             child: Container(
-              height: 42,
+              height: 52,
               padding: EdgeInsets.symmetric(horizontal: collapsed ? 0 : 12),
               child: Row(
                 mainAxisAlignment:
@@ -477,7 +487,7 @@ class _AdminShellState extends ConsumerState<AdminShell>
                       child: Text(
                         item.label,
                         style: GoogleFonts.inter(
-                          fontSize: 13,
+                          fontSize: 15,
                           fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                           color: isDanger
                               ? dangerColor
@@ -724,6 +734,14 @@ class _AdminShellState extends ConsumerState<AdminShell>
 
     return Scaffold(
       backgroundColor: isDark ? AppTheme.darkBg : AppTheme.lightBg,
+      drawer: Drawer(
+        backgroundColor: isDark ? AppTheme.sidebarDark : AppTheme.sidebarLight,
+        child: Builder(
+          builder: (drawerContext) => _buildSidebar(items, isDark, false, onNavItemTapped: () {
+            Navigator.of(drawerContext).pop();
+          }),
+        ),
+      ),
       appBar: AppBar(
         backgroundColor: isDark ? AppTheme.darkBg : AppTheme.lightBg2,
         title: Row(

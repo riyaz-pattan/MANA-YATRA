@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:pinput/pinput.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/theme.dart';
+import 'package:sms_autofill/sms_autofill.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -33,6 +34,16 @@ class _LoginScreenState extends State<LoginScreen>
     _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
     _checkIfKickedOut();
+    _printAppHash();
+  }
+
+  Future<void> _printAppHash() async {
+    try {
+      final String appSignature = await SmsAutoFill().getAppSignature;
+      debugPrint("🔍 APP SIGNATURE HASH: $appSignature");
+    } catch (e) {
+      debugPrint("❌ Failed to get app signature: $e");
+    }
   }
 
   Future<void> _checkIfKickedOut() async {

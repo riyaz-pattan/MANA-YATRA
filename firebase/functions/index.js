@@ -4,6 +4,7 @@ const cors = require("cors")({ origin: true });
 const ngeohash = require("ngeohash");
 const crypto = require("crypto");
 const Razorpay = require("razorpay");
+const geofire = require("geofire-common");
 
 admin.initializeApp();
 
@@ -976,43 +977,212 @@ exports.sendBroadcastNotification = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const { title, body, target } = req.body;
+    const { title, body, target, scheduledTime, geofenceLat, geofenceLng, geofenceRadius } = req.body;
 
     if (!title || !body || !target) {
       res.status(400).json({ error: "Missing title, body, or target" });
       return;
     }
+    
+    let geofence = null;
+    if (geofenceLat !== undefined && geofenceLng !== undefined && geofenceRadius !== undefined) {
+      geofence = { lat: geofenceLat, lng: geofenceLng, radiusKm: geofenceRadius };
+    }
 
     try {
-      const topicName = target === "drivers" ? "drivers" : "riders";
-      
-      await admin.messaging().send({
-        topic: topicName,
-        notification: { title, body },
-        data: { type: "broadcast", target },
-      });
+      if (scheduledTime) {
+        await admin.firestore().collection("scheduled_notifications").add({
+          title,
+          body,
+          target,
+          geofence,
+          scheduledTime: admin.firestore.Timestamp.fromDate(new Date(scheduledTime)),
+          status: "pending",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        res.status(200).json({ success: true, message: "Notification scheduled." });
+        return;
+      }
 
-      // Also log the notification to Firestore
-      await admin.firestore().collection("notifications_log").add({
-        title,
-        body,
-        target,
-        sentAt: admin.firestore.FieldValue.serverTimestamp(),
-        method: "topic",
-        topic: topicName,
-      });
+      // Immediate sending logic
+      await _executeNotificationSend(title, body, target, geofence);
 
-      res.status(200).json({
-        success: true,
-        method: "topic",
-        topic: topicName,
-      });
+      res.status(200).json({ success: true });
     } catch (error) {
       console.error("Error sending notification:", error);
       res.status(500).json({ error: error.message });
     }
   });
 });
+
+/**
+ * Helper to execute the actual push notification logic.
+ */
+async function _executeNotificationSend(title, body, target, geofence) {
+  let topicName = null;
+  let tokens = [];
+
+  // Determine base query
+  let query = null;
+  if (target === "users") topicName = "riders"; // Users still use topic for 'All'
+  else if (target === "drivers") query = admin.firestore().collection("drivers"); // All drivers
+  else if (target === "active_drivers") query = admin.firestore().collection("drivers").where("isOnline", "==", true);
+  else if (target === "offline_drivers") query = admin.firestore().collection("drivers").where("isOnline", "==", false);
+  else if (target === "unapproved_drivers") query = admin.firestore().collection("drivers").where("isApproved", "==", false);
+
+  if (target === "drivers" && !geofence) {
+      topicName = "drivers";
+      query = null;
+  }
+
+  if (query) {
+    if (geofence && geofence.lat && geofence.lng && geofence.radiusKm) {
+      const center = [geofence.lat, geofence.lng];
+      const radiusInM = geofence.radiusKm * 1000;
+      const bounds = geofire.geohashQueryBounds(center, radiusInM);
+
+      const promises = [];
+      for (const b of bounds) {
+        const q = query.where("geohash", ">=", b[0]).where("geohash", "<=", b[1]);
+        promises.push(q.get());
+      }
+
+      const snapshots = await Promise.all(promises);
+      snapshots.forEach((snap) => {
+        snap.forEach((doc) => {
+          const data = doc.data();
+          if (data.lat && data.lng) {
+            const distanceInKm = geofire.distanceBetween([data.lat, data.lng], center);
+            if (distanceInKm <= geofence.radiusKm) {
+              if (data.fcmToken) tokens.push(data.fcmToken);
+            }
+          }
+        });
+      });
+    } else {
+      // No geofence, just fetch all tokens for this query
+      const snapshot = await query.get();
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.fcmToken) tokens.push(data.fcmToken);
+      });
+    }
+  }
+
+  tokens = [...new Set(tokens)];
+
+  if (topicName) {
+    await admin.messaging().send({
+      topic: topicName,
+      notification: { title, body },
+      data: { type: "broadcast", target },
+    });
+  } else if (tokens.length > 0) {
+    // Send in batches of 500
+    for (let i = 0; i < tokens.length; i += 500) {
+      const batchTokens = tokens.slice(i, i + 500);
+      await admin.messaging().sendEachForMulticast({
+        tokens: batchTokens,
+        notification: { title, body },
+        data: { type: "broadcast", target },
+      });
+    }
+  }
+
+  // Log to Firestore
+  await admin.firestore().collection("notifications_log").add({
+    title,
+    body,
+    target,
+    geofence: geofence || null,
+    sentAt: admin.firestore.FieldValue.serverTimestamp(),
+    method: topicName ? "topic" : "multicast",
+    topic: topicName || "none",
+    tokenCount: tokens.length,
+  });
+}
+
+/**
+ * processScheduledNotifications
+ * Runs every 5 minutes to send scheduled push notifications.
+ */
+exports.processScheduledNotifications = functions.pubsub.schedule("*/5 * * * *").onRun(async (context) => {
+  const now = admin.firestore.Timestamp.now();
+  const snapshot = await admin.firestore().collection("scheduled_notifications")
+    .where("status", "==", "pending")
+    .where("scheduledTime", "<=", now)
+    .get();
+
+  if (snapshot.empty) return null;
+
+  const batch = admin.firestore().batch();
+  for (const doc of snapshot.docs) {
+    const data = doc.data();
+    try {
+      await _executeNotificationSend(data.title, data.body, data.target, data.geofence);
+      batch.update(doc.ref, {
+        status: "sent",
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      console.error(`Error sending scheduled notification ${doc.id}:`, e);
+      batch.update(doc.ref, {
+        status: "failed",
+        error: e.message,
+      });
+    }
+  }
+
+  await batch.commit();
+  return null;
+});
+
+/**
+ * onSOSResolved
+ * Sends an FCM notification to the rider when their SOS alert is marked as resolved by the admin.
+ */
+exports.onSOSResolved = functions.firestore
+  .document("sos_alerts/{alertId}")
+  .onUpdate(async (change, context) => {
+    const beforeData = change.before.data();
+    const afterData = change.after.data();
+
+    // Check if status changed from 'active' to 'resolved'
+    if (beforeData.status === "active" && afterData.status === "resolved") {
+      const userId = afterData.userId;
+      if (!userId) return null;
+
+      try {
+        const userDoc = await admin.firestore().collection("users").doc(userId).get();
+        if (!userDoc.exists) return null;
+
+        const fcmToken = userDoc.data().fcmToken;
+        if (fcmToken) {
+          await admin.messaging().send({
+            token: fcmToken,
+            notification: {
+              title: "Emergency Alert Closed",
+              body: "Your emergency alert has been closed. If you still need help, please call Support.",
+            },
+            data: { type: "sos_resolved" },
+          });
+
+          // Log the notification
+          await admin.firestore().collection("notifications_log").add({
+            title: "Emergency Alert Closed",
+            body: "Your emergency alert has been closed. If you still need help, please call Support.",
+            targetUserId: userId,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+            method: "token",
+            topic: "none",
+          });
+        }
+      } catch (error) {
+        console.error(`Failed to send SOS resolution notification to user ${userId}:`, error);
+      }
+    }
+    return null;
+  });
 
 /**
  * deleteMyAccount

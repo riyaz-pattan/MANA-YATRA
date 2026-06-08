@@ -23,6 +23,11 @@ class _ReferralScreenState extends State<ReferralScreen>
   bool _loadingCode = true;
   String? _errorMessage;
 
+  // Referral Data State
+  int _referralCount = 0;
+  List<DocumentSnapshot> _referredDrivers = [];
+  bool _loadingReferrals = true;
+
   late AnimationController _giftBounceController;
   late Animation<double> _giftBounceAnimation;
 
@@ -37,12 +42,52 @@ class _ReferralScreenState extends State<ReferralScreen>
       CurvedAnimation(parent: _giftBounceController, curve: Curves.easeInOut),
     );
     _loadReferralCode();
+    _loadReferrals();
   }
 
   @override
   void dispose() {
     _giftBounceController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadReferrals() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    if (mounted) {
+      setState(() => _loadingReferrals = true);
+    }
+
+    try {
+      // 1. Fetch total rewarded count
+      final countSnapshot = await FirebaseFirestore.instance
+          .collection('referrals')
+          .where('referrerDriverId', isEqualTo: uid)
+          .where('status', isEqualTo: 'rewarded')
+          .get();
+
+      // 2. Fetch list of referred drivers (limit to 20 for UI)
+      final driversSnapshot = await FirebaseFirestore.instance
+          .collection('referrals')
+          .where('referrerDriverId', isEqualTo: uid)
+          .orderBy('createdAt', descending: true)
+          .limit(20)
+          .get();
+
+      if (mounted) {
+        setState(() {
+          _referralCount = countSnapshot.docs.length;
+          _referredDrivers = driversSnapshot.docs;
+          _loadingReferrals = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading referrals: $e');
+      if (mounted) {
+        setState(() => _loadingReferrals = false);
+      }
+    }
   }
 
   Future<void> _loadReferralCode() async {
@@ -135,22 +180,29 @@ class _ReferralScreenState extends State<ReferralScreen>
         elevation: 0,
         scrolledUnderElevation: 0.5,
       ),
-      body: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildStatsHeaderCard(),
-            const SizedBox(height: 24),
-            _buildReferralCodeSection(),
-            const SizedBox(height: 24),
-            _buildQrSection(),
-            const SizedBox(height: 28),
-            _buildReferredDriversSection(),
-            const SizedBox(height: 28),
-            _buildHowItWorksSection(),
-          ],
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await _loadReferrals();
+        },
+        color: AppTheme.primary,
+        backgroundColor: Colors.white,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildStatsHeaderCard(),
+              const SizedBox(height: 24),
+              _buildReferralCodeSection(),
+              const SizedBox(height: 24),
+              _buildQrSection(),
+              const SizedBox(height: 28),
+              _buildReferredDriversSection(),
+              const SizedBox(height: 28),
+              _buildHowItWorksSection(),
+            ],
+          ),
         ),
       ),
     );
@@ -158,8 +210,6 @@ class _ReferralScreenState extends State<ReferralScreen>
 
   // ─── Stats Header Card ───────────────────────────────────────────
   Widget _buildStatsHeaderCard() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
@@ -223,30 +273,14 @@ class _ReferralScreenState extends State<ReferralScreen>
                         ),
                       ),
                       const SizedBox(height: 8),
-                      uid == null
-                          ? Text('0',
-                              style: GoogleFonts.inter(
-                                  fontSize: 40,
-                                  fontWeight: FontWeight.w800,
-                                  color: Colors.white))
-                          : StreamBuilder<QuerySnapshot>(
-                              stream: FirebaseFirestore.instance
-                                  .collection('referrals')
-                                  .where('referrerDriverId', isEqualTo: uid)
-                                  .where('status', isEqualTo: 'rewarded')
-                                  .snapshots(),
-                              builder: (context, snapshot) {
-                                final count = snapshot.data?.docs.length ?? 0;
-                                return Text(
-                                  '$count',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 40,
-                                    fontWeight: FontWeight.w800,
-                                    color: Colors.white,
-                                  ),
-                                );
-                              },
-                            ),
+                      Text(
+                        '$_referralCount',
+                        style: GoogleFonts.inter(
+                          fontSize: 40,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
                       const SizedBox(height: 4),
                       Text(
                         'Successful referrals',
@@ -496,60 +530,45 @@ class _ReferralScreenState extends State<ReferralScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Referred Drivers',
-          style: GoogleFonts.inter(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.text,
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Referred Drivers',
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.text,
+              ),
+            ),
+            if (_loadingReferrals)
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+          ],
         ),
         const SizedBox(height: 12),
-        StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('referrals')
-              .where('referrerDriverId', isEqualTo: uid)
-              .orderBy('createdAt', descending: true)
-              .snapshots(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(32),
-                  child: CircularProgressIndicator(
-                      color: AppTheme.primary, strokeWidth: 2.5),
-                ),
-              );
-            }
-
-            if (snapshot.hasError) {
-              return _buildEmptyState();
-            }
-
-            final docs = snapshot.data?.docs ?? [];
-            if (docs.isEmpty) {
-              return _buildEmptyState();
-            }
-
-            return ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: docs.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final data = docs[index].data() as Map<String, dynamic>;
-                return _buildReferralItem(data);
-              },
-            );
-          },
-        ),
+        if (!_loadingReferrals && _referredDrivers.isEmpty)
+          _buildEmptyState()
+        else
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _referredDrivers.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final data = _referredDrivers[index].data() as Map<String, dynamic>;
+              return _buildReferralItem(data);
+            },
+          ),
       ],
     );
   }
 
   Widget _buildReferralItem(Map<String, dynamic> data) {
-    final name =
-        (data['referredDriverName'] as String?) ?? 'New Driver';
+    final name = (data['referredDriverName'] as String?) ?? 'New Driver';
     final status = (data['status'] as String?) ?? 'pending';
     final createdAt = data['createdAt'] as Timestamp?;
     final dateStr = createdAt != null

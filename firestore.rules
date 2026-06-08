@@ -109,8 +109,8 @@ service cloud.firestore {
     match /rides/{rideId} {
       // Existing: any auth user can read
       allow read: if request.auth != null;
-      // Admin write: operations_manager
-      allow write: if hasRole('operations_manager');
+      // Admin write: operations_manager or super_admin
+      allow write: if hasRole('operations_manager') || isSuperAdmin();
       // Existing rider rules: create ride
       allow create: if request.auth.uid == request.resource.data.riderId
         && request.resource.data.keys().hasAll(['riderId', 'status', 'vehicleType', 'pickup', 'drop'])
@@ -210,7 +210,7 @@ service cloud.firestore {
       // Riders/drivers can create SOS alerts
       allow create: if request.auth != null
         && request.resource.data.userId == request.auth.uid
-        && request.resource.data.keys().hasAll(['userId', 'rideId', 'type']);
+        && request.resource.data.keys().hasAll(['userId', 'rideId']);
       // Riders/drivers can read their own SOS alerts
       allow read: if request.auth != null
         && resource.data.userId == request.auth.uid;

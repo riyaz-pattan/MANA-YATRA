@@ -16,6 +16,7 @@
     "cors": "^2.8.5",
     "firebase-admin": "^12.7.0",
     "firebase-functions": "^5.0.0",
+    "geofire-common": "^6.0.0",
     "ngeohash": "^0.6.3",
     "razorpay": "^2.9.0"
   },

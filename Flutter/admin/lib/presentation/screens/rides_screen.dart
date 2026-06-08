@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
-import 'package:intl/intl.dart';
+import '../widgets/ride_live_map.dart';
+import 'ride_pdf_export.dart';
 
 // Provider to manage the selected tab (Live vs History)
 final rideTabProvider = StateProvider<String>((ref) => 'live');
@@ -13,11 +16,248 @@ final rideTabProvider = StateProvider<String>((ref) => 'live');
 // Provider for the currently selected active ride (for map view)
 final selectedRideProvider = StateProvider<String?>((ref) => null);
 
-class RidesScreen extends ConsumerWidget {
+class RidesScreen extends ConsumerStatefulWidget {
   const RidesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<RidesScreen> createState() => _RidesScreenState();
+}
+
+class _RidesScreenState extends ConsumerState<RidesScreen> {
+  static const int _limit = 20;
+
+  // History Pagination State
+  List<DocumentSnapshot> _historyRides = [];
+  bool _isLoadingHistory = false;
+  bool _hasMoreHistory = true;
+  DocumentSnapshot? _lastHistoryDoc;
+  String _searchQuery = '';
+  Set<String> _selectedRideIds = {};
+
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchHistory();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _fetchHistory({bool loadMore = false}) async {
+    if (_isLoadingHistory) return;
+    if (loadMore && !_hasMoreHistory) return;
+
+    setState(() => _isLoadingHistory = true);
+
+    try {
+      Query q = FirebaseFirestore.instance.collection('rides');
+
+      if (_searchQuery.isNotEmpty) {
+        // Simple prefix search for Ride ID (document ID is not queryable via range, but maybe riderId or driverName)
+        // Wait, Firestore doesn't allow searching by document ID using >= / <= easily unless using __name__.
+        // Since we want to search by Ride ID, we can do exactly that if we use __name__
+        q = q
+            .where(FieldPath.documentId, isGreaterThanOrEqualTo: _searchQuery)
+            .where(FieldPath.documentId, isLessThanOrEqualTo: '$_searchQuery\uf8ff');
+      } else {
+        q = q
+            .where('status', whereIn: ['completed', 'cancelled'])
+            .orderBy('createdAt', descending: true);
+      }
+
+      q = q.limit(_limit);
+
+      if (loadMore && _lastHistoryDoc != null) {
+        q = q.startAfterDocument(_lastHistoryDoc!);
+      }
+
+      final snap = await q.get();
+
+      setState(() {
+        if (loadMore) {
+          _historyRides.addAll(snap.docs);
+        } else {
+          _historyRides = snap.docs;
+        }
+        _hasMoreHistory = snap.docs.length == _limit;
+        if (snap.docs.isNotEmpty) {
+          _lastHistoryDoc = snap.docs.last;
+        }
+        _isLoadingHistory = false;
+      });
+    } catch (e) {
+      debugPrint('Error fetching history: $e');
+      setState(() => _isLoadingHistory = false);
+    }
+  }
+
+  void _onSearchChanged(String val) {
+    setState(() {
+      _searchQuery = val.trim();
+      _historyRides.clear();
+      _lastHistoryDoc = null;
+      _hasMoreHistory = true;
+      _selectedRideIds.clear();
+    });
+    _fetchHistory();
+  }
+
+  Future<void> _exportData() async {
+    if (_selectedRideIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No rides selected to export')));
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generating PDF...')));
+    
+    final selectedDocs = _historyRides.where((d) => _selectedRideIds.contains(d.id)).toList();
+    final ridesData = selectedDocs.map((d) => d.data() as Map<String, dynamic>).toList();
+    final ridesIds = selectedDocs.map((d) => d.id).toList();
+
+    await RidePdfExport.generateAndPrint(ridesData, ridesIds);
+  }
+
+  Future<void> _forceCancelRide(String rideId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Force Cancel Ride?'),
+        content: const Text('This will cancel the ride immediately. Use this only if the driver/rider apps are stuck.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('No')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.danger, foregroundColor: Colors.white),
+            child: const Text('Yes, Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await FirebaseFirestore.instance.collection('rides').doc(rideId).update({
+        'status': 'cancelled',
+        'cancelReason': 'Admin Force Cancellation',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      if (mounted) {
+        ref.read(selectedRideProvider.notifier).state = null;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ride cancelled successfully.')));
+      }
+    }
+  }
+
+  void _showRideDetailsModal(String id, Map<String, dynamic> data, bool isDark) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        final textColor = isDark ? AppTheme.darkText : AppTheme.lightText;
+        final text2Color = isDark ? AppTheme.darkText2 : AppTheme.lightText2;
+        final bgColor = isDark ? AppTheme.darkSurface : AppTheme.lightSurface;
+        
+        final createdAt = data['createdAt'] as Timestamp?;
+        final updatedAt = data['updatedAt'] as Timestamp?;
+        final status = data['status'] ?? 'unknown';
+        final driverName = data['driverName'] ?? 'No Driver';
+        final riderId = data['riderId'] ?? '';
+        final driverId = data['driverId'] ?? '';
+        final fare = data['finalPrice']?.toString() ?? '0';
+
+        return Dialog(
+          backgroundColor: bgColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Container(
+            width: 500,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Ride Details', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold, color: textColor)),
+                    IconButton(icon: Icon(Icons.close, color: textColor), onPressed: () => Navigator.pop(context)),
+                  ],
+                ),
+                const Divider(),
+                const SizedBox(height: 16),
+                
+                // Timeline
+                Text('Timeline', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: text2Color)),
+                const SizedBox(height: 8),
+                _buildTimelineRow('Created', createdAt, textColor),
+                _buildTimelineRow('Last Updated', updatedAt, textColor),
+                const SizedBox(height: 16),
+
+                // Participants
+                Text('Participants', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: text2Color)),
+                const SizedBox(height: 8),
+                ListTile(
+                  leading: const CircleAvatar(child: Icon(Icons.person)),
+                  title: Text('Rider ID: $riderId', style: TextStyle(color: textColor, fontSize: 13)),
+                  trailing: IconButton(icon: const Icon(Icons.open_in_new, size: 18), onPressed: () {
+                    Navigator.pop(context);
+                    if (riderId.isNotEmpty) context.push('/rider/$riderId');
+                  }),
+                ),
+                ListTile(
+                  leading: const CircleAvatar(child: Icon(Icons.local_taxi)),
+                  title: Text('Driver: $driverName', style: TextStyle(color: textColor, fontSize: 13)),
+                  subtitle: Text(driverId, style: TextStyle(color: text2Color, fontSize: 11)),
+                  trailing: IconButton(icon: const Icon(Icons.open_in_new, size: 18), onPressed: () {
+                    Navigator.pop(context);
+                    if (driverId.isNotEmpty) context.push('/driver/$driverId');
+                  }),
+                ),
+                const SizedBox(height: 16),
+
+                // Fare
+                Text('Financials', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: text2Color)),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Status', style: TextStyle(color: textColor)),
+                    Text(status.toUpperCase(), style: TextStyle(fontWeight: FontWeight.bold, color: status == 'completed' ? AppTheme.success : AppTheme.danger)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Total Fare', style: TextStyle(color: textColor)),
+                    Text('₹$fare', style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTimelineRow(String label, Timestamp? time, Color textColor) {
+    if (time == null) return const SizedBox();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: textColor, fontSize: 14)),
+          Text(DateFormat('MMM dd, yyyy HH:mm:ss').format(time.toDate()), style: TextStyle(color: textColor, fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
     final tab = ref.watch(rideTabProvider);
     final width = MediaQuery.of(context).size.width;
@@ -40,20 +280,36 @@ class RidesScreen extends ConsumerWidget {
                   color: isDark ? AppTheme.darkText : AppTheme.lightText,
                 ),
               ),
-              OutlinedButton.icon(
-                onPressed: () {},
-                icon: const Icon(Icons.download, size: 16),
-                label: const Text('Export Data'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 40),
+              if (_selectedRideIds.isNotEmpty)
+                Row(
+                  children: [
+                    Text(
+                      '${_selectedRideIds.length} selected',
+                      style: TextStyle(
+                        color: isDark ? AppTheme.darkText2 : AppTheme.lightText2,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    ElevatedButton.icon(
+                      onPressed: _exportData,
+                      icon: const Icon(Icons.picture_as_pdf, size: 16),
+                      label: const Text('Save to PDF'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.brandBlue,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(0, 40),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
             ],
           ),
           const SizedBox(height: 24),
 
-          // ── Tabs ──
-          Row(
+          // ── Tabs (Wrapped for Mobile) ──
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
             children: [
               _TabButton(
                 label: 'Live / Active Rides',
@@ -61,7 +317,6 @@ class RidesScreen extends ConsumerWidget {
                 onTap: () => ref.read(rideTabProvider.notifier).state = 'live',
                 icon: Icons.route,
               ),
-              const SizedBox(width: 12),
               _TabButton(
                 label: 'Ride History',
                 isActive: tab == 'history',
@@ -81,6 +336,8 @@ class RidesScreen extends ConsumerWidget {
   }
 
   Widget _buildLiveLayout(BuildContext context, WidgetRef ref, bool isDark, bool isDesktop) {
+    final activeRideId = ref.watch(selectedRideProvider);
+
     return SizedBox(
       height: 600, // Fixed height for split view
       child: Row(
@@ -106,7 +363,6 @@ class RidesScreen extends ConsumerWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text('Ongoing Rides', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: isDark ? AppTheme.darkText : AppTheme.lightText)),
-                        Icon(Icons.filter_list, size: 20, color: isDark ? AppTheme.darkText2 : AppTheme.lightText2),
                       ],
                     ),
                   ),
@@ -140,13 +396,15 @@ class RidesScreen extends ConsumerWidget {
                           itemBuilder: (context, index) {
                             final doc = rides[index];
                             final data = doc.data() as Map<String, dynamic>;
-                            final isSelected = ref.watch(selectedRideProvider) == doc.id;
+                            final isSelected = activeRideId == doc.id;
                             return _LiveRideCard(
                               id: doc.id,
                               data: data,
                               isSelected: isSelected,
                               isDark: isDark,
                               onTap: () => ref.read(selectedRideProvider.notifier).state = doc.id,
+                              onCancel: () => _forceCancelRide(doc.id),
+                              onInfo: () => _showRideDetailsModal(doc.id, data, isDark),
                             );
                           },
                         );
@@ -160,7 +418,7 @@ class RidesScreen extends ConsumerWidget {
 
           if (isDesktop) const SizedBox(width: 24),
 
-          // Right: Map Placeholder
+          // Right: Adaptive Live Map
           if (isDesktop)
             Expanded(
               flex: 6,
@@ -169,41 +427,69 @@ class RidesScreen extends ConsumerWidget {
                   color: isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
-                  image: const DecorationImage(
-                    image: NetworkImage('https://maps.googleapis.com/maps/api/staticmap?center=17.3850,78.4867&zoom=13&size=800x800&style=feature:all|element:labels.text.fill|color:0x8ec3b9&style=feature:all|element:labels.text.stroke|color:0x1a3646&style=feature:administrative.country|element:geometry.stroke|color:0x4b6878&style=feature:administrative.land_parcel|element:labels.text.fill|color:0x64779e&style=feature:administrative.province|element:geometry.stroke|color:0x4b6878&style=feature:landscape.man_made|element:geometry.stroke|color:0x334e87&style=feature:landscape.natural|element:geometry|color:0x021019&style=feature:poi|element:geometry|color:0x283d6a&style=feature:poi|element:labels.text.fill|color:0x6f9ba5&style=feature:poi|element:labels.text.stroke|color:0x1d2c4d&style=feature:poi.park|element:geometry.fill|color:0x023e58&style=feature:poi.park|element:labels.text.fill|color:0x3C7680&style=feature:road|element:geometry|color:0x304a7d&style=feature:road|element:labels.text.fill|color:0x98a5be&style=feature:road|element:labels.text.stroke|color:0x1d2c4d&style=feature:road.highway|element:geometry|color:0x2c6675&style=feature:road.highway|element:geometry.stroke|color:0x255763&style=feature:road.highway|element:labels.text.fill|color:0xb0d5ce&style=feature:road.highway|element:labels.text.stroke|color:0x023e58&style=feature:transit|element:labels.text.fill|color:0x98a5be&style=feature:transit|element:labels.text.stroke|color:0x1d2c4d&style=feature:transit.line|element:geometry.fill|color:0x283d6a&style=feature:transit.station|element:geometry|color:0x3a4762&style=feature:water|element:geometry|color:0x0e1626&style=feature:water|element:labels.text.fill|color:0x4e6d70&sensor=false'),
-                    fit: BoxFit.cover,
-                  ),
                 ),
-                child: Stack(
-                  children: [
-                    // Simulated overlay for Map view
-                    Container(
-                      decoration: BoxDecoration(
-                        color: isDark ? Colors.black.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    Positioned(
-                      top: 16, right: 16,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
-                          borderRadius: BorderRadius.circular(8),
-                          boxShadow: [
-                            BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10),
-                          ],
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Stack(
+                    children: [
+                      // Render Map Stream
+                      if (activeRideId != null)
+                        StreamBuilder<DocumentSnapshot>(
+                          stream: FirebaseFirestore.instance.collection('rides').doc(activeRideId).snapshots(),
+                          builder: (context, snap) {
+                            if (!snap.hasData || !snap.data!.exists) {
+                              return const Center(child: Text('Ride not found.'));
+                            }
+                            final data = snap.data!.data() as Map<String, dynamic>;
+                            final status = data['status'] as String? ?? '';
+                            
+                            // If the ride was cancelled or completed, clear the map selection
+                            if (status == 'cancelled' || status == 'completed') {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (ref.read(selectedRideProvider) == activeRideId) {
+                                  ref.read(selectedRideProvider.notifier).state = null;
+                                }
+                              });
+                              return Center(
+                                child: Text(
+                                  'Ride was $status. Select another live ride.', 
+                                  style: TextStyle(color: isDark ? AppTheme.darkText2 : AppTheme.lightText2),
+                                ),
+                              );
+                            }
+                            
+                            return RideLiveMap(
+                              rideData: data,
+                              isDark: isDark,
+                            );
+                          },
+                        )
+                      else
+                        Center(child: Text('Select a live ride from the list to track its location.', style: TextStyle(color: isDark ? AppTheme.darkText2 : AppTheme.lightText2))),
+                      
+                      if (activeRideId != null)
+                        Positioned(
+                          top: 16, right: 16,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: [
+                                BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10),
+                              ],
+                            ),
+                            child: Row(
+                              children: [
+                                Container(width: 8, height: 8, decoration: const BoxDecoration(color: AppTheme.success, shape: BoxShape.circle)),
+                                const SizedBox(width: 8),
+                                Text('Live Tracking Active', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? AppTheme.darkText : AppTheme.lightText)),
+                              ],
+                            ),
+                          ),
                         ),
-                        child: Row(
-                          children: [
-                            Container(width: 8, height: 8, decoration: const BoxDecoration(color: AppTheme.success, shape: BoxShape.circle)),
-                            const SizedBox(width: 8),
-                            Text('Live Tracking Active', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? AppTheme.darkText : AppTheme.lightText)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -215,18 +501,30 @@ class RidesScreen extends ConsumerWidget {
   Widget _buildHistoryLayout(BuildContext context, WidgetRef ref, bool isDark, bool isDesktop) {
     final width = MediaQuery.of(context).size.width;
     
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('rides')
-          .where('status', whereIn: ['completed', 'cancelled'])
-          .orderBy('createdAt', descending: true)
-          .limit(100)
-          .snapshots(),
-      builder: (context, snap) {
-        if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-        final rides = snap.data!.docs;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Search Bar
+        SizedBox(
+          width: isDesktop ? 300 : double.infinity,
+          child: TextField(
+            controller: _searchController,
+            onChanged: _onSearchChanged,
+            style: TextStyle(color: isDark ? AppTheme.darkText : AppTheme.lightText),
+            decoration: InputDecoration(
+              hintText: 'Search Ride ID...',
+              hintStyle: TextStyle(color: isDark ? AppTheme.darkText2 : AppTheme.lightText2),
+              prefixIcon: const Icon(Icons.search),
+              filled: true,
+              fillColor: isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
 
-        return Container(
+        // Data Table
+        Container(
           width: double.infinity,
           decoration: BoxDecoration(
             color: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
@@ -239,31 +537,57 @@ class RidesScreen extends ConsumerWidget {
               scrollDirection: Axis.horizontal,
               child: ConstrainedBox(
                 constraints: BoxConstraints(minWidth: width - (isDesktop ? 300 : 32)),
-                child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(
-                    isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2,
-                  ),
-                  dataRowMinHeight: 64,
-                  dataRowMaxHeight: 64,
-                  columns: const [
-                    DataColumn(label: Text('Date & Time')),
-                    DataColumn(label: Text('Ride ID')),
-                    DataColumn(label: Text('Rider / Driver')),
-                    DataColumn(label: Text('Route')),
-                    DataColumn(label: Text('Status')),
-                    DataColumn(label: Text('Fare')),
-                    DataColumn(label: Text('Actions')),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    DataTable(
+                      headingRowColor: WidgetStateProperty.all(isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2),
+                      dataRowMinHeight: 64,
+                      dataRowMaxHeight: 64,
+                      columns: const [
+                        DataColumn(label: Text('')), // Checkbox
+                        DataColumn(label: Text('Date & Time')),
+                        DataColumn(label: Text('Ride ID')),
+                        DataColumn(label: Text('Rider / Driver')),
+                        DataColumn(label: Text('Route')),
+                        DataColumn(label: Text('Status')),
+                        DataColumn(label: Text('Fare')),
+                        DataColumn(label: Text('Actions')),
+                      ],
+                      rows: _historyRides.map((doc) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        return _buildHistoryDataRow(doc.id, data, isDark);
+                      }).toList(),
+                    ),
+                    if (_isLoadingHistory)
+                      const Padding(
+                        padding: EdgeInsets.all(32.0),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
+                    if (!_isLoadingHistory && _historyRides.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(32.0),
+                        child: Center(
+                          child: Text('No ride history found.', style: TextStyle(color: isDark ? AppTheme.darkText2 : AppTheme.lightText2)),
+                        ),
+                      ),
+                    if (!_isLoadingHistory && _hasMoreHistory)
+                      Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Center(
+                          child: TextButton(
+                            onPressed: () => _fetchHistory(loadMore: true),
+                            child: const Text('Load More'),
+                          ),
+                        ),
+                      ),
                   ],
-                  rows: rides.map((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    return _buildHistoryDataRow(doc.id, data, isDark);
-                  }).toList(),
                 ),
               ),
             ),
           ),
-        );
-      },
+        ),
+      ],
     );
   }
 
@@ -288,6 +612,15 @@ class RidesScreen extends ConsumerWidget {
 
     return DataRow(
       cells: [
+        DataCell(Checkbox(
+          value: _selectedRideIds.contains(id),
+          onChanged: (val) {
+            setState(() {
+              if (val == true) _selectedRideIds.add(id);
+              else _selectedRideIds.remove(id);
+            });
+          },
+        )),
         DataCell(Text(dateStr, style: GoogleFonts.inter(color: text2Color, fontSize: 13))),
         DataCell(Text(id.substring(0, 8).toUpperCase(), style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w600, color: textColor))),
         DataCell(Column(
@@ -298,22 +631,25 @@ class RidesScreen extends ConsumerWidget {
             Text('R: ...${riderId.length > 4 ? riderId.substring(riderId.length - 4) : riderId}', style: GoogleFonts.inter(color: text2Color, fontSize: 12)),
           ],
         )),
-        DataCell(Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Row(children: [
-              const Icon(Icons.circle, size: 8, color: AppTheme.success),
-              const SizedBox(width: 4),
-              Expanded(child: Text(pickup, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(fontSize: 12, color: textColor))),
-            ]),
-            const SizedBox(height: 2),
-            Row(children: [
-              const Icon(Icons.location_on, size: 8, color: AppTheme.danger),
-              const SizedBox(width: 4),
-              Expanded(child: Text(drop, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(fontSize: 12, color: textColor))),
-            ]),
-          ],
+        DataCell(SizedBox(
+          width: 160,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(children: [
+                const Icon(Icons.circle, size: 8, color: AppTheme.success),
+                const SizedBox(width: 4),
+                Flexible(child: Text(pickup, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(fontSize: 12, color: textColor))),
+              ]),
+              const SizedBox(height: 2),
+              Row(children: [
+                const Icon(Icons.location_on, size: 8, color: AppTheme.danger),
+                const SizedBox(width: 4),
+                Flexible(child: Text(drop, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(fontSize: 12, color: textColor))),
+              ]),
+            ],
+          ),
         )),
         DataCell(Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -325,7 +661,7 @@ class RidesScreen extends ConsumerWidget {
           icon: const Icon(Icons.receipt_long, size: 20),
           color: AppTheme.info,
           tooltip: 'View Details',
-          onPressed: () {},
+          onPressed: () => _showRideDetailsModal(id, data, isDark),
         )),
       ],
     );
@@ -378,8 +714,18 @@ class _LiveRideCard extends StatelessWidget {
   final bool isSelected;
   final bool isDark;
   final VoidCallback onTap;
+  final VoidCallback onCancel;
+  final VoidCallback onInfo;
 
-  const _LiveRideCard({required this.id, required this.data, required this.isSelected, required this.isDark, required this.onTap});
+  const _LiveRideCard({
+    required this.id, 
+    required this.data, 
+    required this.isSelected, 
+    required this.isDark, 
+    required this.onTap,
+    required this.onCancel,
+    required this.onInfo,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -414,10 +760,20 @@ class _LiveRideCard extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('ID: ${id.substring(0, 8).toUpperCase()}', style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: isDark ? AppTheme.darkText3 : AppTheme.lightText3)),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(4)),
-                  child: Text(status.toUpperCase(), style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: statusColor)),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(4)),
+                      child: Text(status.toUpperCase(), style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: statusColor)),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: onInfo,
+                      child: const Icon(Icons.info_outline, size: 20, color: AppTheme.brandBlue),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -447,7 +803,16 @@ class _LiveRideCard extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('Fare: ₹$fare', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.success)),
-                Icon(Icons.chevron_right, size: 20, color: isDark ? AppTheme.darkText3 : AppTheme.lightText3),
+                // Force Cancel Button
+                TextButton.icon(
+                  onPressed: onCancel,
+                  icon: const Icon(Icons.cancel, size: 16),
+                  label: const Text('Force Cancel'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.danger,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                ),
               ],
             ),
           ],

@@ -96,8 +96,23 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
       bool needsLocalFiltering = false;
 
       if (_searchQuery.isNotEmpty) {
-        q = q.orderBy('createdAt', descending: true).limit(500);
-        needsLocalFiltering = true;
+        // Multi-field search workaround (Phone or Name)
+        final isPhone = int.tryParse(_searchQuery.replaceAll('+', '')) != null;
+        if (isPhone) {
+          q = q
+              .where('phone', isGreaterThanOrEqualTo: _searchQuery)
+              .where('phone', isLessThanOrEqualTo: '$_searchQuery\uf8ff');
+        } else {
+          // Capitalize first letter for common name searches
+          String searchName = _searchQuery;
+          if (searchName.isNotEmpty) {
+            searchName = searchName[0].toUpperCase() + searchName.substring(1);
+          }
+          q = q
+              .where('name', isGreaterThanOrEqualTo: searchName)
+              .where('name', isLessThanOrEqualTo: '$searchName\uf8ff');
+        }
+        needsLocalFiltering = true; // Cannot mix range query with other equalities safely without composite index
       } else {
         q = q.orderBy('createdAt', descending: true);
 
@@ -118,12 +133,12 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
         } else if (_filterStatus == 'blocked') {
           q = q.where('isBlocked', isEqualTo: true);
         }
+      }
 
-        q = q.limit(_limit);
+      q = q.limit(_limit);
 
-        if (loadMore && _lastDocument != null) {
-          q = q.startAfterDocument(_lastDocument!);
-        }
+      if (loadMore && _lastDocument != null) {
+        q = q.startAfterDocument(_lastDocument!);
       }
 
       final snapshot = await q.get();
@@ -131,18 +146,9 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
       List<DocumentSnapshot> docs = snapshot.docs;
 
       if (needsLocalFiltering) {
-        final queryLower = _searchQuery.toLowerCase();
+        // If we used a range query for search, we filter vehicle and status locally
         docs = docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
-          
-          final name = (data['name'] ?? '').toString().toLowerCase();
-          final phone = (data['phone'] ?? '').toString().toLowerCase();
-          final uid = doc.id.toLowerCase();
-          
-          if (!name.contains(queryLower) && !phone.contains(queryLower) && !uid.contains(queryLower)) {
-            return false;
-          }
-
           final vType = data['vehicleType'] ?? 'auto';
           final isAppr =
               data['isApproved'] == true || data['isApproved'] == 'true';
@@ -160,19 +166,15 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
       }
 
       setState(() {
-        if (loadMore && _searchQuery.isEmpty) {
+        if (loadMore) {
           _drivers.addAll(docs);
         } else {
           _drivers = docs;
         }
         
-        if (_searchQuery.isNotEmpty) {
-           _hasMore = false;
-        } else {
-           _hasMore = snapshot.docs.length == _limit;
-           if (snapshot.docs.isNotEmpty) {
-             _lastDocument = snapshot.docs.last;
-           }
+        _hasMore = snapshot.docs.length == _limit;
+        if (snapshot.docs.isNotEmpty) {
+          _lastDocument = snapshot.docs.last;
         }
         _isLoading = false;
       });
@@ -300,7 +302,7 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
                     color: isDark ? AppTheme.darkText : AppTheme.lightText,
                   ),
                   decoration: InputDecoration(
-                    hintText: 'Search Name, Phone, or ID...',
+                    hintText: 'Search Name or Phone...',
                     hintStyle: TextStyle(
                       color: isDark ? AppTheme.darkText2 : AppTheme.lightText2,
                     ),

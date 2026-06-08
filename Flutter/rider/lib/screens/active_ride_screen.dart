@@ -323,8 +323,11 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     final driverUpiId = _ride?['driverUpiId'] as String? ?? '';
 
     final cancelledBy = _ride?['cancelledBy'];
+    final cancelReasonDb = _ride?['cancelReason'];
     String cancelReason = 'The ride was cancelled.';
-    if (cancelledBy == 'driver') {
+    if (cancelReasonDb == 'Admin Force Cancellation') {
+      cancelReason = 'The ride was cancelled by the Admin.';
+    } else if (cancelledBy == 'driver') {
       cancelReason = 'The ride was cancelled by the Driver.';
     } else if (cancelledBy == 'rider') {
       cancelReason = 'The ride was cancelled by you (Rider).';
@@ -1416,6 +1419,25 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                       if (uid != null) {
                         final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
                         final userData = userDoc.data();
+                        
+                        // 1a. Create SOS alert in Firestore for Admin Dashboard
+                        try {
+                          await FirebaseFirestore.instance.collection('sos_alerts').add({
+                            'userId': uid,
+                            'name': userData?['name'] ?? 'Unknown Rider',
+                            'phone': userData?['phone'] ?? '',
+                            'role': 'rider',
+                            'rideId': widget.rideId,
+                            'location': 'Lat: $lat, Lng: $lng',
+                            'lat': lat,
+                            'lng': lng,
+                            'status': 'active',
+                            'createdAt': FieldValue.serverTimestamp(),
+                          });
+                        } catch (e) {
+                          debugPrint('Failed to save SOS to Firestore: $e');
+                        }
+
                         final customContacts = (userData?['emergencyContacts'] as List<dynamic>?) ?? [];
                         
                         if (customContacts.isNotEmpty) {
