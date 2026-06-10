@@ -1022,20 +1022,20 @@ async function _executeNotificationSend(title, body, target, geofence) {
   let topicName = null;
   let tokens = [];
 
-  // Determine base query
-  let query = null;
-  if (target === "users") topicName = "riders"; // Users still use topic for 'All'
-  else if (target === "drivers") query = admin.firestore().collection("drivers"); // All drivers
-  else if (target === "active_drivers") query = admin.firestore().collection("drivers").where("isOnline", "==", true);
-  else if (target === "offline_drivers") query = admin.firestore().collection("drivers").where("isOnline", "==", false);
-  else if (target === "unapproved_drivers") query = admin.firestore().collection("drivers").where("isApproved", "==", false);
+  console.log(`[Notification] Target: ${target}, Geofence: ${geofence ? JSON.stringify(geofence) : 'none'}`);
 
-  if (target === "drivers" && !geofence) {
-      topicName = "drivers";
-      query = null;
+  // Determine base collection for geofencing or targeted queries
+  let collectionRef = null;
+  if (target === "users") collectionRef = admin.firestore().collection("users");
+  else collectionRef = admin.firestore().collection("drivers");
+
+  if (target === "users" && !geofence) {
+    topicName = "riders";
+  } else if (target === "drivers" && !geofence) {
+    topicName = "drivers";
   }
 
-  if (query) {
+  if (collectionRef && !topicName) {
     if (geofence && geofence.lat && geofence.lng && geofence.radiusKm) {
       const center = [geofence.lat, geofence.lng];
       const radiusInM = geofence.radiusKm * 1000;
@@ -1043,7 +1043,7 @@ async function _executeNotificationSend(title, body, target, geofence) {
 
       const promises = [];
       for (const b of bounds) {
-        const q = query.where("geohash", ">=", b[0]).where("geohash", "<=", b[1]);
+        const q = collectionRef.where("geohash", ">=", b[0]).where("geohash", "<=", b[1]);
         promises.push(q.get());
       }
 
@@ -1051,7 +1051,14 @@ async function _executeNotificationSend(title, body, target, geofence) {
       snapshots.forEach((snap) => {
         snap.forEach((doc) => {
           const data = doc.data();
-          if (data.lat && data.lng) {
+          
+          // Verify target conditions locally to avoid missing composite index errors
+          let matchesTarget = true;
+          if (target === "active_drivers" && data.isOnline !== true) matchesTarget = false;
+          if (target === "offline_drivers" && data.isOnline !== false) matchesTarget = false;
+          if (target === "unapproved_drivers" && data.isApproved !== false) matchesTarget = false;
+
+          if (matchesTarget && data.lat && data.lng) {
             const distanceInKm = geofire.distanceBetween([data.lat, data.lng], center);
             if (distanceInKm <= geofence.radiusKm) {
               if (data.fcmToken) tokens.push(data.fcmToken);
@@ -1060,8 +1067,13 @@ async function _executeNotificationSend(title, body, target, geofence) {
         });
       });
     } else {
-      // No geofence, just fetch all tokens for this query
-      const snapshot = await query.get();
+      // No geofence, just fetch tokens via simple query based on target
+      let simpleQuery = collectionRef;
+      if (target === "active_drivers") simpleQuery = simpleQuery.where("isOnline", "==", true);
+      if (target === "offline_drivers") simpleQuery = simpleQuery.where("isOnline", "==", false);
+      if (target === "unapproved_drivers") simpleQuery = simpleQuery.where("isApproved", "==", false);
+
+      const snapshot = await simpleQuery.get();
       snapshot.forEach((doc) => {
         const data = doc.data();
         if (data.fcmToken) tokens.push(data.fcmToken);
@@ -1070,6 +1082,8 @@ async function _executeNotificationSend(title, body, target, geofence) {
   }
 
   tokens = [...new Set(tokens)];
+
+  console.log(`[Notification] Method: ${topicName ? 'topic:' + topicName : 'multicast'}, Tokens found: ${tokens.length}`);
 
   if (topicName) {
     await admin.messaging().send({
@@ -1110,7 +1124,6 @@ exports.processScheduledNotifications = functions.pubsub.schedule("*/5 * * * *")
   const now = admin.firestore.Timestamp.now();
   const snapshot = await admin.firestore().collection("scheduled_notifications")
     .where("status", "==", "pending")
-    .where("scheduledTime", "<=", now)
     .get();
 
   if (snapshot.empty) return null;
@@ -1118,18 +1131,22 @@ exports.processScheduledNotifications = functions.pubsub.schedule("*/5 * * * *")
   const batch = admin.firestore().batch();
   for (const doc of snapshot.docs) {
     const data = doc.data();
-    try {
-      await _executeNotificationSend(data.title, data.body, data.target, data.geofence);
-      batch.update(doc.ref, {
-        status: "sent",
-        sentAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      console.error(`Error sending scheduled notification ${doc.id}:`, e);
-      batch.update(doc.ref, {
-        status: "failed",
-        error: e.message,
-      });
+    
+    // Filter scheduledTime in memory to avoid FAILED_PRECONDITION composite index error
+    if (data.scheduledTime && data.scheduledTime.toMillis() <= now.toMillis()) {
+      try {
+        await _executeNotificationSend(data.title, data.body, data.target, data.geofence);
+        batch.update(doc.ref, {
+          status: "sent",
+          sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } catch (e) {
+        console.error(`Error sending scheduled notification ${doc.id}:`, e);
+        batch.update(doc.ref, {
+          status: "failed",
+          error: e.message,
+        });
+      }
     }
   }
 
@@ -1333,7 +1350,7 @@ exports.onDriverRegistered = functions.firestore
 
 /**
  * onDriverApproved
- * Notifies the driver when their account is approved.
+ * Notifies the driver when their account is approved or rejected.
  */
 exports.onDriverApproved = functions.firestore
   .document("drivers/{driverId}")
@@ -1343,7 +1360,11 @@ exports.onDriverApproved = functions.firestore
 
     const wasApproved = before.isApproved === true || before.isApproved === "true";
     const isApproved = after.isApproved === true || after.isApproved === "true";
+    
+    const wasRejected = before.isRejected === true || before.isRejected === "true";
+    const isRejected = after.isRejected === true || after.isRejected === "true";
 
+    // Handle Approval
     if (!wasApproved && isApproved) {
       await admin.messaging().send({
         topic: `driver_${context.params.driverId}`,
@@ -1447,6 +1468,20 @@ exports.onDriverApproved = functions.firestore
         console.error("[REFERRAL-REWARD] Error processing referral reward:", referralError);
         // Don't throw — referral processing failure should not break the approval notification
       }
+    }
+
+    // Handle Rejection
+    if (!wasRejected && isRejected) {
+      const reason = after.rejectionReason || "Please review your documents and resubmit.";
+      await admin.messaging().send({
+        topic: `driver_${context.params.driverId}`,
+        notification: {
+          title: "Profile Requires Attention",
+          body: `Your profile was rejected: ${reason}`,
+        },
+        data: { type: "driver_rejected" },
+      });
+      console.log(`[DRIVER-REJECTED] Sent rejection notification to driver_${context.params.driverId}`);
     }
   });
 
@@ -3148,3 +3183,60 @@ exports.initDashboardStats = functions.https.onRequest(async (req, res) => {
 });
 
 
+
+// Triggered when feature flags config is updated
+exports.onFeatureFlagUpdate = functions.firestore
+  .document('config/feature_flags')
+  .onUpdate(async (change, context) => {
+    const beforeData = change.before.data() || {};
+    const afterData = change.after.data() || {};
+
+    const maintenanceBefore = beforeData.maintenance_mode === true;
+    const maintenanceAfter = afterData.maintenance_mode === true;
+
+    if (maintenanceBefore !== maintenanceAfter) {
+      let title = '';
+      let body = '';
+
+      if (maintenanceAfter) {
+        title = 'System Upgrades in Progress 🛠️';
+        body = 'We are currently performing scheduled maintenance to bring you a faster and more reliable experience. We will be back online shortly.';
+      } else {
+        title = 'System Online ✅';
+        body = 'Maintenance is complete! The app is now fully functional and ready for use. Thank you for your patience.';
+      }
+
+      const payloadDriver = {
+        topic: 'drivers',
+        notification: {
+          title: title,
+          body: body,
+        },
+        data: {
+          type: 'broadcast',
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        },
+      };
+
+      const payloadRider = {
+        topic: 'riders',
+        notification: {
+          title: title,
+          body: body,
+        },
+        data: {
+          type: 'broadcast',
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        },
+      };
+
+      try {
+        await admin.messaging().send(payloadDriver);
+        await admin.messaging().send(payloadRider);
+        console.log('Successfully sent maintenance mode notifications');
+      } catch (error) {
+        console.error('Error sending maintenance mode notifications:', error);
+      }
+    }
+    return null;
+  });

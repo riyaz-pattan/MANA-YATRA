@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
+import '../../core/services/audit_log_service.dart';
 
 class FeatureFlagsScreen extends ConsumerStatefulWidget {
   const FeatureFlagsScreen({super.key});
@@ -22,6 +23,15 @@ class _FeatureFlagsScreenState extends ConsumerState<FeatureFlagsScreen> {
     });
 
     try {
+      final admin = ref.read(adminUserProvider).valueOrNull;
+      if (true) {
+        await AuditLogService.logAction(
+          action: 'toggled_feature_flag',
+          targetId: key,
+          admin: admin,
+          details: 'Flag $key changed to $value'
+        );
+      }
       await FirebaseFirestore.instance.collection('config').doc('feature_flags').set({
         key: value,
         'updatedAt': FieldValue.serverTimestamp(),

@@ -8,6 +8,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
 import 'user_profile_dialog.dart';
 import 'driver_profile_dialog.dart';
+import '../../../core/services/audit_log_service.dart';
+import '../../../core/providers/auth_provider.dart';
 
 class TicketDetailsDialog extends ConsumerStatefulWidget {
   final Map<String, dynamic> ticketData;
@@ -26,6 +28,15 @@ class _TicketDetailsDialogState extends ConsumerState<TicketDetailsDialog> {
       _isUpdating = true;
     });
     try {
+      final admin = ref.read(adminUserProvider).valueOrNull;
+      if (true) {
+        await AuditLogService.logAction(
+          action: 'updated_ticket_status',
+          targetId: widget.ticketData['id'],
+          admin: admin,
+          details: 'Status changed to $newStatus',
+        );
+      }
       await FirebaseFirestore.instance
           .collection('support_tickets')
           .doc(widget.ticketData['id'])
@@ -120,24 +131,25 @@ class _TicketDetailsDialogState extends ConsumerState<TicketDetailsDialog> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
                                 children: [
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                     decoration: BoxDecoration(color: (isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2), borderRadius: BorderRadius.circular(6)),
                                     child: Text(role.toUpperCase(), style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: role == 'driver' ? AppTheme.brandBlue : AppTheme.success)),
                                   ),
-                                  const SizedBox(width: 8),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                     decoration: BoxDecoration(color: (isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2), borderRadius: BorderRadius.circular(6)),
                                     child: Text(category, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: textColor)),
                                   ),
-                                  const SizedBox(width: 8),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                     decoration: BoxDecoration(color: priorityColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                                     child: Row(
+                                      mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Icon(Icons.circle, size: 8, color: priorityColor),
                                         const SizedBox(width: 6),
@@ -145,7 +157,6 @@ class _TicketDetailsDialogState extends ConsumerState<TicketDetailsDialog> {
                                       ],
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                     decoration: BoxDecoration(
@@ -161,10 +172,12 @@ class _TicketDetailsDialogState extends ConsumerState<TicketDetailsDialog> {
                               const SizedBox(height: 16),
                               Text(subject, style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: textColor)),
                               const SizedBox(height: 8),
-                              Row(
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                crossAxisAlignment: WrapCrossAlignment.center,
                                 children: [
                                   Icon(role == 'driver' ? Icons.local_taxi : Icons.person, size: 16, color: text3Color),
-                                  const SizedBox(width: 8),
                                   InkWell(
                                     onTap: () {
                                       if (t['uid'] != null && t['uid'].toString().isNotEmpty) {
@@ -185,9 +198,8 @@ class _TicketDetailsDialogState extends ConsumerState<TicketDetailsDialog> {
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: 8),
                                   Icon(Icons.calendar_today, size: 14, color: text3Color),
-                                  const SizedBox(width: 6),
                                   Text(date != null ? DateFormat('MMM dd, yyyy • HH:mm').format(date) : '', style: GoogleFonts.inter(fontSize: 13, color: text3Color)),
                                 ],
                               ),
@@ -256,10 +268,13 @@ class _TicketDetailsDialogState extends ConsumerState<TicketDetailsDialog> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                Wrap(
+                                  alignment: WrapAlignment.spaceBetween,
+                                  runSpacing: 8,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
                                   children: [
                                     Text('Ride ID: ${rideId.substring(0, 8).toUpperCase()}', style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w600, color: textColor)),
+                                    const SizedBox(width: 8),
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                       decoration: BoxDecoration(color: AppTheme.brandBlue.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),

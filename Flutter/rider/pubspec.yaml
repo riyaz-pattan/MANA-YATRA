@@ -1,7 +1,7 @@
 name: gaman
 description: "Gaman App - Zero commission rides, fair prices"
 publish_to: 'none'
-version: 1.0.0+15
+version: 1.0.0+19
 
 environment:
   sdk: ^3.9.2
@@ -48,6 +48,7 @@ dependencies:
   pdf: ^3.12.0
   printing: ^5.14.3
   package_info_plus: ^9.0.1
+  flutter_local_notifications: ^17.1.2
 
 dev_dependencies:
   integration_test:
@@ -88,3 +89,4 @@ flutter:
     - assets/images/map_icons/auto.png
     - assets/images/map_icons/bike.png
     - assets/images/landing_illustration.png
+    - assets/images/logo/

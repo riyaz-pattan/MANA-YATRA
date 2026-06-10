@@ -1,219 +1,54 @@
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:pinput/pinput.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:smart_auth/smart_auth.dart';
+with open('/Users/rameez/Desktop/MANA YATRA/Flutter/rider/lib/screens/login_screen.dart', 'r') as f:
+    content = f.read()
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
-  @override
-  State<LoginScreen> createState() => _LoginScreenState();
-}
-
-class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
-  final _phoneController = TextEditingController();
-  final _otpController = TextEditingController();
-  String _step = 'phone';
-  bool _loading = false;
-  String _error = '';
-  String? _verificationId;
-  int? _resendToken;
-  
-  late AnimationController _animController;
-  late Animation<double> _fadeAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    _animController = AnimationController(
-      duration: const Duration(milliseconds: 800),
-      vsync: this,
-    );
-    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
-    _animController.forward();
-    _checkIfKickedOut();
-  }
-
-  Future<void> _checkIfKickedOut() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool('kicked_out') == true) {
-      if (mounted) {
-        setState(() {
-          _error = 'Session expired: Logged in from another device.';
-        });
-      }
-      await prefs.remove('kicked_out');
-    }
-  }
-
-  @override
-  void dispose() {
-    SmartAuth.instance.removeUserConsentApiListener();
-    _phoneController.dispose();
-    _otpController.dispose();
-    _animController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _sendOtp() async {
-    final phone = _phoneController.text.replaceAll(RegExp(r'\D'), '');
-    if (phone.length < 10) {
-      setState(() => _error = 'Enter a valid 10-digit phone number');
-      return;
-    }
-    setState(() {
-      _loading = true;
-      _error = '';
-    });
-    
-    debugPrint('Sending OTP to +91$phone');
-    
-    _listenForSmsConsent();
-
-    try {
-      await FirebaseAuth.instance.verifyPhoneNumber(
-        phoneNumber: '+91$phone',
-        verificationCompleted: (cred) async {
-          // Intentionally handled by sms consent API or manually to prevent race conditions.
-        },
-        verificationFailed: (e) {
-          debugPrint('FirebaseAuth: verificationFailed! Error: ${e.code} - ${e.message}');
-          if (!mounted) return;
-          setState(() {
-            _error = e.message ?? 'Failed to send OTP';
-            _loading = false;
-          });
-        },
-        codeSent: (verificationId, resendToken) {
-          debugPrint('FirebaseAuth: codeSent! verificationId: $verificationId');
-          if (!mounted) return;
-          setState(() {
-            _verificationId = verificationId;
-            _resendToken = resendToken;
-            _step = 'otp';
-            _loading = false;
-          });
-        },
-        codeAutoRetrievalTimeout: (id) {
-          _verificationId = id;
-        },
-        forceResendingToken: _resendToken,
-        timeout: Duration.zero,
-      );
-    } catch (e) {
-      debugPrint('FirebaseAuth: Exception in verifyPhoneNumber: $e');
-      if (!mounted) return;
-      setState(() {
-        _error = 'Failed to send OTP';
-        _loading = false;
-      });
-    }
-  }
-
-  Future<void> _listenForSmsConsent() async {
-    try {
-      final res = await SmartAuth.instance.getSmsWithUserConsentApi();
-      if (res.hasData && mounted) {
-        final code = res.requireData.code;
-        if (code != null && code.length == 6) {
-          setState(() {
-            _otpController.text = code;
-          });
-          
-          // Wait up to 2 seconds if _verificationId is still null (SMS arrived extremely fast)
-          for (int i = 0; i < 10; i++) {
-            if (_verificationId != null) break;
-            await Future.delayed(const Duration(milliseconds: 200));
-          }
-
-          if (_verificationId != null) {
-            _verifyOtp();
-          }
-        }
-      } else if (res.isCanceled) {
-        debugPrint('SmartAuth: User denied SMS consent.');
-      }
-    } catch (e) {
-      debugPrint('SmartAuth: Consent API failed or was interrupted: $e');
-    }
-  }
-
-  Future<void> _verifyOtp() async {
-    if (_otpController.text.length != 6) {
-      setState(() => _error = 'Enter the 6-digit OTP');
-      return;
-    }
-    setState(() {
-      _loading = true;
-      _error = '';
-    });
-    try {
-      final cred = PhoneAuthProvider.credential(
-        verificationId: _verificationId!,
-        smsCode: _otpController.text,
-      );
-
-      await FirebaseAuth.instance.signInWithCredential(cred);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = 'Invalid OTP. Try again.';
-        _loading = false;
-      });
-    }
-  }
-
-  @override
+parts = content.split('  @override\n  Widget build(BuildContext context) {')
+if len(parts) == 2:
+    new_content = parts[0] + """  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
         child: FadeTransition(
           opacity: _fadeAnim,
-          child: CustomScrollView(
-            slivers: [
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-                  child: Column(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 32),
-                // App Logo
+                const SizedBox(height: 48),
                 Center(
-                  child: Image.asset(
-                    'assets/images/logo/foreground.png',
-                    width: 130,
-                    height: 130,
-                    fit: BoxFit.contain,
+                  child: Text(
+                    'GAMAN',
+                    style: GoogleFonts.manrope(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.black,
+                      letterSpacing: 8,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 80),
                 Text(
-                  _step == 'phone' ? 'Welcome to\nGaman Driver.' : 'Verify your\nnumber.',
+                  _step == 'phone' ? 'Enter your number' : 'Verify OTP',
                   style: GoogleFonts.manrope(
-                    fontSize: 42,
-                    fontWeight: FontWeight.w200,
+                    fontSize: 32,
+                    fontWeight: FontWeight.w300,
                     color: Colors.black,
-                    height: 1.1,
-                    letterSpacing: -1.5,
+                    letterSpacing: -1,
                   ),
                 ),
                 const SizedBox(height: 16),
                 Text(
                   _step == 'phone'
-                      ? "Earn fairly, drive freely.\nEnter your mobile number to begin."
-                      : "We've sent a 6-digit security code to\n+91 ${_phoneController.text}.",
+                      ? "We'll send a 6-digit code to verify your account."
+                      : 'Code sent to +91 ${_phoneController.text}',
                   style: GoogleFonts.inter(
                     fontSize: 16,
-                    color: Colors.grey[600],
-                    height: 1.6,
-                    fontWeight: FontWeight.w400,
+                    color: Colors.grey[700],
+                    height: 1.5,
                   ),
                 ),
-                const SizedBox(height: 64),
+                const SizedBox(height: 48),
                 if (_step == 'phone') ...[
                   _buildPhoneInput(),
                   const Spacer(),
@@ -283,12 +118,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
             ),
           ),
         ),
-      ],
-    ),
-  ),
-),
-);
-}
+      ),
+    );
+  }
 
   Widget _buildPhoneInput() {
     return TextField(
@@ -330,7 +162,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     return Pinput(
       length: 6,
       controller: _otpController,
-      autofocus: false, // Disabled so keyboard does not hide the SMS consent popup
+      autofocus: false,
       onChanged: (_) => setState(() {}),
       onCompleted: (_) => _verifyOtp(),
       separatorBuilder: (index) => const SizedBox(width: 8),
@@ -389,7 +221,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           foregroundColor: Colors.white,
           disabledForegroundColor: Colors.grey[500],
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.zero, // Sharp edges as per Monochrome Absolute
+            borderRadius: BorderRadius.zero,
           ),
           elevation: 0,
         ),
@@ -414,3 +246,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     );
   }
 }
+"""
+    with open('/Users/rameez/Desktop/MANA YATRA/Flutter/rider/lib/screens/login_screen.dart', 'w') as f:
+        f.write(new_content)
+    print("Replacement done.")
+else:
+    print("Could not find build method")

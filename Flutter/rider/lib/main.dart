@@ -11,6 +11,7 @@ import 'config/firebase_config.dart';
 import 'config/theme.dart';
 import 'providers/ride_provider.dart';
 import 'providers/connectivity_provider.dart';
+import 'services/pricing_service.dart';
 
 import 'screens/login_screen.dart';
 import 'screens/main_screen.dart';
@@ -18,10 +19,12 @@ import 'screens/profile_setup_screen.dart';
 
 import 'screens/active_ride_screen.dart';
 import 'screens/custom_splash_screen.dart';
+import 'screens/maintenance_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'utils/custom_toast.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'services/action_queue_service.dart';
+import 'services/local_notifications_service.dart';
 import 'services/sync_engine.dart';
 import 'services/error_handler.dart';
 import 'repositories/ride_repository.dart';
@@ -45,6 +48,7 @@ late final SyncEngine syncEngine;
 late final FirestoreRideRepository rideRepository;
 late final FirebaseAuthRepository authRepository;
 late final AnalyticsService analyticsService;
+late final PricingService pricingService;
 
 void main() {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
@@ -93,11 +97,16 @@ class _AppInitializerState extends State<AppInitializer> {
         syncEngine = SyncEngine(actionQueueService);
         syncEngine.start();
 
+        // Initialize pricing service
+        pricingService = PricingService();
+        await pricingService.init();
+
         rideRepository = FirestoreRideRepository(syncEngine: syncEngine);
         authRepository = FirebaseAuthRepository();
         analyticsService = AnalyticsService();
 
         _initFCM();
+        LocalNotificationsService.initialize();
       }(),
     ]);
 
@@ -134,13 +143,17 @@ void _initFCM() {
         return;
       }
 
-      final ctx = navigatorKey.currentContext;
-      if (ctx != null && ctx.mounted) {
-        CustomToast.show(
-          context: ctx,
-          message:
-              '${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}',
-        );
+      if (type == 'broadcast') {
+        LocalNotificationsService.display(message);
+      } else {
+        final ctx = navigatorKey.currentContext;
+        if (ctx != null && ctx.mounted) {
+          CustomToast.show(
+            context: ctx,
+            message:
+                '${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}',
+          );
+        }
       }
     }
   });
@@ -156,21 +169,42 @@ class ManaYatraRiderApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => RideProvider()),
         ChangeNotifierProvider(create: (_) => ConnectivityProvider()),
         ChangeNotifierProvider.value(value: syncEngine),
+        ChangeNotifierProvider.value(value: pricingService),
         Provider<RideRepository>.value(value: rideRepository),
         Provider<AuthRepository>.value(value: authRepository),
       ],
-      child: MaterialApp(
-        scaffoldMessengerKey: rootScaffoldMessengerKey,
-        navigatorKey: navigatorKey,
-        title: 'Gaman - Rider',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.darkTheme,
-        home: UpgradeAlert(
-          showIgnore: true,
-          showLater: true,
-          upgrader: Upgrader(),
-          child: const AuthGate(),
-        ),
+      child: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance.collection('config').doc('feature_flags').snapshots(),
+        builder: (context, configSnap) {
+          final isMaintenance = configSnap.data?.data() != null 
+              && (configSnap.data!.data() as Map<String, dynamic>)['maintenance_mode'] == true;
+
+          return MaterialApp(
+            scaffoldMessengerKey: rootScaffoldMessengerKey,
+            navigatorKey: navigatorKey,
+            title: 'Gaman - Rider',
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.darkTheme,
+            builder: (context, child) {
+              return Consumer<RideProvider>(
+                builder: (context, provider, _) {
+                  final hasActiveRide = provider.persistedRideId != null;
+                  // Lock out if maintenance is ON and the user does NOT have an active ride
+                  if (isMaintenance && !hasActiveRide) {
+                    return const MaintenanceScreen();
+                  }
+                  return child!;
+                },
+              );
+            },
+            home: UpgradeAlert(
+              showIgnore: true,
+              showLater: true,
+              upgrader: Upgrader(),
+              child: const AuthGate(),
+            ),
+          );
+        }
       ),
     );
   }
@@ -219,6 +253,23 @@ class AuthGate extends StatelessWidget {
           // Subscribe to FCM Topics
           FirebaseMessaging.instance.subscribeToTopic('riders');
           FirebaseMessaging.instance.subscribeToTopic('rider_${user.uid}');
+
+          // Save FCM token to Firestore for targeted notifications
+          FirebaseMessaging.instance.getToken().then((token) {
+            if (token != null) {
+              FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+                {'fcmToken': token},
+                SetOptions(merge: true),
+              );
+            }
+          });
+          // Listen for token refreshes
+          FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+            FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+              {'fcmToken': newToken},
+              SetOptions(merge: true),
+            );
+          });
 
           // Check for a persisted active ride (offline startup recovery)
           return Selector<RideProvider, String?>(

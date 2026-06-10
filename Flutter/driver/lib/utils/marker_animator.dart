@@ -43,7 +43,7 @@ class MarkerAnimator {
     _controller?.dispose();
     _controller = AnimationController(
       vsync: vsync,
-      duration: const Duration(milliseconds: 1000), // 1 second interpolation
+      duration: const Duration(milliseconds: 3000), // 3 seconds interpolation
     )..addListener(() {
         final t = _controller!.value;
         final lat = lerpDouble(_startPos!.latitude, _endPos!.latitude, t)!;

@@ -182,7 +182,7 @@ class _NotificationSettingsScreenState extends ConsumerState<NotificationSetting
                   value: _useGeofence,
                   activeColor: AppTheme.brandBlue,
                   contentPadding: EdgeInsets.zero,
-                  onChanged: _targetAudience == 'users' ? null : (val) {
+                  onChanged: (_targetAudience == 'users' || _targetAudience == 'unapproved_drivers') ? null : (val) {
                     setState(() => _useGeofence = val);
                   },
                 ),
@@ -365,7 +365,14 @@ class _NotificationSettingsScreenState extends ConsumerState<NotificationSetting
   Widget _targetChip(String label, String value, bool isDark) {
     final isSelected = _targetAudience == value;
     return GestureDetector(
-      onTap: () => setState(() => _targetAudience = value),
+      onTap: () {
+        setState(() {
+          _targetAudience = value;
+          if (value == 'users' || value == 'unapproved_drivers') {
+            _useGeofence = false;
+          }
+        });
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),

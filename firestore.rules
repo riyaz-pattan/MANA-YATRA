@@ -276,6 +276,16 @@ service cloud.firestore {
     }
 
     // ============================================================
+    // PRICING / GLOBAL CONFIG (config collection)
+    // All authenticated users: R (riders & drivers need pricing config)
+    // Super Admin + Ops Manager: W
+    // ============================================================
+    match /config/{configId} {
+      allow read: if true;
+      allow write: if hasAnyRole(['super_admin', 'operations_manager']);
+    }
+
+    // ============================================================
     // REFERRAL CODES — lookup collection for referral program
     // Authenticated: R | Cloud Functions: W
     // ============================================================

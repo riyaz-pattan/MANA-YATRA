@@ -10,6 +10,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 import '../config/theme.dart';
 import '../config/constants.dart';
+import '../services/pricing_service.dart';
 import '../providers/ride_provider.dart';
 import '../services/google_maps_service.dart';
 import '../utils/map_style.dart';
@@ -807,7 +808,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (mounted) _fitRoute();
     });
 
-    final estimate = AppConstants.estimatePrice(
+    final pricingService = context.read<PricingService>();
+    final estimate = pricingService.estimatePrice(
       route.distanceKm,
       provider.vehicleType,
     );
@@ -1233,7 +1235,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Column(
               children: AppConstants.vehicleTypes.entries.map((entry) {
                 final isSelected = provider.vehicleType == entry.key;
-                final (low, high) = AppConstants.estimatePriceRange(
+                final pricingService = context.read<PricingService>();
+                final (low, high) = pricingService.estimatePriceRange(
                   provider.route!.distanceKm,
                   entry.key,
                 );
@@ -1261,7 +1264,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 return GestureDetector(
                   onTap: () {
                     provider.setVehicleType(entry.key);
-                    final estimate = AppConstants.estimatePrice(
+                    final pricingService = context.read<PricingService>();
+                    final estimate = pricingService.estimatePrice(
                       provider.route!.distanceKm,
                       entry.key,
                     );
@@ -1483,10 +1487,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                     final price = int.tryParse(val);
                                     if (price != null) {
                                       provider.setBidPrice(price);
-                                      final min =
-                                          AppConstants.minFare[provider
-                                              .vehicleType] ??
-                                          20;
+                                      final min = context.read<PricingService>().getMinFare(provider.vehicleType).toInt();
                                       setState(
                                         () => _bidBelowMinimum = price < min,
                                       );

@@ -18,7 +18,7 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
   final _nameController = TextEditingController();
   bool _isAdding = false;
 
-  Future<void> _addContact() async {
+  Future<void> _saveContact({Map<String, dynamic>? oldContact}) async {
     final name = _nameController.text.trim();
     final phone = _phoneController.text.trim();
 
@@ -39,24 +39,38 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
     setState(() => _isAdding = true);
 
     try {
-      final contact = {
+      final newContact = {
         'name': name,
         'phone': phone,
-        'addedAt': DateTime.now().toIso8601String(),
+        'addedAt': oldContact?['addedAt'] ?? DateTime.now().toIso8601String(),
       };
 
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      List contacts = doc.data()?['emergencyContacts'] ?? [];
+
+      if (oldContact != null) {
+        final index = contacts.indexWhere((c) => c['phone'] == oldContact['phone'] && c['name'] == oldContact['name']);
+        if (index != -1) {
+          contacts[index] = newContact;
+        } else {
+          contacts.add(newContact);
+        }
+      } else {
+        contacts.add(newContact);
+      }
+
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
-        'emergencyContacts': FieldValue.arrayUnion([contact])
+        'emergencyContacts': contacts
       });
 
       _nameController.clear();
       _phoneController.clear();
       if (!mounted) return;
       Navigator.pop(context); // Close the bottom sheet
-      CustomToast.show(context: context, message: 'Emergency contact added');
+      CustomToast.show(context: context, message: oldContact == null ? 'Emergency contact added' : 'Emergency contact updated');
     } catch (e) {
       if (!mounted) return;
-      CustomToast.show(context: context, message: 'Failed to add contact', isError: true);
+      CustomToast.show(context: context, message: 'Failed to save contact', isError: true);
     } finally {
       if (mounted) setState(() => _isAdding = false);
     }
@@ -76,7 +90,15 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
     }
   }
 
-  void _showAddBottomSheet() {
+  void _showContactBottomSheet({Map<String, dynamic>? contactToEdit}) {
+    if (contactToEdit != null) {
+      _nameController.text = contactToEdit['name'] ?? '';
+      _phoneController.text = contactToEdit['phone'] ?? '';
+    } else {
+      _nameController.clear();
+      _phoneController.clear();
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -93,7 +115,7 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Add Emergency Contact',
+                contactToEdit == null ? 'Add Emergency Contact' : 'Edit Emergency Contact',
                 style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
@@ -124,10 +146,10 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _isAdding ? null : _addContact,
+                  onPressed: _isAdding ? null : () => _saveContact(oldContact: contactToEdit),
                   child: _isAdding 
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Save Contact'),
+                    : Text(contactToEdit == null ? 'Save Contact' : 'Update Contact'),
                 ),
               ),
             ],
@@ -187,7 +209,7 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
                     ),
                     const SizedBox(height: 32),
                     ElevatedButton.icon(
-                      onPressed: _showAddBottomSheet,
+                      onPressed: () => _showContactBottomSheet(),
                       icon: const Icon(Icons.add),
                       label: const Text('Add Contact'),
                     ),
@@ -223,28 +245,23 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
                   contact['phone'] ?? '',
                   style: GoogleFonts.inter(color: AppTheme.text2, fontSize: 13),
                 ),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline, color: AppTheme.danger, size: 22),
-                  onPressed: () => _removeContact(contact),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined, color: AppTheme.primary, size: 22),
+                      onPressed: () => _showContactBottomSheet(contactToEdit: contact),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: AppTheme.danger, size: 22),
+                      onPressed: () => _removeContact(contact),
+                    ),
+                  ],
                 ),
               );
             },
           );
         },
-      ),
-      floatingActionButton: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
-        builder: (context, snapshot) {
-          final data = snapshot.data?.data() as Map<String, dynamic>?;
-          final contacts = (data?['emergencyContacts'] as List<dynamic>?) ?? [];
-          if (contacts.isEmpty) return const SizedBox();
-          return FloatingActionButton.extended(
-            onPressed: _showAddBottomSheet,
-            backgroundColor: AppTheme.primary,
-            icon: const Icon(Icons.add, color: Colors.white),
-            label: const Text('Add More', style: TextStyle(color: Colors.white)),
-          );
-        }
       ),
     );
   }

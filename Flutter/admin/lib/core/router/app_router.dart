@@ -10,7 +10,6 @@ import '../../presentation/screens/drivers_screen.dart';
 import '../../presentation/screens/users_screen.dart';
 import '../../presentation/screens/rides_screen.dart';
 import '../../presentation/screens/financials_hub_screen.dart';
-import '../../presentation/screens/analytics_screen.dart';
 import '../../presentation/screens/operations_hub_screen.dart';
 import '../../presentation/screens/support_hub_screen.dart';
 import '../../presentation/screens/system_hub_screen.dart';
@@ -53,8 +52,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           else if (location.startsWith('/financials')) selectedIndex = 4;
           else if (location.startsWith('/operations')) selectedIndex = 5;
           else if (location.startsWith('/support')) selectedIndex = 6;
-          else if (location.startsWith('/analytics')) selectedIndex = 7;
-          else if (location.startsWith('/system')) selectedIndex = 8;
+          else if (location.startsWith('/system')) selectedIndex = 7;
 
           return AdminShell(
             selectedIndex: selectedIndex,
@@ -112,10 +110,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: '/support',
             builder: (context, state) => const SupportHubScreen(),
           ),
-          GoRoute(
-            path: '/analytics',
-            builder: (context, state) => const AnalyticsScreen(),
-          ),
+
           GoRoute(
             path: '/system',
             builder: (context, state) => const SystemHubScreen(),

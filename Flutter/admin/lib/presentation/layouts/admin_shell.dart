@@ -65,12 +65,7 @@ const List<NavItem> allNavItems = [
     label: 'Support',
     routeKey: 'support',
   ),
-  NavItem(
-    icon: Icons.analytics_outlined,
-    activeIcon: Icons.analytics_rounded,
-    label: 'Analytics',
-    routeKey: 'analytics',
-  ),
+
   NavItem(
     icon: Icons.settings_outlined,
     activeIcon: Icons.settings_rounded,

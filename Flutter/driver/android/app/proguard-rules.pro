@@ -10,3 +10,6 @@
 -keepclasseswithmembers class * {
   public void onPayment*(...);
 }
+
+# Keep SMS User Consent classes
+-keep class com.google.android.gms.auth.api.phone.** { *; }

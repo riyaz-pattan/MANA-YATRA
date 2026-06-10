@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
 import '../widgets/ticket_details_dialog.dart';
+import '../../core/services/audit_log_service.dart';
 
 class SupportTicketsScreen extends ConsumerStatefulWidget {
   const SupportTicketsScreen({super.key});
@@ -33,6 +34,149 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
     'Other'
   ];
 
+  // Pagination & Counts State
+  List<Map<String, dynamic>> _tickets = [];
+  DocumentSnapshot? _lastDocument;
+  bool _isLoading = false;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+  String _indexError = '';
+  
+  int _openCount = 0;
+  int _inProgressCount = 0;
+  int _resolvedCount = 0;
+  int _closedCount = 0;
+
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchCounts();
+    _fetchInitialTickets();
+    
+    _scrollController.addListener(() {
+      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+        _fetchMoreTickets();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _fetchCounts() async {
+    try {
+      final futures = await Future.wait([
+        FirebaseFirestore.instance.collection('support_tickets').where('status', isEqualTo: 'open').count().get(),
+        FirebaseFirestore.instance.collection('support_tickets').where('status', isEqualTo: 'in_progress').count().get(),
+        FirebaseFirestore.instance.collection('support_tickets').where('status', isEqualTo: 'resolved').count().get(),
+        FirebaseFirestore.instance.collection('support_tickets').where('status', isEqualTo: 'closed').count().get(),
+      ]);
+      if (mounted) {
+        setState(() {
+          _openCount = futures[0].count ?? 0;
+          _inProgressCount = futures[1].count ?? 0;
+          _resolvedCount = futures[2].count ?? 0;
+          _closedCount = futures[3].count ?? 0;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching counts: $e');
+    }
+  }
+
+  Query _buildQuery() {
+    Query q = FirebaseFirestore.instance.collection('support_tickets');
+    
+    q = q.where('status', isEqualTo: _filter);
+
+    if (_roleFilter != 'All Roles') {
+      q = q.where('role', isEqualTo: _roleFilter.toLowerCase());
+    }
+    if (_categoryFilter != 'All Categories') {
+      q = q.where('category', isEqualTo: _categoryFilter);
+    }
+    
+    q = q.orderBy('createdAt', descending: true).limit(20);
+    return q;
+  }
+
+  Future<void> _fetchInitialTickets() async {
+    if (_isLoading) return;
+    setState(() {
+      _isLoading = true;
+      _indexError = '';
+    });
+
+    try {
+      final snap = await _buildQuery().get();
+      if (mounted) {
+        setState(() {
+          _tickets = snap.docs.map((d) {
+            final data = d.data() as Map<String, dynamic>;
+            data['id'] = d.id;
+            return data;
+          }).toList();
+          _lastDocument = snap.docs.isNotEmpty ? snap.docs.last : null;
+          _hasMore = snap.docs.length == 20;
+          _isLoading = false;
+        });
+      }
+    } on FirebaseException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _indexError = e.message ?? 'Unknown Firebase Error';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _indexError = e.toString();
+        });
+      }
+    }
+  }
+
+  Future<void> _fetchMoreTickets() async {
+    if (_isLoadingMore || !_hasMore || _isLoading || _lastDocument == null) return;
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    try {
+      final snap = await _buildQuery().startAfterDocument(_lastDocument!).get();
+      if (mounted) {
+        setState(() {
+          final newTickets = snap.docs.map((d) {
+            final data = d.data() as Map<String, dynamic>;
+            data['id'] = d.id;
+            return data;
+          }).toList();
+          _tickets.addAll(newTickets);
+          _lastDocument = snap.docs.isNotEmpty ? snap.docs.last : _lastDocument;
+          _hasMore = snap.docs.length == 20;
+          _isLoadingMore = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingMore = false;
+        });
+      }
+    }
+  }
+
+  void _onFilterChanged() {
+    _fetchInitialTickets();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
@@ -44,90 +188,123 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
     final textColor = isDark ? AppTheme.darkText : AppTheme.lightText;
     final text3Color = isDark ? AppTheme.darkText3 : AppTheme.lightText3;
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('support_tickets').orderBy('createdAt', descending: true).snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-
-        final allTickets = snapshot.data!.docs.map((d) {
-          final data = d.data() as Map<String, dynamic>;
-          data['id'] = d.id;
-          return data;
-        }).toList();
-
-        final openCount = allTickets.where((d) => d['status'] == 'open').length;
-        final inProgressCount = allTickets.where((d) => d['status'] == 'in_progress').length;
-        final resolvedCount = allTickets.where((d) => d['status'] == 'resolved').length;
-        final closedCount = allTickets.where((d) => d['status'] == 'closed').length;
-
-        final filtered = allTickets.where((d) {
-          if (d['status'] != _filter) return false;
-          if (_roleFilter != 'All Roles') {
-            final r = (d['role'] ?? 'rider').toString().toLowerCase();
-            if (r != _roleFilter.toLowerCase()) return false;
-          }
-          if (_categoryFilter != 'All Categories') {
-            final c = (d['category'] ?? 'General').toString();
-            if (c != _categoryFilter) return false;
-          }
-          return true;
-        }).toList();
-
-        return SingleChildScrollView(
-          padding: EdgeInsets.all(isDesktop ? 32 : 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return SingleChildScrollView(
+      controller: _scrollController,
+      padding: EdgeInsets.all(isDesktop ? 32 : 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Support Tickets', style: GoogleFonts.inter(fontSize: isDesktop ? 24 : 20, fontWeight: FontWeight.w700, color: textColor)),
-              const SizedBox(height: 8),
-              Text('Manage user and driver complaints, disputes, and inquiries.', style: GoogleFonts.inter(fontSize: 14, color: text3Color)),
-              const SizedBox(height: 32),
-
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: border)),
-                child: Row(
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _filterTab('Open', openCount, 'open', isDark),
-                    _filterTab('In Progress', inProgressCount, 'in_progress', isDark),
-                    _filterTab('Resolved', resolvedCount, 'resolved', isDark),
-                    _filterTab('Closed', closedCount, 'closed', isDark),
+                    Text('Support Tickets', style: GoogleFonts.inter(fontSize: isDesktop ? 24 : 20, fontWeight: FontWeight.w700, color: textColor)),
+                    const SizedBox(height: 8),
+                    Text('Manage user and driver complaints, disputes, and inquiries.', style: GoogleFonts.inter(fontSize: 14, color: text3Color)),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildDropdown(_roleOptions, _roleFilter, (val) => setState(() => _roleFilter = val!), bg, border, textColor),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _buildDropdown(_categoryOptions, _categoryFilter, (val) => setState(() => _categoryFilter = val!), bg, border, textColor),
-                  ),
-                ],
+              IconButton(
+                icon: Icon(Icons.refresh, color: AppTheme.brandBlue),
+                onPressed: () {
+                  _fetchCounts();
+                  _fetchInitialTickets();
+                },
+                tooltip: 'Refresh Tickets',
               ),
-              const SizedBox(height: 24),
-
-              if (filtered.isEmpty)
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 60),
-                    child: Column(
-                      children: [
-                        Icon(Icons.check_circle_outline, size: 64, color: AppTheme.success.withValues(alpha: 0.5)),
-                        const SizedBox(height: 16),
-                        Text('No tickets matching filters', style: GoogleFonts.inter(fontSize: 16, color: text3Color)),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                ...filtered.map((t) => _ticketCard(t, isDark, bg, border, textColor, text3Color)),
             ],
           ),
-        );
-      },
+          const SizedBox(height: 32),
+
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: border)),
+            child: Row(
+              children: [
+                _filterTab('Open', _openCount, 'open', isDark),
+                _filterTab('In Progress', _inProgressCount, 'in_progress', isDark),
+                _filterTab('Resolved', _resolvedCount, 'resolved', isDark),
+                _filterTab('Closed', _closedCount, 'closed', isDark),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _buildDropdown(_roleOptions, _roleFilter, (val) {
+                  setState(() => _roleFilter = val!);
+                  _onFilterChanged();
+                }, bg, border, textColor),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _buildDropdown(_categoryOptions, _categoryFilter, (val) {
+                  setState(() => _categoryFilter = val!);
+                  _onFilterChanged();
+                }, bg, border, textColor),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          if (_indexError.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: AppTheme.danger.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.danger)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded, color: AppTheme.danger),
+                      const SizedBox(width: 8),
+                      Text('Database Index Required', style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: AppTheme.danger)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SelectableText(_indexError, style: GoogleFonts.inter(fontSize: 13, color: textColor)),
+                ],
+              ),
+            )
+          else if (_isLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 60),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_tickets.isEmpty)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 60),
+                child: Column(
+                  children: [
+                    Icon(Icons.check_circle_outline, size: 64, color: AppTheme.success.withValues(alpha: 0.5)),
+                    const SizedBox(height: 16),
+                    Text('No tickets matching filters', style: GoogleFonts.inter(fontSize: 16, color: text3Color)),
+                  ],
+                ),
+              ),
+            )
+          else
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _tickets.length + (_hasMore ? 1 : 0),
+              itemBuilder: (context, index) {
+                if (index == _tickets.length) {
+                  return const Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                return _ticketCard(_tickets[index], isDark, bg, border, textColor, text3Color);
+              },
+            ),
+        ],
+      ),
     );
   }
 
@@ -210,24 +387,25 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
                         children: [
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(color: (isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2), borderRadius: BorderRadius.circular(6)),
                             child: Text(role.toUpperCase(), style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: role == 'driver' ? AppTheme.brandBlue : AppTheme.success)),
                           ),
-                          const SizedBox(width: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(color: (isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2), borderRadius: BorderRadius.circular(6)),
                             child: Text(category, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: textColor)),
                           ),
-                          const SizedBox(width: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(color: priorityColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                             child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(Icons.circle, size: 8, color: priorityColor),
                                 const SizedBox(width: 6),
@@ -252,7 +430,13 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
                                 children: [
                                   Icon(Icons.directions_car, size: 14, color: AppTheme.brandBlue),
                                   const SizedBox(width: 4),
-                                  Text('Linked Ride: ${t['rideId']}', style: GoogleFonts.inter(fontSize: 12, color: AppTheme.brandBlue, fontWeight: FontWeight.w600, decoration: TextDecoration.underline, decorationColor: AppTheme.brandBlue)),
+                                  Flexible(
+                                    child: Text(
+                                      'Linked Ride: ${t['rideId']}', 
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.inter(fontSize: 12, color: AppTheme.brandBlue, fontWeight: FontWeight.w600, decoration: TextDecoration.underline, decorationColor: AppTheme.brandBlue)
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -281,7 +465,13 @@ class _SupportTicketsScreenState extends ConsumerState<SupportTicketsScreen> {
                 ),
                 ElevatedButton(
                   onPressed: () => _showTicketDetails(t),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.brandBlue, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.brandBlue,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
                   child: const Text('View & Update'),
                 ),
               ],

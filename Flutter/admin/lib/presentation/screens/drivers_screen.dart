@@ -6,6 +6,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
 import 'driver_pdf_export.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/services/audit_log_service.dart';
 
 class DriversScreen extends ConsumerStatefulWidget {
   const DriversScreen({super.key});
@@ -34,6 +35,7 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
   int _pendingCount = 0;
   int _approvedCount = 0;
   int _blockedCount = 0;
+  int _rejectedCount = 0;
 
   final TextEditingController _searchController = TextEditingController();
 
@@ -64,12 +66,19 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
           .count()
           .get();
 
+      final rejSnap = await db
+          .where('isRejected', isEqualTo: true)
+          .where('isBlocked', isEqualTo: false) // Ensure blocked drivers don't double count if they are also rejected
+          .count()
+          .get();
+
       if (mounted) {
         setState(() {
           _allCount = allSnap.count ?? 0;
           _blockedCount = blkSnap.count ?? 0;
           _approvedCount = apprSnap.count ?? 0;
-          _pendingCount = _allCount - _approvedCount - _blockedCount;
+          _rejectedCount = rejSnap.count ?? 0;
+          _pendingCount = _allCount - _approvedCount - _blockedCount - _rejectedCount;
           if (_pendingCount < 0) _pendingCount = 0;
         });
       }
@@ -126,6 +135,12 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
           q = q
               .where('isApproved', isEqualTo: false)
               .where('isBlocked', isEqualTo: false);
+          needsLocalFiltering = true; // Required to filter out isRejected == true
+        } else if (_filterStatus == 'rejected') {
+          q = q
+              .where('isApproved', isEqualTo: false)
+              .where('isBlocked', isEqualTo: false);
+          needsLocalFiltering = true; // Required to filter for isRejected == true
         } else if (_filterStatus == 'approved') {
           q = q
               .where('isApproved', isEqualTo: true)
@@ -145,8 +160,9 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
 
       List<DocumentSnapshot> docs = snapshot.docs;
 
-      if (needsLocalFiltering) {
-        // If we used a range query for search, we filter vehicle and status locally
+      if (needsLocalFiltering || _filterStatus == 'all') {
+        // If we used a range query for search, or if we need local filtering for status, apply it.
+        // We also filter 'all' locally just to be perfectly safe about state inconsistencies.
         docs = docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           final vType = data['vehicleType'] ?? 'auto';
@@ -154,12 +170,15 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
               data['isApproved'] == true || data['isApproved'] == 'true';
           final isBlk =
               data['isBlocked'] == true || data['isBlocked'] == 'true';
+          final isRej = 
+              data['isRejected'] == true || data['isRejected'] == 'true';
 
           if (_filterVehicle != 'all' && vType != _filterVehicle) return false;
 
-          if (_filterStatus == 'pending' && (isAppr || isBlk)) return false;
+          if (_filterStatus == 'pending' && (isAppr || isBlk || isRej)) return false;
           if (_filterStatus == 'approved' && (!isAppr || isBlk)) return false;
           if (_filterStatus == 'blocked' && !isBlk) return false;
+          if (_filterStatus == 'rejected' && (!isRej || isBlk)) return false;
 
           return true;
         }).toList();
@@ -383,6 +402,14 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
                 ),
                 const SizedBox(width: 8),
                 _FilterTab(
+                  label: 'Rejected',
+                  count: _rejectedCount,
+                  value: 'rejected',
+                  groupValue: _filterStatus,
+                  onTap: () => _setFilterStatus('rejected'),
+                ),
+                const SizedBox(width: 8),
+                _FilterTab(
                   label: 'Blocked',
                   count: _blockedCount,
                   value: 'blocked',
@@ -505,11 +532,15 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
 
     final isAppr = data['isApproved'] == true || data['isApproved'] == 'true';
     final isBlk = data['isBlocked'] == true || data['isBlocked'] == 'true';
+    final isRej = data['isRejected'] == true || data['isRejected'] == 'true';
 
     String status = 'Pending';
     Color statusColor = AppTheme.warning;
     if (isBlk) {
       status = 'Blocked';
+      statusColor = AppTheme.danger;
+    } else if (isRej) {
+      status = 'Rejected';
       statusColor = AppTheme.danger;
     } else if (isAppr) {
       status = 'Approved';
@@ -535,7 +566,16 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
         // Driver Info
         DataCell(
           InkWell(
-            onTap: () => context.push('/driver/$id'),
+            onTap: () async {
+              await context.push('/driver/$id');
+              setState(() {
+                _drivers.clear();
+                _lastDocument = null;
+                _hasMore = true;
+              });
+              _fetchCounts();
+              _fetchDrivers();
+            },
             borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
@@ -653,12 +693,18 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (!isAppr && !isBlk)
+              if (!isAppr && !isBlk && !isRej)
                 IconButton(
                   icon: const Icon(Icons.check_circle_outline, size: 20),
                   color: AppTheme.success,
                   tooltip: 'Approve',
                   onPressed: () {
+                    final admin = ref.read(adminUserProvider).valueOrNull;
+                    AuditLogService.logAction(
+                      action: 'approved_driver',
+                      targetId: id,
+                      admin: admin,
+                    );
                     setState(() {
                       _localMutations[id] = {
                         'isApproved': true,
@@ -672,27 +718,34 @@ class _DriversScreenState extends ConsumerState<DriversScreen> {
                     _fetchCounts(); // Update local counts
                   },
                 ),
-              IconButton(
-                icon: Icon(
-                  isBlk ? Icons.lock_open : Icons.pause_circle_filled,
-                  size: 20,
+              if (!isRej)
+                IconButton(
+                  icon: Icon(
+                    isBlk ? Icons.lock_open : Icons.pause_circle_filled,
+                    size: 20,
+                  ),
+                  color: isBlk ? AppTheme.success : AppTheme.warning,
+                  tooltip: isBlk ? 'Unblock' : 'Suspend 24h',
+                  onPressed: () {
+                    final admin = ref.read(adminUserProvider).valueOrNull;
+                    AuditLogService.logAction(
+                      action: isBlk ? 'unblocked_driver' : 'blocked_driver',
+                      targetId: id,
+                      admin: admin,
+                    );
+                    setState(() {
+                      _localMutations[id] = {
+                        'isBlocked': !isBlk,
+                        'isOnline': false,
+                      };
+                    });
+                    FirebaseFirestore.instance
+                        .collection('drivers')
+                        .doc(id)
+                        .update({'isBlocked': !isBlk, 'isOnline': false});
+                    _fetchCounts();
+                  },
                 ),
-                color: isBlk ? AppTheme.success : AppTheme.warning,
-                tooltip: isBlk ? 'Unblock' : 'Suspend 24h',
-                onPressed: () {
-                  setState(() {
-                    _localMutations[id] = {
-                      'isBlocked': !isBlk,
-                      'isOnline': false,
-                    };
-                  });
-                  FirebaseFirestore.instance
-                      .collection('drivers')
-                      .doc(id)
-                      .update({'isBlocked': !isBlk, 'isOnline': false});
-                  _fetchCounts();
-                },
-              ),
             ],
           ),
         ),

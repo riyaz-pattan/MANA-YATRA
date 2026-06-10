@@ -6,7 +6,6 @@ import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
 import 'sos_alerts_screen.dart';
 import 'notification_settings_screen.dart';
-import 'driver_approvals_screen.dart';
 
 class OperationsHubScreen extends ConsumerWidget {
   const OperationsHubScreen({super.key});
@@ -21,7 +20,7 @@ class OperationsHubScreen extends ConsumerWidget {
     final text3Color = isDark ? AppTheme.darkText3 : AppTheme.lightText3;
 
     return DefaultTabController(
-      length: 3,
+      length: 2,
       child: Scaffold(
         backgroundColor: bg,
         appBar: AppBar(
@@ -40,7 +39,6 @@ class OperationsHubScreen extends ConsumerWidget {
                 tabs: const [
                   Tab(text: 'SOS Alerts'),
                   Tab(text: 'Push Notifications'),
-                  Tab(text: 'Driver Approvals'),
                 ],
               ),
             ),
@@ -50,7 +48,6 @@ class OperationsHubScreen extends ConsumerWidget {
           children: [
             SOSAlertsScreen(),
             NotificationSettingsScreen(),
-            DriverApprovalsScreen(),
           ],
         ),
       ),

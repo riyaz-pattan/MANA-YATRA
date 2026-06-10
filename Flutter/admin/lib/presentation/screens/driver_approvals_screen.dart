@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
+import '../../core/services/audit_log_service.dart';
 
 class DriverApprovalsScreen extends ConsumerStatefulWidget {
   const DriverApprovalsScreen({super.key});
@@ -29,6 +30,14 @@ class _DriverApprovalsScreenState extends ConsumerState<DriverApprovalsScreen> {
         updates['rejectionReason'] = null;
       }
 
+      final admin = ref.read(adminUserProvider).valueOrNull;
+      if (true) {
+        await AuditLogService.logAction(
+          action: status == 'approved' ? 'approved_driver' : 'rejected_driver',
+          targetId: uid,
+          admin: admin,
+        );
+      }
       await FirebaseFirestore.instance.collection('drivers').doc(uid).update(updates);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
+import '../../core/services/audit_log_service.dart';
 
 class DriverProfileScreen extends ConsumerStatefulWidget {
   final String driverId;
@@ -46,6 +47,16 @@ class _DriverProfileScreenState extends ConsumerState<DriverProfileScreen> {
     super.dispose();
   }
 
+  static const List<String> _rejectionReasons = [
+    'Selfie does not match Aadhaar/License photo',
+    'Name does not match documents',
+    'Documents are blurred or unreadable',
+    'Incomplete or missing documents',
+    'Vehicle number not clearly visible',
+    'Aadhaar card details are invalid',
+    'Driving license has expired',
+  ];
+
   void _populateControllers(Map<String, dynamic> data) {
     if (!_isEditing) {
       _nameController.text = data['name'] ?? '';
@@ -60,6 +71,14 @@ class _DriverProfileScreenState extends ConsumerState<DriverProfileScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSaving = true);
     try {
+      final admin = ref.read(adminUserProvider).valueOrNull;
+      if (true) {
+        await AuditLogService.logAction(
+          action: 'updated_driver_profile',
+          targetId: widget.driverId,
+          admin: admin,
+        );
+      }
       await FirebaseFirestore.instance.collection('drivers').doc(widget.driverId).update({
         'name': _nameController.text.trim(),
         'phone': _phoneController.text.trim(),
@@ -86,10 +105,27 @@ class _DriverProfileScreenState extends ConsumerState<DriverProfileScreen> {
 
   Future<void> _updateStatus(bool approve, bool block) async {
     try {
-      await FirebaseFirestore.instance.collection('drivers').doc(widget.driverId).update({
+      final Map<String, dynamic> updateData = {
         'isApproved': approve,
         'isBlocked': block,
-      });
+      };
+      
+      // If we are approving, clear any previous rejection
+      if (approve) {
+        updateData['isRejected'] = false;
+        updateData['rejectionReason'] = null; // Use FieldValue.delete() if preferred, but null works to clear text
+      }
+
+      final admin = ref.read(adminUserProvider).valueOrNull;
+      if (true) {
+        await AuditLogService.logAction(
+          action: 'rejected_driver',
+          targetId: widget.driverId,
+          admin: admin,
+          details: 'Reasons: ${_rejectionReasons.join(", ")}'
+        );
+      }
+      await FirebaseFirestore.instance.collection('drivers').doc(widget.driverId).update(updateData);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Status updated successfully'), backgroundColor: AppTheme.success),
@@ -169,6 +205,145 @@ class _DriverProfileScreenState extends ConsumerState<DriverProfileScreen> {
           ),
         );
       },
+    );
+  }
+
+  void _showRejectionSheet(String driverName, bool isDark) {
+    List<String> selectedReasons = [];
+    final customReasonController = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final isKeyboardOpen = MediaQuery.of(ctx).viewInsets.bottom > 0;
+          return Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * (isKeyboardOpen ? 0.9 : 0.7),
+            ),
+            decoration: BoxDecoration(
+              color: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Reject Documents', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold, color: isDark ? AppTheme.darkText : AppTheme.lightText)),
+                          const SizedBox(height: 4),
+                          Text('Select reasons to notify $driverName', style: GoogleFonts.inter(fontSize: 14, color: isDark ? AppTheme.darkText3 : AppTheme.lightText3)),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close, color: isDark ? AppTheme.darkText3 : AppTheme.lightText3),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                
+                // Reasons List (Scrollable to prevent overflow)
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: _rejectionReasons.map((reason) {
+                      final isSelected = selectedReasons.contains(reason);
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: isSelected 
+                              ? AppTheme.brandBlue.withValues(alpha: 0.1) 
+                              : (isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isSelected ? AppTheme.brandBlue : Colors.transparent,
+                          ),
+                        ),
+                        child: CheckboxListTile(
+                          title: Text(reason, style: GoogleFonts.inter(fontSize: 14, fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500, color: isDark ? AppTheme.darkText : AppTheme.lightText)),
+                          value: isSelected,
+                          activeColor: AppTheme.brandBlue,
+                          checkColor: Colors.white,
+                          side: BorderSide(color: isDark ? AppTheme.darkText3 : AppTheme.lightText3),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          onChanged: (val) {
+                            setSheetState(() {
+                              if (val == true) selectedReasons.add(reason);
+                              else selectedReasons.remove(reason);
+                            });
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                // Custom Reason Field
+                TextField(
+                  controller: customReasonController,
+                  decoration: InputDecoration(
+                    labelText: 'Other reason (optional)',
+                    labelStyle: TextStyle(color: isDark ? AppTheme.darkText3 : AppTheme.lightText3),
+                    filled: true,
+                    fillColor: isDark ? AppTheme.darkSurface2 : AppTheme.lightSurface2,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.brandBlue)),
+                  ),
+                  style: GoogleFonts.inter(color: isDark ? AppTheme.darkText : AppTheme.lightText),
+                ),
+                const SizedBox(height: 24),
+                
+                // Submit Button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: selectedReasons.isEmpty && customReasonController.text.trim().isEmpty ? null : () {
+                      final reasonStr = selectedReasons.join(', ') + (customReasonController.text.isNotEmpty ? ' - ${customReasonController.text}' : '');
+                      final admin = ref.read(adminUserProvider).valueOrNull;
+                      if (true) {
+                        AuditLogService.logAction(
+                          action: 'rejected_driver',
+                          targetId: widget.driverId,
+                          admin: admin,
+                          details: 'Reason: $reasonStr'
+                        );
+                      }
+                      FirebaseFirestore.instance.collection('drivers').doc(widget.driverId).update({
+                        'isRejected': true, 
+                        'isApproved': false, 
+                        'rejectionReason': reasonStr
+                      });
+                      Navigator.pop(ctx);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.danger, 
+                      disabledBackgroundColor: AppTheme.danger.withValues(alpha: 0.3),
+                      foregroundColor: Colors.white, 
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: Text('Confirm Rejection', style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16)),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -265,6 +440,7 @@ class _DriverProfileScreenState extends ConsumerState<DriverProfileScreen> {
 
           final isAppr = data['isApproved'] == true || data['isApproved'] == 'true';
           final isBlk = data['isBlocked'] == true || data['isBlocked'] == 'true';
+          final isRej = data['isRejected'] == true || data['isRejected'] == 'true';
 
           return LayoutBuilder(
             builder: (context, constraints) {
@@ -412,20 +588,30 @@ class _DriverProfileScreenState extends ConsumerState<DriverProfileScreen> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                         decoration: BoxDecoration(
-                                          color: isBlk
+                                          color: isBlk || isRej
                                               ? AppTheme.danger.withValues(alpha: 0.1)
                                               : (isAppr ? AppTheme.success.withValues(alpha: 0.1) : AppTheme.warning.withValues(alpha: 0.1)),
                                           borderRadius: BorderRadius.circular(20),
                                         ),
                                         child: Text(
-                                          isBlk ? 'Blocked' : (isAppr ? 'Approved' : 'Pending'),
+                                          isBlk ? 'Blocked' : (isRej ? 'Rejected' : (isAppr ? 'Approved' : 'Pending')),
                                           style: TextStyle(
-                                            color: isBlk ? AppTheme.danger : (isAppr ? AppTheme.success : AppTheme.warning),
+                                            color: isBlk || isRej ? AppTheme.danger : (isAppr ? AppTheme.success : AppTheme.warning),
                                             fontWeight: FontWeight.bold,
                                           ),
                                         ),
                                       ),
-                                      if (!isAppr && !isBlk)
+                                      if (!isAppr && !isBlk && !isRej) ...[
+                                        ElevatedButton.icon(
+                                          onPressed: () => _showRejectionSheet(data['name'] ?? 'Driver', isDark),
+                                          icon: const Icon(Icons.close, size: 18),
+                                          label: const Text('Reject'),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: AppTheme.danger,
+                                            foregroundColor: Colors.white,
+                                            minimumSize: const Size(0, 40),
+                                          ),
+                                        ),
                                         ElevatedButton.icon(
                                           onPressed: () => _updateStatus(true, false),
                                           icon: const Icon(Icons.check_circle_outline, size: 18),
@@ -436,6 +622,19 @@ class _DriverProfileScreenState extends ConsumerState<DriverProfileScreen> {
                                             minimumSize: const Size(0, 40),
                                           ),
                                         ),
+                                      ],
+                                      if (isRej && !isBlk && !isAppr) ...[
+                                        ElevatedButton.icon(
+                                          onPressed: () => _updateStatus(true, false),
+                                          icon: const Icon(Icons.check_circle_outline, size: 18),
+                                          label: const Text('Override Rejection & Approve'),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: AppTheme.success,
+                                            foregroundColor: Colors.white,
+                                            minimumSize: const Size(0, 40),
+                                          ),
+                                        ),
+                                      ],
                                       if (isAppr && !isBlk)
                                         ElevatedButton.icon(
                                           onPressed: () => _updateStatus(true, true),

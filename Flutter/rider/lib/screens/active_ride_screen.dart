@@ -882,6 +882,205 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     }
   }
 
+  void _showSOSConfirmation() {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Cancel',
+      barrierColor: Colors.black.withValues(alpha: 0.9),
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (ctx, anim1, anim2) {
+        return Scaffold(
+          backgroundColor: Colors.transparent,
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                GestureDetector(
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _triggerSOSAlert();
+                  },
+                  child: Container(
+                    width: 250,
+                    height: 250,
+                    decoration: BoxDecoration(
+                      color: AppTheme.danger,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.danger.withValues(alpha: 0.5),
+                          blurRadius: 40,
+                          spreadRadius: 10,
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: Text(
+                        'SOS',
+                        style: GoogleFonts.inter(
+                          fontSize: 72,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 40),
+                Text(
+                  'TAP TO TRIGGER EMERGENCY',
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Text(
+                    'This will immediately notify your emergency contacts and our support team.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: Colors.white70,
+                      height: 1.5,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 60),
+                TextButton.icon(
+                  onPressed: () => Navigator.pop(ctx),
+                  icon: const Icon(Icons.close, color: Colors.white, size: 24),
+                  label: Text(
+                    'CANCEL',
+                    style: GoogleFonts.inter(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, anim1, anim2, child) {
+        return FadeTransition(
+          opacity: anim1,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.9, end: 1.0).animate(
+              CurvedAnimation(parent: anim1, curve: Curves.easeOutBack),
+            ),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _triggerSOSAlert() async {
+    final lat = _driverPos?.latitude ?? _ride!['pickup']['lat'];
+    final lng = _driverPos?.longitude ?? _ride!['pickup']['lng'];
+    final message = "🚨 SOS EMERGENCY ALERT! 🚨\n"
+        "I am in an emergency during my Gaman ride.\n\n"
+        "📍 My Live Location: https://maps.google.com/?q=$lat,$lng\n\n"
+        "🚗 Ride Details:\n"
+        "- Driver: ${_ride!['driverName']}\n"
+        "- Vehicle: ${_ride!['vehicleNumber']}\n"
+        "- Driver Phone: ${_ride!['driverPhone']}";
+    
+    // 1. Fetch user's custom emergency contacts
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    String emergencyNumber = '';
+    
+    if (uid != null) {
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final userData = userDoc.data();
+      
+      // 1a. Create SOS alert in Firestore for Admin Dashboard
+      try {
+        await FirebaseFirestore.instance.collection('sos_alerts').add({
+          'userId': uid,
+          'name': userData?['name'] ?? 'Unknown Rider',
+          'phone': userData?['phone'] ?? '',
+          'role': 'rider',
+          'rideId': widget.rideId,
+          'location': 'Lat: $lat, Lng: $lng',
+          'lat': lat,
+          'lng': lng,
+          'status': 'active',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      } catch (e) {
+        debugPrint('Failed to save SOS to Firestore: $e');
+      }
+
+      final customContacts = (userData?['emergencyContacts'] as List<dynamic>?) ?? [];
+      
+      if (customContacts.isNotEmpty) {
+        // Use the first contact's phone
+        String rawPhone = customContacts.first['phone'] as String;
+        // Remove all non-digit characters
+        emergencyNumber = rawPhone.replaceAll(RegExp(r'\D'), '');
+        
+        // Normalize: If it's a 10-digit number, assume it's Indian and prefix 91
+        if (emergencyNumber.length == 10) {
+          emergencyNumber = '91$emergencyNumber';
+        } else if (emergencyNumber.length > 10 && emergencyNumber.startsWith('0')) {
+          // If it starts with 0 and is more than 10 digits, replace 0 with 91
+          emergencyNumber = '91${emergencyNumber.substring(1)}';
+        }
+      }
+    }
+
+    // 2. Build URI: If no emergency number, it opens WhatsApp contact picker
+    final uriString = emergencyNumber.isNotEmpty 
+        ? 'whatsapp://send?phone=$emergencyNumber&text=${Uri.encodeComponent(message)}'
+        : 'whatsapp://send?text=${Uri.encodeComponent(message)}';
+    
+    final uri = Uri.parse(uriString);
+    
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        // Fallback to web-based API if whatsapp scheme fails
+        final fallbackUriString = emergencyNumber.isNotEmpty
+            ? 'https://wa.me/$emergencyNumber?text=${Uri.encodeComponent(message)}'
+            : 'https://api.whatsapp.com/send?text=${Uri.encodeComponent(message)}';
+        
+        final fallbackUri = Uri.parse(fallbackUriString);
+        if (await canLaunchUrl(fallbackUri)) {
+          await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
+        } else {
+          if (mounted) {
+            CustomToast.show(
+              context: context,
+              message: 'WhatsApp is not installed on your device.',
+              isError: true,
+            );
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        CustomToast.show(
+          context: context,
+          message: 'Could not open WhatsApp.',
+          isError: true,
+        );
+      }
+    }
+  }
+
   Set<Polyline> _buildPolylines(String status, List<LatLng> routeCoords) {
     if (routeCoords.isEmpty) return {};
 
@@ -1398,117 +1597,26 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () async {
-                      final lat = _driverPos?.latitude ?? _ride!['pickup']['lat'];
-                      final lng = _driverPos?.longitude ?? _ride!['pickup']['lng'];
-                      final message = "🚨 SOS EMERGENCY ALERT! 🚨\n"
-                          "I am in an emergency during my Gaman ride.\n\n"
-                          "📍 My Live Location: https://maps.google.com/?q=$lat,$lng\n\n"
-                          "🚗 Ride Details:\n"
-                          "- Driver: ${_ride!['driverName']}\n"
-                          "- Vehicle: ${_ride!['vehicleNumber']}\n"
-                          "- Driver Phone: ${_ride!['driverPhone']}";
-                      
-                      // 1. Fetch user's custom emergency contacts
-                      final uid = FirebaseAuth.instance.currentUser?.uid;
-                      String emergencyNumber = '';
-                      
-                      if (uid != null) {
-                        final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-                        final userData = userDoc.data();
-                        
-                        // 1a. Create SOS alert in Firestore for Admin Dashboard
-                        try {
-                          await FirebaseFirestore.instance.collection('sos_alerts').add({
-                            'userId': uid,
-                            'name': userData?['name'] ?? 'Unknown Rider',
-                            'phone': userData?['phone'] ?? '',
-                            'role': 'rider',
-                            'rideId': widget.rideId,
-                            'location': 'Lat: $lat, Lng: $lng',
-                            'lat': lat,
-                            'lng': lng,
-                            'status': 'active',
-                            'createdAt': FieldValue.serverTimestamp(),
-                          });
-                        } catch (e) {
-                          debugPrint('Failed to save SOS to Firestore: $e');
-                        }
-
-                        final customContacts = (userData?['emergencyContacts'] as List<dynamic>?) ?? [];
-                        
-                        if (customContacts.isNotEmpty) {
-                          // Use the first contact's phone
-                          String rawPhone = customContacts.first['phone'] as String;
-                          // Remove all non-digit characters
-                          emergencyNumber = rawPhone.replaceAll(RegExp(r'\D'), '');
-                          
-                          // Normalize: If it's a 10-digit number, assume it's Indian and prefix 91
-                          if (emergencyNumber.length == 10) {
-                            emergencyNumber = '91$emergencyNumber';
-                          } else if (emergencyNumber.length > 10 && emergencyNumber.startsWith('0')) {
-                            // If it starts with 0 and is more than 10 digits, replace 0 with 91
-                            emergencyNumber = '91${emergencyNumber.substring(1)}';
-                          }
-                        }
-                      }
-
-                      // 2. Build URI: If no emergency number, it opens WhatsApp contact picker
-                      final uriString = emergencyNumber.isNotEmpty 
-                          ? 'whatsapp://send?phone=$emergencyNumber&text=${Uri.encodeComponent(message)}'
-                          : 'whatsapp://send?text=${Uri.encodeComponent(message)}';
-                      
-                      final uri = Uri.parse(uriString);
-                      
-                      try {
-                        if (await canLaunchUrl(uri)) {
-                          await launchUrl(uri, mode: LaunchMode.externalApplication);
-                        } else {
-                          // Fallback to web-based API if whatsapp scheme fails
-                          final fallbackUriString = emergencyNumber.isNotEmpty
-                              ? 'https://wa.me/$emergencyNumber?text=${Uri.encodeComponent(message)}'
-                              : 'https://api.whatsapp.com/send?text=${Uri.encodeComponent(message)}';
-                          
-                          final fallbackUri = Uri.parse(fallbackUriString);
-                          if (await canLaunchUrl(fallbackUri)) {
-                            await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
-                          } else {
-                            if (mounted) {
-                              CustomToast.show(
-                                context: context,
-                                message: 'WhatsApp is not installed on your device.',
-                                isError: true,
-                              );
-                            }
-                          }
-                        }
-                      } catch (e) {
-                        if (mounted) {
-                          CustomToast.show(
-                            context: context,
-                            message: 'Could not open WhatsApp.',
-                            isError: true,
-                          );
-                        }
-                      }
-                    },
-                    icon: const Icon(Icons.warning_rounded, size: 18, color: Colors.white),
-                    label: Text(
-                      'SOS Alert',
-                      style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: Colors.white),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.danger,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                if (_ride!['status'] == 'started') ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _showSOSConfirmation,
+                      icon: const Icon(Icons.warning_rounded, size: 18, color: Colors.white),
+                      label: Text(
+                        'SOS Alert',
+                        style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: Colors.white),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.danger,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ],
               ],
             ),
           ],

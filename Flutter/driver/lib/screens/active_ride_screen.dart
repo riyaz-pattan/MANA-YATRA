@@ -1052,7 +1052,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
               bottom: status == 'matched' ? 320 : 240,
             ),
             style: lightMapStyle,
-            myLocationEnabled: status != 'started',
+            myLocationEnabled: false,
             myLocationButtonEnabled: false,
             initialCameraPosition: CameraPosition(
               target: provider.lat != null
@@ -1105,8 +1105,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                   icon: _dropDot ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
                   anchor: const Offset(0.5, 0.9), // Anchor at the bottom of the stem
                 ),
-              // Show driver's vehicle marker instead of the blue dot when the ride has started
-              if (status == 'started' && _driverAnimator.currentPos != null)
+              // Show driver's vehicle marker instead of the blue dot
+              if ((status == 'started' || status == 'matched') && _driverAnimator.currentPos != null)
                 Marker(
                   markerId: const MarkerId('driver_vehicle'),
                   position: _driverAnimator.currentPos!,

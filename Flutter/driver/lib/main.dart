@@ -18,6 +18,7 @@ import 'screens/pending_screen.dart';
 import 'screens/rejected_screen.dart';
 import 'screens/account_deletion_pending_screen.dart';
 import 'screens/custom_splash_screen.dart';
+import 'screens/maintenance_screen.dart';
 
 import 'screens/dashboard_screen.dart';
 import 'screens/active_ride_screen.dart';
@@ -28,11 +29,13 @@ import 'utils/custom_toast.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'services/action_queue_service.dart';
+import 'services/local_notifications_service.dart';
 import 'services/sync_engine.dart';
 import 'services/error_handler.dart';
 import 'repositories/ride_repository.dart';
 import 'repositories/auth_repository.dart';
 import 'services/analytics_service.dart';
+import 'services/pricing_service.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:upgrader/upgrader.dart';
 import 'package:app_links/app_links.dart';
@@ -61,6 +64,7 @@ late final SyncEngine syncEngine;
 late final FirestoreRideRepository rideRepository;
 late final FirebaseAuthRepository authRepository;
 late final AnalyticsService analyticsService;
+late final PricingService pricingService;
 
 void main() {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
@@ -117,9 +121,12 @@ class _AppInitializerState extends State<AppInitializer> {
         rideRepository = FirestoreRideRepository(syncEngine: syncEngine);
         authRepository = FirebaseAuthRepository();
         analyticsService = AnalyticsService();
+        pricingService = PricingService();
+        await pricingService.init();
 
         // Initialize FCM in the background (non-blocking)
         _initFCM();
+        LocalNotificationsService.initialize();
 
         // Initialize deep link handling (non-blocking)
         _initDeepLinks();
@@ -166,13 +173,17 @@ void _initFCM() {
 
     // Regular notification messages (e.g., admin broadcasts, driver approval)
     if (message.notification != null) {
-      final ctx = navigatorKey.currentContext;
-      if (ctx != null && ctx.mounted) {
-        CustomToast.show(
-          context: ctx,
-          message:
-              '${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}',
-        );
+      if (type == 'broadcast' || type == 'driver_rejected' || type == 'driver_approved') {
+        LocalNotificationsService.display(message);
+      } else {
+        final ctx = navigatorKey.currentContext;
+        if (ctx != null && ctx.mounted) {
+          CustomToast.show(
+            context: ctx,
+            message:
+                '${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}',
+          );
+        }
       }
     }
   });
@@ -246,19 +257,40 @@ class ManaYatraDriverApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: syncEngine),
         Provider<RideRepository>.value(value: rideRepository),
         Provider<AuthRepository>.value(value: authRepository),
+        ChangeNotifierProvider.value(value: pricingService),
       ],
-      child: MaterialApp(
-        scaffoldMessengerKey: rootScaffoldMessengerKey,
-        navigatorKey: navigatorKey,
-        title: 'Gaman - Driver',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.darkTheme,
-        home: UpgradeAlert(
-          showIgnore: true,
-          showLater: true,
-          upgrader: Upgrader(),
-          child: const AuthGate(),
-        ),
+      child: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance.collection('config').doc('feature_flags').snapshots(),
+        builder: (context, configSnap) {
+          final isMaintenance = configSnap.data?.data() != null 
+              && (configSnap.data!.data() as Map<String, dynamic>)['maintenance_mode'] == true;
+
+          return MaterialApp(
+            scaffoldMessengerKey: rootScaffoldMessengerKey,
+            navigatorKey: navigatorKey,
+            title: 'Gaman - Driver',
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.darkTheme,
+            builder: (context, child) {
+              return Consumer<DriverProvider>(
+                builder: (context, provider, _) {
+                  final hasActiveRide = provider.persistedRideId != null;
+                  // Lock out if maintenance is ON and the user does NOT have an active ride
+                  if (isMaintenance && !hasActiveRide) {
+                    return const MaintenanceScreen();
+                  }
+                  return child!;
+                },
+              );
+            },
+            home: UpgradeAlert(
+              showIgnore: true,
+              showLater: true,
+              upgrader: Upgrader(),
+              child: const AuthGate(),
+            ),
+          );
+        }
       ),
     );
   }
@@ -300,6 +332,23 @@ class AuthGate extends StatelessWidget {
         // FCM Topics
         FirebaseMessaging.instance.subscribeToTopic('drivers');
         FirebaseMessaging.instance.subscribeToTopic('driver_${user.uid}');
+
+        // Save FCM token to Firestore for targeted notifications
+        FirebaseMessaging.instance.getToken().then((token) {
+          if (token != null) {
+            FirebaseFirestore.instance.collection('drivers').doc(user.uid).set(
+              {'fcmToken': token},
+              SetOptions(merge: true),
+            );
+          }
+        });
+        // Listen for token refreshes
+        FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+          FirebaseFirestore.instance.collection('drivers').doc(user.uid).set(
+            {'fcmToken': newToken},
+            SetOptions(merge: true),
+          );
+        });
 
         // Set user in provider (this kicks off the profile listener in DriverProvider)
         WidgetsBinding.instance.addPostFrameCallback((_) {

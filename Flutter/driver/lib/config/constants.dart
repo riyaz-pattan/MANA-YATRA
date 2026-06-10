@@ -36,16 +36,6 @@ class AppConstants {
   static const int activeRideIntervalMs = 5000;     // 5 seconds
   static const int autoOfflineMinutes = 120;          // 2 hours — auto-offline idle drivers
 
-  static const Map<String, double> pricePerKm = {
-    'auto': 12,
-    'bike': 8,
-  };
-
-  static const Map<String, double> baseFare = {
-    'auto': 30,
-    'bike': 20,
-  };
-
   // Razorpay — live key (public identifier, safe for client-side)
   static const String razorpayKeyId = 'rzp_live_SxrYK0cDCc2o9i';
 }

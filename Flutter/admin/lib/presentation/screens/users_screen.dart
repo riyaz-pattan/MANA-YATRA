@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
 import 'rider_pdf_export.dart';
+import '../../core/services/audit_log_service.dart';
 
 class UsersScreen extends ConsumerStatefulWidget {
   const UsersScreen({super.key});
@@ -98,7 +99,9 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
         }
         needsLocalFiltering = true; // Cannot mix range query with other equalities safely
       } else {
-        q = q.orderBy('createdAt', descending: true);
+        // Removed orderBy('createdAt') because older riders might not have this field, 
+        // causing them to be excluded from the query results silently.
+        // q = q.orderBy('createdAt', descending: true);
 
         // Apply Status Filter
         if (_filterStatus == 'active') {
@@ -439,6 +442,14 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
               color: isBlk ? AppTheme.success : AppTheme.danger,
               tooltip: isBlk ? 'Unblock' : 'Block',
               onPressed: () {
+                final admin = ref.read(adminUserProvider).valueOrNull;
+                if (true) {
+                  AuditLogService.logAction(
+                    action: isBlk ? 'unblocked_rider' : 'blocked_rider',
+                    targetId: id,
+                    admin: admin,
+                  );
+                }
                 FirebaseFirestore.instance.collection('users').doc(id).update({
                   'isBlocked': !isBlk,
                 });

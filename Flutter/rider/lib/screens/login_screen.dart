@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pinput/pinput.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../config/theme.dart';
+import 'package:smart_auth/smart_auth.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -51,6 +51,7 @@ class _LoginScreenState extends State<LoginScreen>
 
   @override
   void dispose() {
+    SmartAuth.instance.removeUserConsentApiListener();
     _phoneController.dispose();
     _otpController.dispose();
     _animController.dispose();
@@ -69,9 +70,15 @@ class _LoginScreenState extends State<LoginScreen>
     });
 
     debugPrint('Sending OTP to +91$phone');
+    
+    // START LISTENING IMMEDIATELY BEFORE TRIGGERING FIREBASE
+    // If we wait for the OTP screen to build, the SMS might arrive too early!
+    _listenForSmsConsent();
+
     try {
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: '+91$phone',
+        timeout: Duration.zero, // Disables native Firebase SMS auto-retrieval to prevent crashes
         verificationCompleted: (PhoneAuthCredential credential) async {
           debugPrint(
             'FirebaseAuth: verificationCompleted! Auto-retrieval successful. smsCode: ${credential.smsCode}',
@@ -117,7 +124,6 @@ class _LoginScreenState extends State<LoginScreen>
           _verificationId = verificationId;
         },
         forceResendingToken: _resendToken,
-        timeout: const Duration(seconds: 60),
       );
     } catch (e) {
       debugPrint('FirebaseAuth: Exception in verifyPhoneNumber: $e');
@@ -126,6 +132,34 @@ class _LoginScreenState extends State<LoginScreen>
         _error = 'Failed to send OTP. Try again.';
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _listenForSmsConsent() async {
+    try {
+      final res = await SmartAuth.instance.getSmsWithUserConsentApi();
+      if (res.hasData && mounted) {
+        final code = res.requireData.code;
+        if (code != null && code.length == 6) {
+          setState(() {
+            _otpController.text = code;
+          });
+          
+          // Wait up to 2 seconds if _verificationId is still null (SMS arrived extremely fast)
+          for (int i = 0; i < 10; i++) {
+            if (_verificationId != null) break;
+            await Future.delayed(const Duration(milliseconds: 200));
+          }
+
+          if (_verificationId != null) {
+            _verifyOtp();
+          }
+        }
+      } else if (res.isCanceled) {
+        debugPrint('SmartAuth: User denied SMS consent.');
+      }
+    } catch (e) {
+      debugPrint('SmartAuth: Consent API failed or was interrupted: $e');
     }
   }
 
@@ -165,192 +199,128 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0F0E1A), Color(0xFF1A1929)],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: FadeTransition(
-                opacity: _fadeAnim,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Logo
-                    Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.primary.withValues(alpha: 0.3),
-                            blurRadius: 40,
-                            spreadRadius: 5,
-                          ),
-                        ],
-                      ),
-                      child: const Text('🛺', style: TextStyle(fontSize: 52)),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Gaman',
-                      style: GoogleFonts.inter(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Zero commission rides, fair prices',
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
-                        color: AppTheme.text2,
-                      ),
-                    ),
-                    const SizedBox(height: 48),
-
-                    // Card
-                    Container(
-                      width: double.infinity,
-                      constraints: const BoxConstraints(maxWidth: 360),
-                      padding: const EdgeInsets.all(28),
-                      decoration: BoxDecoration(
-                        color: AppTheme.bg,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: AppTheme.border),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.5),
-                            blurRadius: 64,
-                            offset: const Offset(0, 24),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _step == 'phone'
-                                ? 'Enter your number'
-                                : 'Verify OTP',
-                            style: GoogleFonts.inter(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _step == 'phone'
-                                ? "We'll send a 6-digit OTP via SMS"
-                                : 'OTP sent to +91 ${_phoneController.text}',
-                            style: GoogleFonts.inter(
-                              fontSize: 14,
-                              color: AppTheme.text2,
-                            ),
-                          ),
-                          const SizedBox(height: 28),
-                          if (_step == 'phone') ...[
-                            _buildPhoneInput(),
-                            const SizedBox(height: 16),
-                            _buildPrimaryButton(
-                              'Send OTP →',
-                              _sendOtp,
-                              enabled:
-                                  _phoneController.text
-                                      .replaceAll(RegExp(r'\D'), '')
-                                      .length >=
-                                  10,
-                            ),
-                          ] else ...[
-                            _buildOtpInput(),
-                            const SizedBox(height: 16),
-                            _buildPrimaryButton(
-                              'Verify & Continue →',
-                              _verifyOtp,
-                              enabled: _otpController.text.length == 6,
-                            ),
-                            const SizedBox(height: 10),
-                            SizedBox(
-                              width: double.infinity,
-                              child: TextButton(
-                                onPressed: () {
-                                  setState(() {
-                                    _step = 'phone';
-                                    _otpController.clear();
-                                    _error = '';
-                                  });
-                                },
-                                style: TextButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 14,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    side: const BorderSide(
-                                      color: AppTheme.border,
-                                    ),
-                                  ),
-                                ),
-                                child: Text(
-                                  '← Change number',
-                                  style: GoogleFonts.inter(
-                                    color: AppTheme.text2,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                          if (_error.isNotEmpty) ...[
-                            const SizedBox(height: 16),
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: AppTheme.danger.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: AppTheme.danger.withValues(alpha: 0.3),
-                                ),
-                              ),
-                              child: Text(
-                                _error,
-                                textAlign: TextAlign.center,
-                                style: GoogleFonts.inter(
-                                  color: AppTheme.danger,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'By continuing, you agree to our Terms & Privacy Policy',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: AppTheme.text3,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: FadeTransition(
+          opacity: _fadeAnim,
+          child: CustomScrollView(
+            slivers: [
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+                  child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 32),
+                // App Logo
+                Center(
+                  child: Image.asset(
+                    'assets/images/logo/foreground.png',
+                    width: 130,
+                    height: 130,
+                    fit: BoxFit.contain,
+                  ),
                 ),
-              ),
+                const SizedBox(height: 32),
+                Text(
+                  _step == 'phone' ? 'Welcome to\nGaman.' : 'Verify your\nnumber.',
+                  style: GoogleFonts.manrope(
+                    fontSize: 42,
+                    fontWeight: FontWeight.w200,
+                    color: Colors.black,
+                    height: 1.1,
+                    letterSpacing: -1.5,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  _step == 'phone'
+                      ? "Enter your mobile number to begin your premium journey."
+                      : "We've sent a 6-digit security code to\n+91 ${_phoneController.text}.",
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    color: Colors.grey[600],
+                    height: 1.6,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+                const SizedBox(height: 64),
+                if (_step == 'phone') ...[
+                  _buildPhoneInput(),
+                  const Spacer(),
+                  _buildPrimaryButton(
+                    'CONTINUE',
+                    _sendOtp,
+                    enabled: _phoneController.text.replaceAll(RegExp(r'\D'), '').length >= 10,
+                  ),
+                ] else ...[
+                  _buildOtpInput(),
+                  const SizedBox(height: 24),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _step = 'phone';
+                          _otpController.clear();
+                          _error = '';
+                        });
+                      },
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Text(
+                        'Change number',
+                        style: GoogleFonts.inter(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w600,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  _buildPrimaryButton(
+                    'VERIFY',
+                    _verifyOtp,
+                    enabled: _otpController.text.length == 6,
+                  ),
+                ],
+                if (_error.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    _error,
+                    style: GoogleFonts.inter(
+                      color: Colors.red[800],
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 24),
+                Center(
+                  child: Text(
+                    'By continuing, you agree to our Terms & Privacy Policy',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: Colors.grey[500],
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
-      ),
-    );
-  }
+      ],
+    ),
+  ),
+),
+);
+}
 
   Widget _buildPhoneInput() {
     return TextField(
@@ -358,22 +328,31 @@ class _LoginScreenState extends State<LoginScreen>
       keyboardType: TextInputType.phone,
       maxLength: 10,
       onChanged: (_) => setState(() {}),
-      style: GoogleFonts.inter(fontSize: 16),
+      style: GoogleFonts.inter(fontSize: 20, color: Colors.black, fontWeight: FontWeight.w500),
+      cursorColor: Colors.black,
       decoration: InputDecoration(
         prefixIcon: Padding(
-          padding: const EdgeInsets.only(left: 16, right: 8),
+          padding: const EdgeInsets.only(right: 16),
           child: Text(
             '+91',
             style: GoogleFonts.inter(
-              fontWeight: FontWeight.w600,
-              fontSize: 15,
-              color: AppTheme.text2,
+              fontWeight: FontWeight.w400,
+              fontSize: 20,
+              color: Colors.black,
             ),
           ),
         ),
-        prefixIconConstraints: const BoxConstraints(minWidth: 0),
-        hintText: '9876543210',
+        prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+        hintText: '00000 00000',
+        hintStyle: GoogleFonts.inter(color: Colors.grey[400], fontSize: 20),
         counterText: '',
+        enabledBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: Colors.black, width: 1),
+        ),
+        focusedBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: Colors.black, width: 2),
+        ),
+        contentPadding: const EdgeInsets.symmetric(vertical: 12),
       ),
       onSubmitted: (_) => _sendOtp(),
     );
@@ -383,56 +362,44 @@ class _LoginScreenState extends State<LoginScreen>
     return Pinput(
       length: 6,
       controller: _otpController,
-      autofocus: true,
+      autofocus: false,
       onChanged: (_) => setState(() {}),
       onCompleted: (_) => _verifyOtp(),
+      separatorBuilder: (index) => const SizedBox(width: 8),
       defaultPinTheme: PinTheme(
-        width: 44,
-        height: 52,
+        width: 48,
+        height: 60,
         textStyle: GoogleFonts.inter(
-          fontSize: 22,
-          fontWeight: FontWeight.w700,
-          color: AppTheme.text,
+          fontSize: 24,
+          fontWeight: FontWeight.w600,
+          color: Colors.black,
         ),
-        decoration: BoxDecoration(
-          color: AppTheme.bg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.border),
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: Colors.grey, width: 1)),
         ),
       ),
       focusedPinTheme: PinTheme(
-        width: 44,
-        height: 52,
+        width: 48,
+        height: 60,
         textStyle: GoogleFonts.inter(
-          fontSize: 22,
-          fontWeight: FontWeight.w700,
-          color: AppTheme.text,
+          fontSize: 24,
+          fontWeight: FontWeight.w600,
+          color: Colors.black,
         ),
-        decoration: BoxDecoration(
-          color: AppTheme.bg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.primary, width: 2),
-          boxShadow: [
-            BoxShadow(
-              color: AppTheme.primary.withValues(alpha: 0.2),
-              blurRadius: 8,
-              spreadRadius: 1,
-            ),
-          ],
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: Colors.black, width: 2)),
         ),
       ),
       submittedPinTheme: PinTheme(
-        width: 44,
-        height: 52,
+        width: 48,
+        height: 60,
         textStyle: GoogleFonts.inter(
-          fontSize: 22,
-          fontWeight: FontWeight.w700,
-          color: AppTheme.text,
+          fontSize: 24,
+          fontWeight: FontWeight.w600,
+          color: Colors.black,
         ),
-        decoration: BoxDecoration(
-          color: AppTheme.primary.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.primary),
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: Colors.black, width: 1)),
         ),
       ),
     );
@@ -445,19 +412,36 @@ class _LoginScreenState extends State<LoginScreen>
   }) {
     return SizedBox(
       width: double.infinity,
-      height: 54,
+      height: 56,
       child: ElevatedButton(
         onPressed: _loading || !enabled ? null : onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.black,
+          disabledBackgroundColor: Colors.grey[300],
+          foregroundColor: Colors.white,
+          disabledForegroundColor: Colors.grey[500],
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.zero,
+          ),
+          elevation: 0,
+        ),
         child: _loading
             ? const SizedBox(
-                width: 22,
-                height: 22,
+                width: 24,
+                height: 24,
                 child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
+                  strokeWidth: 2,
                   color: Colors.white,
                 ),
               )
-            : Text(label),
+            : Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 2,
+                ),
+              ),
       ),
     );
   }
