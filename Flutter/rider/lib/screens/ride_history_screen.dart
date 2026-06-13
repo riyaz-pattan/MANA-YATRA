@@ -268,7 +268,7 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
   Widget _buildRideCard(Map<String, dynamic> ride) {
     final pickup = ride['pickup'] != null ? (ride['pickup']['display_name'] ?? ride['pickup']['short_name'] ?? 'Unknown Pickup') : 'Unknown Pickup';
     final dropoff = ride['drop'] != null ? (ride['drop']['display_name'] ?? ride['drop']['short_name'] ?? 'Unknown Dropoff') : 'Unknown Dropoff';
-    final fare = ride['finalPrice']?.toString() ?? '0';
+    final fare = ride['finalPrice']?.toString() ?? ride['estimatedFare']?.toString() ?? ride['estimatedPrice']?.toString() ?? ride['price']?.toString() ?? '0';
     final timestamp = (ride['completedAt'] ?? ride['createdAt']) as Timestamp?;
     final date = timestamp != null ? _formatDate(timestamp.toDate()) : 'Unknown Date';
     final vehicleType = ride['vehicleType'] ?? 'Unknown';
@@ -315,34 +315,36 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
           ),
           const SizedBox(height: 12),
           if (!isCancelled) ...[
-            Row(
-              children: [
-                Icon(Icons.person, size: 16, color: AppTheme.text2),
-                const SizedBox(width: 6),
-                Text(
-                  driverName,
-                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.text),
-                ),
-                if (vehicleNumber.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppTheme.border,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      vehicleNumber,
-                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.text2),
-                    ),
+            if (driverName != 'Unknown Driver' && driverName.isNotEmpty) ...[
+              Row(
+                children: [
+                  Icon(Icons.person, size: 16, color: AppTheme.text2),
+                  const SizedBox(width: 6),
+                  Text(
+                    driverName,
+                    style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.text),
                   ),
-                ]
-              ],
-            ),
-            const SizedBox(height: 12),
+                  if (vehicleNumber.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppTheme.border,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        vehicleNumber,
+                        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.text2),
+                      ),
+                    ),
+                  ]
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
             Row(
               children: [
-                _buildInfoChip(Icons.electric_rickshaw, vehicleType.toString().toUpperCase()),
+                _buildInfoChip(_getVehicleIcon(vehicleType.toString()), vehicleType.toString().toUpperCase()),
                 const SizedBox(width: 12),
                 _buildInfoChip(Icons.route, '$distance km'),
                 const SizedBox(width: 12),
@@ -515,5 +517,23 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
 
   String _formatDate(DateTime dt) {
     return "${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
+  }
+
+  IconData _getVehicleIcon(String type) {
+    switch (type.toLowerCase()) {
+      case 'bike':
+      case 'motorcycle':
+        return Icons.motorcycle;
+      case 'auto':
+      case 'rickshaw':
+        return Icons.electric_rickshaw;
+      case 'car':
+      case 'cab':
+      case 'mini':
+      case 'sedan':
+        return Icons.directions_car;
+      default:
+        return Icons.local_taxi;
+    }
   }
 }

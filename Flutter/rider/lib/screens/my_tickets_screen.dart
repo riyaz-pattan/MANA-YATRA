@@ -13,6 +13,22 @@ class MyTicketsScreen extends StatefulWidget {
 }
 
 class _MyTicketsScreenState extends State<MyTicketsScreen> {
+  Future<QuerySnapshot>? _ticketsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      _ticketsFuture = FirebaseFirestore.instance
+          .collection('support_tickets')
+          .where('uid', isEqualTo: user.uid)
+          .orderBy('createdAt', descending: true)
+          .limit(20)
+          .get();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -32,12 +48,7 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
       body: user == null
           ? Center(child: Text('Please log in to view tickets', style: GoogleFonts.inter(color: AppTheme.text2)))
           : FutureBuilder<QuerySnapshot>(
-              future: FirebaseFirestore.instance
-                  .collection('support_tickets')
-                  .where('uid', isEqualTo: user.uid)
-                  .orderBy('createdAt', descending: true)
-                  .limit(20)
-                  .get(),
+              future: _ticketsFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());

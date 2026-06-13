@@ -29,9 +29,10 @@ const OPERATION_TTL_DAYS = 30; // How long to keep operationIds for dedup
  */
 async function checkIdempotency(db, operationId) {
   if (!operationId) return; // Backwards compat — old clients without operationId
-  const opRef = db.collection("operations").doc(operationId);
+  const rtdb = admin.database();
+  const opRef = rtdb.ref(`operations/${operationId}`);
   const opSnap = await opRef.get();
-  if (opSnap.exists) {
+  if (opSnap.exists()) {
     throw new functions.https.HttpsError(
       "already-exists",
       "Operation already processed."
@@ -41,10 +42,10 @@ async function checkIdempotency(db, operationId) {
 
 async function recordOperation(db, operationId, type) {
   if (!operationId) return;
-  await db.collection("operations").doc(operationId).set({
+  const rtdb = admin.database();
+  await rtdb.ref(`operations/${operationId}`).set({
     type,
-    processedAt: admin.firestore.FieldValue.serverTimestamp(),
-    expiresAt: new Date(Date.now() + OPERATION_TTL_DAYS * 86400000),
+    timestamp: admin.database.ServerValue.TIMESTAMP
   });
 }
 
@@ -56,31 +57,38 @@ async function recordOperation(db, operationId, type) {
  * Prevents API abuse by limiting calls per UID per action.
  */
 async function checkRateLimit(db, uid, action, limitCount = 10, windowMs = 60000) {
-  const rateLimitRef = db.collection('rate_limits').doc(`${uid}_${action}`);
+  const rtdb = admin.database();
+  const rateLimitRef = rtdb.ref(`rate_limits/${uid}_${action}`);
   const now = Date.now();
   
-  await db.runTransaction(async (txn) => {
-    const snap = await txn.get(rateLimitRef);
-    let data = snap.data();
-    
-    if (!snap.exists || !data || (now - data.windowStart) > windowMs) {
+  const result = await rateLimitRef.transaction((currentData) => {
+    if (!currentData || (now - currentData.windowStart) > windowMs) {
       // Reset or start new window
-      txn.set(rateLimitRef, {
+      return {
         windowStart: now,
         count: 1
-      });
+      };
     } else {
-      if (data.count >= limitCount) {
-        throw new functions.https.HttpsError(
-          'resource-exhausted',
-          `Rate limit exceeded for action: ${action}`
-        );
+      if (currentData.count >= limitCount) {
+        // Abort transaction if rate limit is exceeded
+        return undefined;
       }
-      txn.update(rateLimitRef, {
-        count: admin.firestore.FieldValue.increment(1)
-      });
+      currentData.count += 1;
+      return currentData;
     }
   });
+
+  if (!result.committed) {
+    // If aborted, double check if it was due to limit
+    const snap = await rateLimitRef.get();
+    const data = snap.val();
+    if (data && data.count >= limitCount && (now - data.windowStart) <= windowMs) {
+      throw new functions.https.HttpsError(
+        'resource-exhausted',
+        `Rate limit exceeded for action: ${action}`
+      );
+    }
+  }
 }
 
 /**
@@ -121,47 +129,34 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
 
   // Idempotency: if this operationId was already processed, return success
   await checkIdempotency(db, operationId);
+
+  const rtdb = admin.database();
+  // In Scenario B, the driverId is used as the bidId in RTDB
+  const bidSnapRtdb = await rtdb.ref(`active_bids/${rideId}/${bidId}`).once('value');
+  if (!bidSnapRtdb.exists()) {
+    throw new functions.https.HttpsError("not-found", "Bid not found in RTDB.");
+  }
+  const bid = bidSnapRtdb.val();
+  const driverId = bid.driverId || bidId;
+
   const rideRef = db.collection("rides").doc(rideId);
-  const bidRef = db.collection("bids").doc(bidId);
+  const driverRef = db.collection("drivers").doc(driverId);
+  const bidRef = db.collection("bids").doc(bidId); // We still save the winning bid to Firestore permanently
 
   try {
     await db.runTransaction(async (txn) => {
       const rideSnap = await txn.get(rideRef);
-      const bidSnap = await txn.get(bidRef);
+      const driverSnap = await txn.get(driverRef);
 
       if (!rideSnap.exists) {
         throw new functions.https.HttpsError("not-found", "Ride not found.");
       }
-      if (!bidSnap.exists) {
-        throw new functions.https.HttpsError("not-found", "Bid not found.");
-      }
-
-      const ride = rideSnap.data();
-      const bid = bidSnap.data();
-
-      // ── CHECK 0: Integrity ──
-      if (bid.rideId !== rideId) {
-        throw new functions.https.HttpsError(
-          "invalid-argument",
-          "This bid does not belong to the requested ride."
-        );
-      }
-
-      const driverId = bid.driverId;
-      const driverRef = db.collection("drivers").doc(driverId);
-      const driverSnap = await txn.get(driverRef);
-
       if (!driverSnap.exists) {
         throw new functions.https.HttpsError("not-found", "Driver not found.");
       }
-      const driver = driverSnap.data();
 
-      // PRE-FETCH READS
-      // Fetch other bids to reject (Firestore transactions require all reads before writes)
-      const otherBidsQuery = db.collection("bids")
-        .where("rideId", "==", rideId)
-        .where("status", "==", "pending");
-      const otherBidsSnap = await txn.get(otherBidsQuery);
+      const ride = rideSnap.data();
+      const driver = driverSnap.data();
 
       // ── CHECK 1: Ride status ──
       if (ride.status !== "searching" && ride.status !== "bidding") {
@@ -176,14 +171,6 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError(
           "failed-precondition",
           "Ride is already being matched."
-        );
-      }
-
-      // ── CHECK 3: Bid status ──
-      if (bid.status !== "pending") {
-        throw new functions.https.HttpsError(
-          "failed-precondition",
-          "This bid is no longer active (withdrawn or rejected)."
         );
       }
 
@@ -228,17 +215,14 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
         matchedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // 2. Update Accepted Bid
-      txn.update(bidRef, { status: "accepted" });
-
-      // 3. Reject other bids for this ride
-      otherBidsSnap.forEach((doc) => {
-        if (doc.id !== bidId) {
-          txn.update(doc.ref, { status: "rejected_by_system" });
-        }
+      // 2. Save the winning bid permanently to Firestore
+      txn.set(bidRef, {
+        ...bid,
+        status: "accepted",
+        acceptedAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
-      // 4. Update Driver State
+      // 3. Update Driver State
       txn.update(driverRef, {
         driverState: "ON_RIDE",
         activeRideId: rideId,
@@ -264,6 +248,10 @@ exports.acceptBid = functions.https.onCall(async (data, context) => {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
+
+    // Wipe all losing bids from RTDB instantly (free operation)
+    await admin.database().ref(`active_bids/${rideId}`).remove();
+    await admin.database().ref(`active_rides/${rideId}`).remove(); // Remove the sync flag too
 
     // Record idempotency key after successful commit
     await recordOperation(db, operationId, "acceptBid");
@@ -541,6 +529,9 @@ exports.cancelRide = functions.https.onCall(async (data, context) => {
         cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
+
+    await admin.database().ref(`active_bids/${rideId}`).remove();
+    await admin.database().ref(`active_rides/${rideId}`).remove();
 
     await recordOperation(db, operationId, "cancelRide");
     return { success: true };
@@ -843,6 +834,18 @@ exports.registerReferral = functions.https.onCall(async (data, context) => {
     );
   }
 
+  // --- KILL SWITCH CHECK ---
+  const configSnap = await admin.database().ref('config/feature_flags/enable_referrals').once('value');
+  const referralsEnabled = configSnap.val() !== false; // true by default
+
+  if (!referralsEnabled) {
+    console.log(`[REFERRAL] ERROR: Referral program is paused.`);
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "The referral program is currently paused. Please try again later."
+    );
+  }
+
   const db = admin.firestore();
 
   // Rate Limiting: 5 calls/min
@@ -1124,6 +1127,7 @@ exports.processScheduledNotifications = functions.pubsub.schedule("*/5 * * * *")
   const now = admin.firestore.Timestamp.now();
   const snapshot = await admin.firestore().collection("scheduled_notifications")
     .where("status", "==", "pending")
+    .where("scheduledTime", "<=", now)
     .get();
 
   if (snapshot.empty) return null;
@@ -1132,27 +1136,74 @@ exports.processScheduledNotifications = functions.pubsub.schedule("*/5 * * * *")
   for (const doc of snapshot.docs) {
     const data = doc.data();
     
-    // Filter scheduledTime in memory to avoid FAILED_PRECONDITION composite index error
-    if (data.scheduledTime && data.scheduledTime.toMillis() <= now.toMillis()) {
-      try {
-        await _executeNotificationSend(data.title, data.body, data.target, data.geofence);
-        batch.update(doc.ref, {
-          status: "sent",
-          sentAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      } catch (e) {
-        console.error(`Error sending scheduled notification ${doc.id}:`, e);
-        batch.update(doc.ref, {
-          status: "failed",
-          error: e.message,
-        });
-      }
+    try {
+      await _executeNotificationSend(data.title, data.body, data.target, data.geofence);
+      batch.update(doc.ref, {
+        status: "sent",
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      console.error(`Error sending scheduled notification ${doc.id}:`, e);
+      batch.update(doc.ref, {
+        status: "failed",
+        error: e.message,
+      });
     }
   }
 
   await batch.commit();
   return null;
 });
+
+/**
+ * onSOSCreated
+ * Sends an FCM notification to the admin dashboard when a new SOS alert is created.
+ */
+exports.onSOSCreated = functions.firestore
+  .document("sos_alerts/{alertId}")
+  .onCreate(async (snap, context) => {
+    const data = snap.data();
+    if (!data) return null;
+
+    const role = (data.role || "user").toUpperCase();
+    const name = data.name || "Unknown User";
+    const location = data.location || "Unknown Location";
+
+    try {
+      await admin.messaging().send({
+        topic: "admin_sos_alerts",
+        notification: {
+          title: "🚨 EMERGENCY SOS ALERT",
+          body: `[${role}] ${name} activated SOS at ${location}`,
+        },
+        android: {
+          priority: "high",
+          notification: {
+            channelId: "emergency_alerts",
+            defaultSound: true,
+            defaultVibrateTimings: true,
+            priority: "high",
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: "default",
+            },
+          },
+        },
+        data: { 
+          type: "sos_alert",
+          alertId: context.params.alertId 
+        },
+      });
+
+      console.log(`SOS Alert FCM sent to admins for alert: ${context.params.alertId}`);
+    } catch (error) {
+      console.error("Error sending SOS FCM to admins:", error);
+    }
+    return null;
+  });
 
 /**
  * onSOSResolved
@@ -1170,19 +1221,14 @@ exports.onSOSResolved = functions.firestore
       if (!userId) return null;
 
       try {
-        const userDoc = await admin.firestore().collection("users").doc(userId).get();
-        if (!userDoc.exists) return null;
-
-        const fcmToken = userDoc.data().fcmToken;
-        if (fcmToken) {
-          await admin.messaging().send({
-            token: fcmToken,
-            notification: {
-              title: "Emergency Alert Closed",
-              body: "Your emergency alert has been closed. If you still need help, please call Support.",
-            },
-            data: { type: "sos_resolved" },
-          });
+        await admin.messaging().send({
+          topic: `rider_${userId}`,
+          notification: {
+            title: "Emergency Alert Closed",
+            body: "Your emergency alert has been closed. If you still need help, please call Support.",
+          },
+          data: { type: "sos_resolved" },
+        });
 
           // Log the notification
           await admin.firestore().collection("notifications_log").add({
@@ -1193,7 +1239,6 @@ exports.onSOSResolved = functions.firestore
             method: "token",
             topic: "none",
           });
-        }
       } catch (error) {
         console.error(`Failed to send SOS resolution notification to user ${userId}:`, error);
       }
@@ -1383,6 +1428,13 @@ exports.onDriverApproved = functions.firestore
         console.log(`[REFERRAL-REWARD] Driver ${approvedDriverId} approved. referredBy=${referrerDriverId || 'NONE'}`);
 
         if (referrerDriverId) {
+          // --- KILL SWITCH CHECK ---
+          const configSnap = await admin.database().ref('config/feature_flags/enable_referrals').once('value');
+          if (configSnap.val() === false) {
+            console.log(`[REFERRAL-REWARD] Referral program is paused. Skipping reward for driver ${approvedDriverId}.`);
+            return null;
+          }
+
           const db = admin.firestore();
 
           // Find the pending referral document
@@ -1508,54 +1560,6 @@ exports.onRideStatusChanged = functions.firestore
           totalAssignedRides: admin.firestore.FieldValue.increment(1)
         });
 
-        // Cancel this driver's bids on other active rides
-        const otherBids = await admin.firestore().collection("bids")
-          .where("driverId", "==", driverId)
-          .where("status", "==", "pending")
-          .get();
-        
-        const batch = admin.firestore().batch();
-        otherBids.docs.forEach(doc => {
-          if (doc.data().rideId !== rideId) {
-            batch.update(doc.ref, { status: "withdrawn" });
-          }
-        });
-        await batch.commit();
-
-        // Reject all other pending bids for this ride and decrement their drivers' activeBidCount
-        const otherRideBids = await admin.firestore().collection("bids")
-          .where("rideId", "==", rideId)
-          .where("status", "==", "pending")
-          .get();
-        
-        const rejectBatch = admin.firestore().batch();
-        const affectedDriverIds = new Set();
-        otherRideBids.docs.forEach(doc => {
-          rejectBatch.update(doc.ref, { status: "rejected" });
-          affectedDriverIds.add(doc.data().driverId);
-        });
-        await rejectBatch.commit();
-
-        // Decrement activeBidCount for each affected driver
-        for (const affectedId of affectedDriverIds) {
-          if (affectedId && affectedId !== driverId) {
-            try {
-              const driverDoc = await admin.firestore().collection("drivers").doc(affectedId).get();
-              if (driverDoc.exists) {
-                const dData = driverDoc.data();
-                const newCount = Math.max(0, (dData.activeBidCount || 1) - 1);
-                const updates = { activeBidCount: newCount };
-                // If no more active bids, return to ONLINE_IDLE
-                if (newCount === 0 && dData.driverState === "BIDDING") {
-                  updates.driverState = "ONLINE_IDLE";
-                }
-                await admin.firestore().collection("drivers").doc(affectedId).update(updates);
-              }
-            } catch (e) {
-              console.error(`Failed to update activeBidCount for driver ${affectedId}:`, e);
-            }
-          }
-        }
       }
 
       // Cleanup RTDB signals from all zone paths
@@ -1594,36 +1598,7 @@ exports.onRideStatusChanged = functions.firestore
       }
       await admin.database().ref(`ride_declines/${rideId}`).remove();
     } else if (before.status !== "expired" && after.status === "expired") {
-      // Decrement activeBidCount for all drivers who had pending bids on this ride
-      const pendingBids = await admin.firestore().collection("bids")
-        .where("rideId", "==", rideId)
-        .where("status", "==", "pending")
-        .get();
 
-      const expBatch = admin.firestore().batch();
-      const expDriverIds = new Set();
-      pendingBids.docs.forEach(doc => {
-        expBatch.update(doc.ref, { status: "expired" });
-        expDriverIds.add(doc.data().driverId);
-      });
-      await expBatch.commit();
-
-      for (const dId of expDriverIds) {
-        try {
-          const dd = await admin.firestore().collection("drivers").doc(dId).get();
-          if (dd.exists) {
-            const d = dd.data();
-            const nc = Math.max(0, (d.activeBidCount || 1) - 1);
-            const upd = { activeBidCount: nc };
-            if (nc === 0 && d.driverState === "BIDDING") {
-              upd.driverState = "ONLINE_IDLE";
-            }
-            await admin.firestore().collection("drivers").doc(dId).update(upd);
-          }
-        } catch (e) {
-          console.error(`Failed to update activeBidCount for driver ${dId}:`, e);
-        }
-      }
 
       // Cleanup RTDB signals from all zone paths
       const expPaths = after.activeSignalPaths || [];
@@ -1782,239 +1757,241 @@ exports.onRideCreated = functions.firestore
   });
 
 /**
- * expandRideSearch (Phase 2 — Wider Radius)
- *
- * Runs every minute. Finds rides that have been searching/bidding for 3+ minutes
- * but less than 5 minutes, and haven't been expanded yet.
- *
- * Re-broadcasts to geohash-4 FCM topics (~20km radius per cell) to reach
- * drivers farther away. Phase 1 uses geohash-5 (~5km).
+ * manageActiveRides
+ * Runs every minute to manage rides stuck in "searching" or "bidding".
+ * - If > 5 minutes old: Expires the ride and cleans up RTDB signals.
+ * - If 3-5 minutes old: Expands the search radius to geohash-4.
  */
-exports.expandRideSearch = functions.pubsub
+exports.manageActiveRides = functions.pubsub
   .schedule("* * * * *")
   .onRun(async (context) => {
     const now = Date.now();
     const phase2Start = new Date(now - (3 * 60 * 1000)); // 3 minutes ago
-    const phase2End = new Date(now - (5 * 60 * 1000));   // 5 minutes ago (don't expand already expired)
+    const expiryTime = new Date(now - (5 * 60 * 1000));  // 5 minutes ago
 
-    // Find rides in searching/bidding that are 3-5 min old and not yet expanded
-    const searchingSnap = await admin.firestore().collection("rides")
+    const snapshot = await admin.firestore().collection("rides")
       .where("status", "in", ["searching", "bidding"])
       .where("createdAt", "<", admin.firestore.Timestamp.fromDate(phase2Start))
-      .where("createdAt", ">", admin.firestore.Timestamp.fromDate(phase2End))
       .get();
 
-    if (searchingSnap.empty) return null;
+    if (snapshot.empty) return null;
 
+    const batch = admin.firestore().batch();
+    const promises = [];
     let expandedCount = 0;
+    let expiredCount = 0;
 
-    for (const doc of searchingSnap.docs) {
+    for (const doc of snapshot.docs) {
       const data = doc.data();
-
-      // Skip if already expanded
-      if (data.expandedSearch === true) continue;
-
-      // Need pickup location for geohash
-      if (!data.pickup || !data.pickup.lat || !data.pickup.lng) continue;
-
-      const lat = data.pickup.lat;
-      const lng = data.pickup.lng;
-      const vehicleType = data.vehicleType || "auto";
       const rideId = doc.id;
+      const createdAt = data.createdAt ? data.createdAt.toDate() : new Date();
 
-      // Compute geohash-4 (wider area)
-      const centerHash4 = ngeohash.encode(lat, lng, 4);
-      const neighbors4 = ngeohash.neighbors(centerHash4);
-      const expandedHashes = [centerHash4, ...neighbors4];
-
-      // Write signal to expanded geohash-4 zone paths in RTDB
-      try {
-        // Read existing signal data from one of the original paths
-        const existingPaths = data.activeSignalPaths || [];
-        let signalData = null;
-        if (existingPaths.length > 0) {
-          const existingSnap = await admin.database().ref(existingPaths[0]).once("value");
-          if (existingSnap.exists()) {
-            signalData = existingSnap.val();
+      if (createdAt < expiryTime) {
+        // --- EXPIRATION LOGIC ---
+        batch.update(doc.ref, { status: "expired" });
+        
+        const paths = data.activeSignalPaths || [];
+        if (paths.length > 0) {
+          const removeUpdate = {};
+          for (const p of paths) {
+            removeUpdate[p] = null;
           }
+          promises.push(admin.database().ref().update(removeUpdate));
         }
-        if (signalData) {
-          signalData.expanded = true;
-          const expandMultiPath = {};
-          const newPaths = [];
-          for (const hash of expandedHashes) {
-            const path = `ride_signals/${vehicleType}/${hash}/${rideId}`;
-            // Only add if not already covered by existing paths
-            if (!existingPaths.includes(path)) {
-              expandMultiPath[path] = signalData;
-              newPaths.push(path);
+        promises.push(admin.database().ref(`ride_declines/${rideId}`).remove());
+        expiredCount++;
+      } else if (data.expandedSearch !== true) {
+        // --- EXPANSION LOGIC ---
+        if (!data.pickup || !data.pickup.lat || !data.pickup.lng) continue;
+
+        const lat = data.pickup.lat;
+        const lng = data.pickup.lng;
+        const vehicleType = data.vehicleType || "auto";
+
+        const centerHash4 = ngeohash.encode(lat, lng, 4);
+        const neighbors4 = ngeohash.neighbors(centerHash4);
+        const expandedHashes = [centerHash4, ...neighbors4];
+
+        try {
+          const existingPaths = data.activeSignalPaths || [];
+          let signalData = null;
+          if (existingPaths.length > 0) {
+            const existingSnap = await admin.database().ref(existingPaths[0]).once("value");
+            if (existingSnap.exists()) {
+              signalData = existingSnap.val();
             }
           }
-          if (Object.keys(expandMultiPath).length > 0) {
-            await admin.database().ref().update(expandMultiPath);
+          if (signalData) {
+            signalData.expanded = true;
+            const expandMultiPath = {};
+            const newPaths = [];
+            for (const hash of expandedHashes) {
+              const path = `ride_signals/${vehicleType}/${hash}/${rideId}`;
+              if (!existingPaths.includes(path)) {
+                expandMultiPath[path] = signalData;
+                newPaths.push(path);
+              }
+            }
+            if (Object.keys(expandMultiPath).length > 0) {
+              promises.push(admin.database().ref().update(expandMultiPath));
+            }
+            if (newPaths.length > 0) {
+              batch.update(doc.ref, {
+                activeSignalPaths: admin.firestore.FieldValue.arrayUnion(...newPaths),
+                expandedSearch: true
+              });
+            } else {
+              batch.update(doc.ref, { expandedSearch: true });
+            }
+          } else {
+            batch.update(doc.ref, { expandedSearch: true });
           }
-          // Append new paths to Firestore
-          if (newPaths.length > 0) {
-            await doc.ref.update({
-              activeSignalPaths: admin.firestore.FieldValue.arrayUnion(...newPaths),
+        } catch (e) {
+          console.error(`Failed to expand RTDB signals for ride ${rideId}:`, e);
+        }
+
+        const pickupName = (data.pickup && data.pickup.short_name) || "Nearby";
+        const dropName = (data.drop && data.drop.short_name) || "Destination";
+        const fareLabel = data.riderBid ? `₹${data.riderBid}` : "Open bid";
+
+        const chunk1 = expandedHashes.slice(0, 5);
+        const chunk2 = expandedHashes.slice(5, 9);
+
+        const sendExpanded = (hashes) => {
+          if (hashes.length === 0) return;
+          const condition = hashes.map(h => `'zone_${h}_${vehicleType}' in topics`).join(" || ");
+          promises.push(
+            admin.messaging().send({
+              condition,
+              notification: {
+                title: `${vehicleType} ride nearby — ${fareLabel}`,
+                body: `${pickupName} → ${dropName} (expanded search)`,
+              },
+              data: { type: "new_ride", rideId },
+              android: {
+                priority: "high",
+                notification: {
+                  channelId: "ride_alerts",
+                  sound: "default",
+                  priority: "high",
+                },
+              },
+            }).catch(e => console.error("Expanded FCM Send Error:", e))
+          );
+        };
+
+        sendExpanded(chunk1);
+        sendExpanded(chunk2);
+        
+        expandedCount++;
+      }
+    }
+
+    promises.push(batch.commit());
+    await Promise.all(promises);
+
+    if (expandedCount > 0 || expiredCount > 0) {
+      console.log(`manageActiveRides: Expanded ${expandedCount}, Expired ${expiredCount}`);
+    }
+    return null;
+  });
+
+/**
+ * cleanupStaleRides
+ * Runs every 30 minutes. 
+ * - Finds rides stuck in "matched" for > 60 minutes and cancels them.
+ * - Finds rides stuck in "started" for > 4 hours and cancels them.
+ */
+exports.cleanupStaleRides = functions.pubsub
+  .schedule("every 30 minutes")
+  .onRun(async (context) => {
+    const db = admin.firestore();
+    const now = Date.now();
+    
+    const staleMatchedTimeMs = now - (60 * 60 * 1000); // 60 minutes ago
+    const staleStartedTimeMs = now - (4 * 60 * 60 * 1000); // 4 hours ago
+
+    const batch = db.batch();
+    const promises = [];
+    let matchedCount = 0;
+    let startedCount = 0;
+
+    try {
+      // 1. Cleanup Stale "Matched" Rides
+      const staleMatchedSnap = await db.collection("rides")
+        .where("status", "==", "matched")
+        .where("createdAt", "<", admin.firestore.Timestamp.fromDate(new Date(staleMatchedTimeMs)))
+        .get();
+
+      if (!staleMatchedSnap.empty) {
+        staleMatchedSnap.forEach((doc) => {
+          const data = doc.data();
+          const rideId = doc.id;
+          
+          batch.update(doc.ref, { 
+            status: "cancelled",
+            cancelReason: "server_stale_cleanup",
+            cancelledAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+
+          if (data.driverId) {
+            batch.update(db.collection("drivers").doc(data.driverId), {
+              driverState: "ONLINE_IDLE",
+              activeRideId: null,
+              activeBidCount: 0,
             });
           }
-        }
-      } catch (e) {
-        console.error(`Failed to expand RTDB signals for ride ${rideId}:`, e);
-      }
-
-      // Send FCM wakeup to wider geohash-4 zones
-      const pickupName = (data.pickup && data.pickup.short_name) || "Nearby";
-      const dropName = (data.drop && data.drop.short_name) || "Destination";
-      const fareLabel = data.riderBid ? `₹${data.riderBid}` : "Open bid";
-
-      // FCM condition: max 5 conditions per message, we have 9 hashes → 2 chunks
-      const chunk1 = expandedHashes.slice(0, 5);
-      const chunk2 = expandedHashes.slice(5, 9);
-
-      const sendExpanded = async (hashes) => {
-        if (hashes.length === 0) return;
-        const condition = hashes.map(h => `'zone_${h}_${vehicleType}' in topics`).join(" || ");
-        try {
-          await admin.messaging().send({
-            condition,
-            notification: {
-              title: `${vehicleType} ride nearby — ${fareLabel}`,
-              body: `${pickupName} → ${dropName} (expanded search)`,
-            },
-            data: { type: "new_ride", rideId },
-            android: {
-              priority: "high",
-              notification: {
-                channelId: "ride_alerts",
-                sound: "default",
-                priority: "high",
-              },
-            },
-          });
-        } catch (e) {
-          console.error("Expanded FCM Send Error:", e);
-        }
-      };
-
-      await sendExpanded(chunk1);
-      await sendExpanded(chunk2);
-
-      // Mark as expanded in Firestore
-      await doc.ref.update({ expandedSearch: true });
-      expandedCount++;
-    }
-
-    if (expandedCount > 0) {
-      console.log(`Expanded search for ${expandedCount} rides to geohash-4 zones.`);
-    }
-    return null;
-  });
-
-/**
- * cleanupExpiredRides
- * Runs every minute to find rides stuck in "searching" or "bidding" for more
- * than 5 minutes and marks them as "expired". Also cleans up the RTDB signal.
- */
-exports.cleanupExpiredRides = functions.pubsub
-  .schedule("* * * * *") // Every minute
-  .onRun(async (context) => {
-    const expiryTimeMs = Date.now() - (5 * 60 * 1000); // 5 minutes ago
-    const expiryDate = new Date(expiryTimeMs);
-
-    // Expire rides in both "searching" and "bidding" status
-    const expiredSnapshot = await admin.firestore().collection("rides")
-      .where("status", "in", ["searching", "bidding"])
-      .where("createdAt", "<", admin.firestore.Timestamp.fromDate(expiryDate))
-      .get();
-
-    if (expiredSnapshot.empty) return null;
-
-    const batch = admin.firestore().batch();
-    const promises = [];
-
-    expiredSnapshot.docs.forEach((doc) => {
-      const rideData = doc.data();
-      const rideId = doc.id;
-      // Update firestore status
-      batch.update(doc.ref, { status: "expired" });
-      
-      // Delete from RTDB using stored zone paths
-      const paths = rideData.activeSignalPaths || [];
-      if (paths.length > 0) {
-        const removeUpdate = {};
-        for (const p of paths) {
-          removeUpdate[p] = null;
-        }
-        promises.push(admin.database().ref().update(removeUpdate));
-      }
-      // Also cleanup declinedDrivers
-      promises.push(admin.database().ref(`ride_declines/${rideId}`).remove());
-    });
-
-    promises.push(batch.commit());
-    await Promise.all(promises);
-    console.log(`Cleaned up ${expiredSnapshot.size} expired rides.`);
-    return null;
-  });
-
-/**
- * cleanupStaleAcceptedRides
- * Runs every 5 minutes. Finds rides stuck in "matched" for > 60 minutes
- * and marks them as "cancelled" due to staleness.
- */
-exports.cleanupStaleAcceptedRides = functions.pubsub
-  .schedule("*/15 * * * *") // Every 15 minutes
-  .onRun(async (context) => {
-    const staleTimeMs = Date.now() - (60 * 60 * 1000); // 60 minutes ago
-    const staleDate = new Date(staleTimeMs);
-
-    const staleSnapshot = await admin.firestore().collection("rides")
-      .where("status", "==", "matched")
-      .where("createdAt", "<", admin.firestore.Timestamp.fromDate(staleDate))
-      .get();
-
-    if (staleSnapshot.empty) return null;
-
-    const batch = admin.firestore().batch();
-    const promises = [];
-
-    staleSnapshot.docs.forEach((doc) => {
-      const data = doc.data();
-      const rideId = doc.id;
-      // Update firestore status
-      batch.update(doc.ref, { 
-        status: "cancelled",
-        cancelReason: "server_stale_cleanup",
-        cancelledAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-
-      // Reset driver status if matched
-      if (data.driverId) {
-        batch.update(admin.firestore().collection("drivers").doc(data.driverId), {
-          driverState: "ONLINE_IDLE",
-          activeRideId: null,
-          activeBidCount: 0,
+          
+          const paths = data.activeSignalPaths || [];
+          if (paths.length > 0) {
+            const removeUpdate = {};
+            for (const p of paths) {
+              removeUpdate[p] = null;
+            }
+            promises.push(admin.database().ref().update(removeUpdate));
+          }
+          promises.push(admin.database().ref(`ride_declines/${rideId}`).remove());
+          matchedCount++;
         });
       }
-      
-      // Delete from RTDB using stored zone paths
-      const paths = data.activeSignalPaths || [];
-      if (paths.length > 0) {
-        const removeUpdate = {};
-        for (const p of paths) {
-          removeUpdate[p] = null;
-        }
-        promises.push(admin.database().ref().update(removeUpdate));
-      }
-      promises.push(admin.database().ref(`ride_declines/${rideId}`).remove());
-    });
 
-    promises.push(batch.commit());
-    await Promise.all(promises);
-    console.log(`Cleaned up ${staleSnapshot.size} stale matched rides and reset drivers.`);
-    return null;
+      // 2. Cleanup Dead "Started" Sessions
+      const deadStartedSnap = await db.collection("rides")
+        .where("status", "==", "started")
+        .where("startedAt", "<", admin.firestore.Timestamp.fromDate(new Date(staleStartedTimeMs)))
+        .get();
+
+      if (!deadStartedSnap.empty) {
+        deadStartedSnap.forEach((doc) => {
+          const data = doc.data();
+          
+          batch.update(doc.ref, {
+            status: "cancelled",
+            cancelReason: "system_timeout_dead_session",
+            completedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          if (data.driverId) {
+            batch.update(db.collection("drivers").doc(data.driverId), {
+              driverState: "ONLINE_IDLE",
+              activeRideId: null,
+            });
+          }
+          startedCount++;
+        });
+      }
+
+      if (matchedCount > 0 || startedCount > 0) {
+        promises.push(batch.commit());
+        await Promise.all(promises);
+        console.log(`Cleaned up ${matchedCount} stale matched rides and ${startedCount} dead started sessions.`);
+      }
+
+      return null;
+    } catch (e) {
+      console.error("Error cleaning up stale rides:", e);
+      return null;
+    }
   });
 
 /**
@@ -2147,59 +2124,7 @@ exports.onBidStatusChanged = functions.firestore
     }
   });
 
-/**
- * cleanupDeadSessions
- * Scheduled Cron Job (Runs every 30 minutes)
- * Finds rides stuck in 'started' state for > 4 hours and automatically cancels them.
- */
-exports.cleanupDeadSessions = functions.pubsub
-  .schedule("every 30 minutes")
-  .onRun(async (context) => {
-    const db = admin.firestore();
-    const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
-    
-    try {
-      const deadRidesSnap = await db.collection("rides")
-        .where("status", "==", "started")
-        .where("startedAt", "<", admin.firestore.Timestamp.fromDate(fourHoursAgo))
-        .get();
 
-      if (deadRidesSnap.empty) {
-        console.log("No dead ride sessions found for cleanup.");
-        return null;
-      }
-
-      console.log(`Found ${deadRidesSnap.size} dead ride sessions. Cleaning up...`);
-
-      const batch = db.batch();
-      
-      deadRidesSnap.forEach((doc) => {
-        const rideData = doc.data();
-        const rideRef = doc.ref;
-        
-        batch.update(rideRef, {
-          status: "cancelled",
-          cancelReason: "system_timeout_dead_session",
-          completedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        if (rideData.driverId) {
-          const driverRef = db.collection("drivers").doc(rideData.driverId);
-          batch.update(driverRef, {
-            driverState: "ONLINE_IDLE",
-            activeRideId: null,
-          });
-        }
-      });
-
-      await batch.commit();
-      console.log(`Successfully cleaned up ${deadRidesSnap.size} dead ride sessions.`);
-      return null;
-    } catch (e) {
-      console.error("Error cleaning up dead sessions:", e);
-      return null;
-    }
-  });
 
 /**
  * expireRide
@@ -2245,6 +2170,9 @@ exports.expireRide = functions.https.onCall(async (data, context) => {
     }
   });
 
+  await admin.database().ref(`active_bids/${rideId}`).remove();
+  await admin.database().ref(`active_rides/${rideId}`).remove();
+
   return { success: true };
 });
 
@@ -2265,11 +2193,9 @@ exports.processTasks = functions.firestore
         task.paths.forEach(p => { updates[p] = null; });
         await admin.database().ref().update(updates);
       } else if (task.type === "NOTIFY_DRIVER_MATCH") {
-        const driverSnap = await admin.firestore().collection("drivers").doc(task.driverId).get();
-        const fcmToken = driverSnap.data()?.fcmToken;
-        if (fcmToken) {
+        try {
           await admin.messaging().send({
-            token: fcmToken,
+            topic: `driver_${task.driverId}`,
             notification: {
               title: task.title,
               body: task.body,
@@ -2287,6 +2213,8 @@ exports.processTasks = functions.firestore
               },
             },
           });
+        } catch (e) {
+          console.error("Failed to send match notification to driver", e);
         }
       }
 
@@ -2805,7 +2733,7 @@ exports.verifyRazorpayPayment = functions
 
 /**
  * checkSubscriptions
- * Runs every 5 minutes to check for expired subscriptions and upcoming expirations.
+ * Runs every 15 minutes to check for expired subscriptions and upcoming expirations.
  */
 exports.checkSubscriptions = functions.pubsub
   .schedule("every 15 minutes")
@@ -2837,9 +2765,9 @@ exports.checkSubscriptions = functions.pubsub
       console.error("Error setting expired drivers offline:", e);
     }
 
-    // 2. Send FCM alerts for subscriptions expiring in ~1 hour (55 to 60 mins from now)
+    // 2. Send FCM alerts for subscriptions expiring in ~1 hour (45 to 60 mins from now)
     try {
-      const minExpiry = new Date(now.getTime() + 55 * 60000);
+      const minExpiry = new Date(now.getTime() + 45 * 60000);
       const maxExpiry = new Date(now.getTime() + 60 * 60000);
 
       const warningDriversSnap = await db.collection("drivers")
@@ -2878,68 +2806,7 @@ exports.checkSubscriptions = functions.pubsub
     return null;
   });
 
-/**
- * onRideReviewed
- * Triggers when a new review is created.
- * Updates the driver's average rating, total ratings, and compliments map.
- */
-exports.onRideReviewed = functions.firestore
-  .document("reviews/{reviewId}")
-  .onCreate(async (snap, context) => {
-    const reviewData = snap.data();
-    const { driverId, rating, tags } = reviewData;
 
-    if (!driverId || typeof rating !== "number") {
-      console.log("Missing driverId or rating in review, skipping.");
-      return null;
-    }
-
-    const db = admin.firestore();
-    const driverRef = db.collection("drivers").doc(driverId);
-
-    try {
-      await db.runTransaction(async (txn) => {
-        const driverSnap = await txn.get(driverRef);
-        if (!driverSnap.exists) {
-          console.log(`Driver ${driverId} not found, skipping review update.`);
-          return;
-        }
-
-        const driverData = driverSnap.data();
-        const oldRating = driverData.rating || 0;
-        const oldTotalRatings = driverData.totalRatings || 0;
-
-        const newTotalRatings = oldTotalRatings + 1;
-        const newTotalRatingSum = (oldRating * oldTotalRatings) + rating;
-        const newRating = newTotalRatingSum / newTotalRatings;
-
-        const updates = {
-          rating: newRating,
-          totalRatings: admin.firestore.FieldValue.increment(1),
-        };
-
-        if (Array.isArray(tags) && tags.length > 0) {
-          const oldCompliments = driverData.compliments || {};
-          const newCompliments = { ...oldCompliments };
-          
-          tags.forEach((tag) => {
-            if (typeof tag === "string") {
-              newCompliments[tag] = (newCompliments[tag] || 0) + 1;
-            }
-          });
-          
-          updates.compliments = newCompliments;
-        }
-
-        txn.update(driverRef, updates);
-      });
-      console.log(`Successfully updated driver ${driverId} rating based on review ${context.params.reviewId}`);
-    } catch (error) {
-      console.error(`Error updating driver ${driverId} for review ${context.params.reviewId}:`, error);
-    }
-
-    return null;
-  });
 
 
 // --- Daily Stats Function ---
@@ -3185,11 +3052,11 @@ exports.initDashboardStats = functions.https.onRequest(async (req, res) => {
 
 
 // Triggered when feature flags config is updated
-exports.onFeatureFlagUpdate = functions.firestore
-  .document('config/feature_flags')
+exports.onFeatureFlagUpdateRTDB = functions.database
+  .ref('/config/feature_flags')
   .onUpdate(async (change, context) => {
-    const beforeData = change.before.data() || {};
-    const afterData = change.after.data() || {};
+    const beforeData = change.before.val() || {};
+    const afterData = change.after.val() || {};
 
     const maintenanceBefore = beforeData.maintenance_mode === true;
     const maintenanceAfter = afterData.maintenance_mode === true;
@@ -3238,5 +3105,138 @@ exports.onFeatureFlagUpdate = functions.firestore
         console.error('Error sending maintenance mode notifications:', error);
       }
     }
+
+    // Handle Referral Program toggles
+    const referralsBefore = beforeData.enable_referrals !== false; // Default is true
+    const referralsAfter = afterData.enable_referrals !== false;
+
+    if (referralsBefore !== referralsAfter) {
+      let title = '';
+      let body = '';
+
+      if (!referralsAfter) {
+        title = 'Referral Program Paused ⏸️';
+        body = 'Our Refer & Earn program is taking a short break. You can still view your past earnings in the app!';
+      } else {
+        title = 'Referral Program is Back! 🎉';
+        body = 'Great news! The Refer & Earn program is active again. Start referring other drivers to get your 7-day free subscription!';
+      }
+
+      const payloadDriverReferral = {
+        topic: 'drivers',
+        notification: {
+          title: title,
+          body: body,
+        },
+        data: {
+          type: 'referral_broadcast', // Custom type so frontend can show Toast + Notification
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        },
+      };
+
+      try {
+        await admin.messaging().send(payloadDriverReferral);
+        console.log('Successfully sent referral program notifications to drivers');
+      } catch (error) {
+        console.error('Error sending referral program notifications:', error);
+      }
+    }
+
     return null;
+  });
+
+// ============================================================
+// CRON JOBS
+// ============================================================
+/**
+ * cleanupRTDB
+ * Runs every 24 hours to delete old rate limit and idempotency nodes from RTDB.
+ */
+exports.cleanupRTDB = functions.pubsub.schedule("every 24 hours").onRun(async (context) => {
+  const rtdb = admin.database();
+  const now = Date.now();
+  
+  // 1. Clean up operations older than 7 days
+  const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
+  const opsSnap = await rtdb.ref("operations").orderByChild("timestamp").endAt(sevenDaysAgo).once("value");
+  const opsUpdates = {};
+  opsSnap.forEach(child => {
+    opsUpdates[child.key] = null;
+  });
+  if (Object.keys(opsUpdates).length > 0) {
+    await rtdb.ref("operations").update(opsUpdates);
+  }
+
+  // 2. Clean up rate_limits older than 1 hour
+  const oneHourAgo = now - (60 * 60 * 1000);
+  const limitsSnap = await rtdb.ref("rate_limits").orderByChild("windowStart").endAt(oneHourAgo).once("value");
+  const limitUpdates = {};
+  limitsSnap.forEach(child => {
+    limitUpdates[child.key] = null;
+  });
+  if (Object.keys(limitUpdates).length > 0) {
+    await rtdb.ref("rate_limits").update(limitUpdates);
+  }
+
+  console.log(`Cleaned up ${Object.keys(opsUpdates).length} old operations and ${Object.keys(limitUpdates).length} old rate limits from RTDB.`);
+  return null;
+});
+
+// ============================================================
+// DYNAMIC ADVERTISEMENTS (REMOTE CONFIG)
+// ============================================================
+/**
+ * syncPromoConfig
+ * Automatically updates Firebase Remote Config whenever an ad campaign is modified in Firestore.
+ */
+exports.syncPromoConfig = functions.firestore
+  .document('ad_campaigns/{campaignId}')
+  .onWrite(async (change, context) => {
+    try {
+      const db = admin.firestore();
+      // 1. Find the active campaign
+      const activeQuery = await db.collection('ad_campaigns')
+        .where('isActive', '==', true)
+        .limit(1)
+        .get();
+
+      let promoPayload = { isActive: false };
+
+      if (!activeQuery.empty) {
+        const data = activeQuery.docs[0].data();
+        promoPayload = {
+          isActive: true,
+          imageUrl: data.imageUrl || '',
+          title: data.title || '',
+          actionUrl: data.actionUrl || '',
+          targetLat: data.targetLat || 0,
+          targetLng: data.targetLng || 0,
+          radiusKm: data.radiusKm || 0,
+          campaignId: data.id || activeQuery.docs[0].id,
+        };
+      }
+
+      // 2. Get the current active Remote Config template
+      const template = await admin.remoteConfig().getTemplate();
+
+      // 3. Add or update the 'promotional_banner' parameter
+      template.parameters = template.parameters || {};
+      template.parameters['promotional_banner'] = {
+        defaultValue: {
+          value: JSON.stringify(promoPayload)
+        },
+        valueType: 'STRING',
+        description: 'Dynamic Ad Campaign Payload'
+      };
+
+      // 4. Validate and publish the updated template
+      const validatedTemplate = await admin.remoteConfig().validateTemplate(template);
+      const publishedTemplate = await admin.remoteConfig().publishTemplate(validatedTemplate);
+
+      console.log("Successfully published new Remote Config template:", publishedTemplate.version.versionNumber);
+      return null;
+    } catch (error) {
+      console.error("Error syncing Remote Config:", error);
+      return null;
+    }
   });

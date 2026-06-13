@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
@@ -186,24 +187,76 @@ class _ReferralScreenState extends State<ReferralScreen>
         },
         color: AppTheme.primary,
         backgroundColor: Colors.white,
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildStatsHeaderCard(),
-              const SizedBox(height: 24),
-              _buildReferralCodeSection(),
-              const SizedBox(height: 24),
-              _buildQrSection(),
-              const SizedBox(height: 28),
-              _buildReferredDriversSection(),
-              const SizedBox(height: 28),
-              _buildHowItWorksSection(),
-            ],
-          ),
+        child: StreamBuilder<DatabaseEvent>(
+          stream: FirebaseDatabase.instance.ref('config/feature_flags/enable_referrals').onValue,
+          builder: (context, snapshot) {
+            final isEnabled = snapshot.data?.snapshot.value != false; // true by default
+
+            return SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (!isEnabled) ...[
+                    _buildPausedBanner(),
+                    const SizedBox(height: 24),
+                  ],
+                  _buildStatsHeaderCard(),
+                  if (isEnabled) ...[
+                    const SizedBox(height: 24),
+                    _buildReferralCodeSection(),
+                    const SizedBox(height: 24),
+                    _buildQrSection(),
+                  ],
+                  const SizedBox(height: 28),
+                  _buildReferredDriversSection(),
+                  if (isEnabled) ...[
+                    const SizedBox(height: 28),
+                    _buildHowItWorksSection(),
+                  ],
+                ],
+              ),
+            );
+          }
         ),
+      ),
+    );
+  }
+
+  // ─── Paused Banner ───────────────────────────────────────────────
+  Widget _buildPausedBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.warning.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.warning.withValues(alpha: 0.5), width: 1.5),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.pause_circle_filled, color: AppTheme.warning, size: 36),
+          const SizedBox(height: 12),
+          Text(
+            'Program Paused',
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.warning,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Our Refer & Earn program is currently taking a short break. Check back later for new rewards!\n\nYou can still view your past earnings below.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: AppTheme.text,
+              height: 1.5,
+            ),
+          ),
+        ],
       ),
     );
   }

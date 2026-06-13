@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../utils/custom_toast.dart';
+import 'package:provider/provider.dart';
+import '../providers/driver_provider.dart';
 
 class ReportIssueScreen extends StatefulWidget {
   final String? initialRideId;
@@ -93,10 +95,11 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
       String phone = '';
 
       if (user != null) {
-        final doc = await FirebaseFirestore.instance.collection('drivers').doc(user.uid).get();
-        if (doc.exists) {
-          name = doc.data()?['name'] ?? 'Unknown Driver';
-          phone = doc.data()?['phone'] ?? '';
+        final driverProvider = Provider.of<DriverProvider>(context, listen: false);
+        final data = driverProvider.profile;
+        if (data != null) {
+          name = data['name'] ?? 'Unknown Driver';
+          phone = data['phone'] ?? '';
         }
       }
 

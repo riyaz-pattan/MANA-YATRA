@@ -9,6 +9,7 @@ import 'package:flutter_map/flutter_map.dart' as fmap;
 import 'package:latlong2/latlong.dart' as latlong2;
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
+import '../../core/providers/config_provider.dart';
 
 class NotificationSettingsScreen extends ConsumerStatefulWidget {
   const NotificationSettingsScreen({super.key});
@@ -39,15 +40,12 @@ class _NotificationSettingsScreenState extends ConsumerState<NotificationSetting
 
   Future<void> _loadAlertSettings() async {
     try {
-      final doc = await FirebaseFirestore.instance.collection('admin_settings').doc('alerts').get();
-      if (doc.exists) {
-        final data = doc.data()!;
-        if (mounted) {
-          setState(() {
-            _alertNewDriver = data['newDriverRegistration'] ?? true;
-            _alertDailyEarnings = data['dailyEarningsSummary'] ?? false;
-          });
-        }
+      final data = await ref.read(notificationConfigProvider.future);
+      if (mounted) {
+        setState(() {
+          _alertNewDriver = data['newDriverRegistration'] ?? true;
+          _alertDailyEarnings = data['dailyEarningsSummary'] ?? false;
+        });
       }
     } catch (_) {}
   }
@@ -89,7 +87,7 @@ class _NotificationSettingsScreenState extends ConsumerState<NotificationSetting
       };
       
       if (_scheduledTime != null) {
-        payload['scheduledTime'] = _scheduledTime!.toIso8601String();
+        payload['scheduledTime'] = _scheduledTime!.toUtc().toIso8601String();
       }
       
       if (_useGeofence && _targetAudience != 'users') {
@@ -151,7 +149,20 @@ class _NotificationSettingsScreenState extends ConsumerState<NotificationSetting
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Push Notifications', style: GoogleFonts.inter(fontSize: isDesktop ? 24 : 20, fontWeight: FontWeight.w700, color: textColor)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Push Notifications', style: GoogleFonts.inter(fontSize: isDesktop ? 24 : 20, fontWeight: FontWeight.w700, color: textColor)),
+              IconButton(
+                icon: Icon(Icons.refresh_rounded, color: text2Color),
+                tooltip: 'Refresh Templates',
+                onPressed: () {
+                  ref.invalidate(notificationConfigProvider);
+                  _loadAlertSettings();
+                },
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
           Text('Broadcast messages to drivers or riders.', style: GoogleFonts.inter(fontSize: 14, color: text3Color)),
           const SizedBox(height: 32),

@@ -11,6 +11,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_remote_config/firebase_remote_config.dart';
+import 'dart:convert';
 import '../config/theme.dart';
 import '../config/constants.dart';
 import '../utils/map_style.dart';
@@ -32,6 +34,7 @@ import 'package:uuid/uuid.dart';
 import '../widgets/premium_retry_button.dart';
 import '../utils/marker_animator.dart';
 import '../utils/map_utils.dart';
+import '../widgets/promo_banner_dialog.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -473,6 +476,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 15),
         );
         setState(() => _locating = false);
+        _checkPromoCampaign(pos.latitude, pos.longitude);
 
         // If online, start RTDB signal listener
         if (provider.isOnline) {
@@ -481,6 +485,43 @@ class _DashboardScreenState extends State<DashboardScreen>
       }
     } catch (e) {
       if (mounted) setState(() => _locating = false);
+    }
+  }
+
+  Future<void> _checkPromoCampaign(double currentLat, double currentLng) async {
+    try {
+      final remoteConfig = FirebaseRemoteConfig.instance;
+      final promoJson = remoteConfig.getString('promotional_banner');
+      
+      if (promoJson.isEmpty) return;
+
+      final Map<String, dynamic> promoData = jsonDecode(promoJson);
+      
+      final bool isActive = promoData['isActive'] ?? false;
+      if (!isActive) return;
+
+      final targetLat = (promoData['targetLat'] as num?)?.toDouble() ?? 0.0;
+      final targetLng = (promoData['targetLng'] as num?)?.toDouble() ?? 0.0;
+      final radiusKm = (promoData['radiusKm'] as num?)?.toDouble() ?? 0.0;
+
+      if (targetLat != 0.0 && targetLng != 0.0 && radiusKm > 0) {
+        final distanceInMeters = Geolocator.distanceBetween(
+          currentLat,
+          currentLng,
+          targetLat,
+          targetLng,
+        );
+
+        if (distanceInMeters > (radiusKm * 1000)) {
+          return;
+        }
+      }
+
+      if (mounted) {
+        PromoBannerDialog.showIfEligible(context, promoData);
+      }
+    } catch (e) {
+      debugPrint('Error checking promo campaign: $e');
     }
   }
 

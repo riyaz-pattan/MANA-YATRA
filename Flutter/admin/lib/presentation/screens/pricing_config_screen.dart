@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/services/audit_log_service.dart';
+import '../../core/providers/config_provider.dart';
 
 // ─── Fare calculation using tiered pricing ───────────────────────────────────
 double _calculateFare(double distanceKm, Map<String, double> c) {
@@ -140,18 +141,13 @@ class _PricingConfigScreenState extends ConsumerState<PricingConfigScreen>
     super.dispose();
   }
 
-  // ── Load from Firestore ──────────────────────────────────────────────────
+  // ── Load from memory / Firestore ──────────────────────────────────────────
   Future<void> _loadConfig() async {
+    setState(() => _isLoading = true);
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('config')
-          .doc('pricing')
-          .get();
-      if (doc.exists) {
-        final data = doc.data()!;
-        _applyData(data['auto'], _autoCtrl, _autoDefaults);
-        _applyData(data['bike'], _bikeCtrl, _bikeDefaults);
-      }
+      final data = await ref.read(pricingConfigProvider.future);
+      _applyData(data['auto'], _autoCtrl, _autoDefaults);
+      _applyData(data['bike'], _bikeCtrl, _bikeDefaults);
     } catch (e) {
       debugPrint('Error loading pricing config: $e');
     } finally {
@@ -294,9 +290,35 @@ class _PricingConfigScreenState extends ConsumerState<PricingConfigScreen>
 
     return Column(
       children: [
+        // ── Header & Refresh Button ──
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Pricing Configuration',
+                style: GoogleFonts.inter(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                ),
+              ),
+              IconButton(
+                icon: Icon(Icons.refresh_rounded, color: text2),
+                tooltip: 'Refresh Configuration',
+                onPressed: () {
+                  ref.invalidate(pricingConfigProvider);
+                  _loadConfig();
+                },
+              ),
+            ],
+          ),
+        ),
+
         // ── Vehicle type tab bar ──
         Container(
-          margin: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+          margin: const EdgeInsets.fromLTRB(24, 16, 24, 0),
           decoration: BoxDecoration(
             color: bg2,
             borderRadius: BorderRadius.circular(12),

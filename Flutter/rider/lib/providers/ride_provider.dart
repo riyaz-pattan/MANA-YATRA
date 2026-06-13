@@ -30,6 +30,7 @@ class RideProvider extends ChangeNotifier {
   Map<String, dynamic>? _activeRide;
   Map<String, dynamic>? _selectedBid;
   String? _persistedRideId; // Loaded from SharedPreferences on startup
+  String? _persistedRideStatus; // Tracks status on startup recovery
   StreamSubscription<DocumentSnapshot>? _profileSubscription;
 
   static const _kActiveRideKey = 'rider_active_ride_id';
@@ -54,6 +55,7 @@ class RideProvider extends ChangeNotifier {
   Map<String, dynamic>? get selectedBid => _selectedBid;
   /// Non-null when we recovered a ride ID from local storage on cold start.
   String? get persistedRideId => _persistedRideId;
+  String? get persistedRideStatus => _persistedRideStatus;
   List<Map<String, dynamic>> get nearbyDrivers => _nearbyDrivers;
 
   // Setters
@@ -200,6 +202,7 @@ class RideProvider extends ChangeNotifier {
           if (status == 'searching' || status == 'bidding' || 
               status == 'matched' || status == 'started') {
             _persistedRideId = id;
+            _persistedRideStatus = status;
             notifyListeners();
             return;
           }
@@ -225,6 +228,7 @@ class RideProvider extends ChangeNotifier {
   /// Firestore listener confirms the ride is completed/cancelled.
   void clearPersistedRideId() {
     _persistedRideId = null;
+    _persistedRideStatus = null;
     _persistRideId(null);
     notifyListeners();
   }

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'config/firebase_config.dart';
@@ -24,6 +25,7 @@ import 'screens/dashboard_screen.dart';
 import 'screens/active_ride_screen.dart';
 import 'screens/subscription_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'utils/custom_toast.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
@@ -37,7 +39,11 @@ import 'repositories/auth_repository.dart';
 import 'services/analytics_service.dart';
 import 'services/pricing_service.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
-import 'package:upgrader/upgrader.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:in_app_update/in_app_update.dart';
+import 'dart:io';
+import 'utils/version_utils.dart';
+import 'screens/force_update_screen.dart';
 import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/referral_screen.dart';
@@ -65,6 +71,7 @@ late final FirestoreRideRepository rideRepository;
 late final FirebaseAuthRepository authRepository;
 late final AnalyticsService analyticsService;
 late final PricingService pricingService;
+late final PackageInfo packageInfo;
 
 void main() {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
@@ -102,6 +109,17 @@ class _AppInitializerState extends State<AppInitializer> {
         await dotenv.load(fileName: ".env");
         await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
 
+        final remoteConfig = FirebaseRemoteConfig.instance;
+        await remoteConfig.setConfigSettings(RemoteConfigSettings(
+          fetchTimeout: const Duration(minutes: 1),
+          minimumFetchInterval: const Duration(minutes: 1), // Reduced for testing dynamic ads
+        ));
+        try {
+          await remoteConfig.fetchAndActivate();
+        } catch (e) {
+          debugPrint('Failed to fetch remote config: $e');
+        }
+
         await FirebaseAppCheck.instance.activate(
           androidProvider: kDebugMode
               ? AndroidProvider.debug
@@ -123,6 +141,8 @@ class _AppInitializerState extends State<AppInitializer> {
         analyticsService = AnalyticsService();
         pricingService = PricingService();
         await pricingService.init();
+
+        packageInfo = await PackageInfo.fromPlatform();
 
         // Initialize FCM in the background (non-blocking)
         _initFCM();
@@ -173,8 +193,19 @@ void _initFCM() {
 
     // Regular notification messages (e.g., admin broadcasts, driver approval)
     if (message.notification != null) {
-      if (type == 'broadcast' || type == 'driver_rejected' || type == 'driver_approved') {
+      if (type == 'broadcast' || type == 'driver_rejected' || type == 'driver_approved' || type == 'referral_broadcast') {
         LocalNotificationsService.display(message);
+        
+        // Also show an in-app toast for broadcasts so the driver definitely sees it while in the app
+        if (type == 'broadcast' || type == 'referral_broadcast') {
+          final ctx = navigatorKey.currentContext;
+          if (ctx != null && ctx.mounted) {
+            CustomToast.show(
+              context: ctx,
+              message: '${message.notification?.title ?? ''}\n${message.notification?.body ?? ''}',
+            );
+          }
+        }
       } else {
         final ctx = navigatorKey.currentContext;
         if (ctx != null && ctx.mounted) {
@@ -259,11 +290,21 @@ class ManaYatraDriverApp extends StatelessWidget {
         Provider<AuthRepository>.value(value: authRepository),
         ChangeNotifierProvider.value(value: pricingService),
       ],
-      child: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('config').doc('feature_flags').snapshots(),
+      child: StreamBuilder<DatabaseEvent>(
+        stream: FirebaseDatabase.instance.ref('config').onValue,
         builder: (context, configSnap) {
-          final isMaintenance = configSnap.data?.data() != null 
-              && (configSnap.data!.data() as Map<String, dynamic>)['maintenance_mode'] == true;
+          final rawData = configSnap.data?.snapshot.value;
+          final rawMap = rawData as Map<dynamic, dynamic>?;
+          final isMaintenance = rawMap != null && rawMap['feature_flags']?['maintenance_mode'] == true;
+
+          final appVersionsRaw = rawMap?['app_versions'];
+          final appVersions = appVersionsRaw is Map ? appVersionsRaw['driver'] as Map? : null;
+          final minVersion = appVersions?['min_required_version']?.toString() ?? '0.0.0';
+          final latestVersion = appVersions?['latest_version']?.toString() ?? '0.0.0';
+          final currentVersion = packageInfo.version;
+
+          final isForceUpdate = compareVersions(currentVersion, minVersion) < 0;
+          final needsFlexibleUpdate = !isForceUpdate && compareVersions(currentVersion, latestVersion) < 0;
 
           return MaterialApp(
             scaffoldMessengerKey: rootScaffoldMessengerKey,
@@ -275,6 +316,11 @@ class ManaYatraDriverApp extends StatelessWidget {
               return Consumer<DriverProvider>(
                 builder: (context, provider, _) {
                   final hasActiveRide = provider.persistedRideId != null;
+
+                  if (isForceUpdate) {
+                    return const ForceUpdateScreen();
+                  }
+
                   // Lock out if maintenance is ON and the user does NOT have an active ride
                   if (isMaintenance && !hasActiveRide) {
                     return const MaintenanceScreen();
@@ -283,16 +329,63 @@ class ManaYatraDriverApp extends StatelessWidget {
                 },
               );
             },
-            home: UpgradeAlert(
-              showIgnore: true,
-              showLater: true,
-              upgrader: Upgrader(),
+            home: FlexibleUpdateWrapper(
+              needsFlexibleUpdate: needsFlexibleUpdate,
               child: const AuthGate(),
             ),
           );
         }
       ),
     );
+  }
+}
+
+class FlexibleUpdateWrapper extends StatefulWidget {
+  final bool needsFlexibleUpdate;
+  final Widget child;
+  const FlexibleUpdateWrapper({super.key, required this.needsFlexibleUpdate, required this.child});
+
+  @override
+  State<FlexibleUpdateWrapper> createState() => _FlexibleUpdateWrapperState();
+}
+
+class _FlexibleUpdateWrapperState extends State<FlexibleUpdateWrapper> {
+  bool _updateTriggered = false;
+
+  @override
+  void didUpdateWidget(FlexibleUpdateWrapper oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _checkUpdate();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _checkUpdate();
+  }
+
+  void _checkUpdate() {
+    if (widget.needsFlexibleUpdate && !_updateTriggered && Platform.isAndroid) {
+      _updateTriggered = true;
+      _triggerInAppUpdate();
+    }
+  }
+
+  Future<void> _triggerInAppUpdate() async {
+    try {
+      final info = await InAppUpdate.checkForUpdate();
+      if (info.updateAvailability == UpdateAvailability.updateAvailable) {
+        await InAppUpdate.startFlexibleUpdate();
+        await InAppUpdate.completeFlexibleUpdate();
+      }
+    } catch (e) {
+      debugPrint("InAppUpdate Error: \$e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.child;
   }
 }
 

@@ -8,6 +8,9 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_remote_config/firebase_remote_config.dart';
+import 'dart:convert';
+import '../widgets/promo_banner_dialog.dart';
 import '../config/theme.dart';
 import '../config/constants.dart';
 import '../services/pricing_service.dart';
@@ -57,7 +60,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   List<Map<String, dynamic>>? _savedCustomPlaces;
   bool _bidBelowMinimum = false; // tracks min-fare warning state
 
-  StreamSubscription? _rideListener;
+  StreamSubscription? _profileSubscription;
   bool _isLocationCentered = false;
   bool _isFetchingLocation = false;
 
@@ -65,7 +68,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _requestPermissionsSequentially();
-    _listenForActiveRide();
     _loadSavedPlaces();
     _loadCustomIcons();
     _pickupFocusNode.addListener(() {
@@ -92,7 +94,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _bidController.dispose();
     _pickupFocusNode.dispose();
     _dropFocusNode.dispose();
-    _rideListener?.cancel();
     super.dispose();
   }
 
@@ -110,91 +111,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     } catch (e) {
       debugPrint('[HomeScreen] Failed to load custom vehicle icons: $e');
     }
-  }
-
-  void _listenForActiveRide() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-
-    _rideListener = FirebaseFirestore.instance
-        .collection('rides')
-        .where('riderId', isEqualTo: uid)
-        .where(
-          'status',
-          whereIn: ['searching', 'bidding', 'matched', 'started'],
-        )
-        .snapshots()
-        .listen(
-          (snap) {
-            if (snap.docs.isNotEmpty) {
-              if (!mounted) return;
-              try {
-                final ride = snap.docs.first;
-                final data = Map<String, dynamic>.from(ride.data() as Map);
-                data['id'] = ride.id;
-                final provider = context.read<RideProvider>();
-                provider.setActiveRide(data);
-
-                final status = data['status'];
-                final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
-
-                if (status == 'searching' || status == 'bidding') {
-                  if (createdAt != null &&
-                      DateTime.now().difference(createdAt).inMinutes >=
-                          AppConstants.rideExpiryMinutes) {
-                    // Force expire locally if the app was closed and server hasn't cleaned it up yet
-                    FirebaseFirestore.instance
-                        .collection('rides')
-                        .doc(ride.id)
-                        .update({'status': 'expired'});
-                    provider.setActiveRide(null);
-                    return;
-                  }
-
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(
-                      builder: (_) => MatchingScreen(rideId: ride.id),
-                    ),
-                  );
-                } else if (status == 'matched') {
-                  if (createdAt != null &&
-                      DateTime.now().difference(createdAt).inMinutes >= 60) {
-                    // Force expire locally if it's been stuck in matched for over 60 minutes
-                    FirebaseFirestore.instance
-                        .collection('rides')
-                        .doc(ride.id)
-                        .update({
-                          'status': 'cancelled',
-                          'cancelReason': 'local_stale_cleanup',
-                        });
-                    provider.setActiveRide(null);
-                    return;
-                  }
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(
-                      builder: (_) => ActiveRideScreen(rideId: ride.id),
-                    ),
-                  );
-                } else if (status == 'started') {
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(
-                      builder: (_) => ActiveRideScreen(rideId: ride.id),
-                    ),
-                  );
-                }
-              } catch (e) {
-                debugPrint('Error in HomeScreen _listenForActiveRide: $e');
-              }
-            } else {
-              if (mounted) {
-                context.read<RideProvider>().setActiveRide(null);
-              }
-            }
-          },
-          onError: (error) {
-            debugPrint('Firestore stream error in HomeScreen: $error');
-          },
-        );
   }
 
   Future<void> _requestNotificationPermission() async {
@@ -496,6 +412,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _mapController?.animateCamera(
           CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 15),
         );
+        
+        _checkPromoCampaign(pos.latitude, pos.longitude);
       }
     } catch (e) {
       if (mounted) setState(() {});
@@ -526,6 +444,43 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
     }
     return markers;
+  }
+
+  Future<void> _checkPromoCampaign(double currentLat, double currentLng) async {
+    try {
+      final remoteConfig = FirebaseRemoteConfig.instance;
+      final promoJson = remoteConfig.getString('promotional_banner');
+      
+      if (promoJson.isEmpty) return;
+
+      final Map<String, dynamic> promoData = jsonDecode(promoJson);
+      
+      final bool isActive = promoData['isActive'] ?? false;
+      if (!isActive) return;
+
+      final targetLat = (promoData['targetLat'] as num?)?.toDouble() ?? 0.0;
+      final targetLng = (promoData['targetLng'] as num?)?.toDouble() ?? 0.0;
+      final radiusKm = (promoData['radiusKm'] as num?)?.toDouble() ?? 0.0;
+
+      if (targetLat != 0.0 && targetLng != 0.0 && radiusKm > 0) {
+        final distanceInMeters = Geolocator.distanceBetween(
+          currentLat,
+          currentLng,
+          targetLat,
+          targetLng,
+        );
+
+        if (distanceInMeters > (radiusKm * 1000)) {
+          return;
+        }
+      }
+
+      if (mounted) {
+        PromoBannerDialog.showIfEligible(context, promoData);
+      }
+    } catch (e) {
+      debugPrint('Error checking promo campaign: $e');
+    }
   }
 
   Future<void> _loadSavedPlaces() async {

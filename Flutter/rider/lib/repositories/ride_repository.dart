@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_database/firebase_database.dart';
 import '../services/sync_engine.dart';
 import '../models/queue_item.dart';
 
@@ -7,7 +8,7 @@ abstract class RideRepository {
   Future<void> acceptBid(String rideId, String bidId, String operationId);
   Future<void> cancelRide(String rideId, String operationId, {String reason = 'user_cancelled'});
   Stream<DocumentSnapshot> getRideStream(String rideId);
-  Stream<QuerySnapshot> getBidsStream(String rideId);
+  Stream<DatabaseEvent> getBidsStream(String rideId);
 }
 
 class FirestoreRideRepository implements RideRepository {
@@ -64,10 +65,7 @@ class FirestoreRideRepository implements RideRepository {
   }
 
   @override
-  Stream<QuerySnapshot> getBidsStream(String rideId) {
-    return _firestore
-        .collection('bids')
-        .where('rideId', isEqualTo: rideId)
-        .snapshots();
+  Stream<DatabaseEvent> getBidsStream(String rideId) {
+    return FirebaseDatabase.instance.ref('active_bids/$rideId').onValue;
   }
 }

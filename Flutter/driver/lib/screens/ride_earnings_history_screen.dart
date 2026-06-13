@@ -56,8 +56,8 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
 
   void _onScroll() {
     if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
-      if (_selectedFilter == 'All Time' && !_isLoadingMore && _hasMore) {
-        _loadMoreAllTime();
+      if (!_isLoadingMore && _hasMore) {
+        _loadMoreRides();
       }
     }
   }
@@ -91,23 +91,34 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
 
     try {
       if (_selectedFilter != 'All Time') {
-        // Fetch all rides for bounded timeframe
-        final snapshot = await FirebaseFirestore.instance
+        // Fetch totals via aggregation, pagination for list
+        final baseQuery = FirebaseFirestore.instance
             .collection('rides')
             .where('driverId', isEqualTo: user.uid)
             .where('status', isEqualTo: 'completed')
-            .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate!))
+            .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate!));
+            
+        // 1. Get Totals via Aggregation
+        final aggSnapshot = await baseQuery.aggregate(
+          sum('finalPrice'),
+          count(),
+        ).get();
+        
+        _totalEarnings = aggSnapshot.getSum('finalPrice') ?? 0.0;
+        _totalRides = aggSnapshot.count ?? 0;
+        
+        // 2. Fetch first page of rides
+        final snapshot = await baseQuery
             .orderBy('completedAt', descending: true)
+            .limit(_limit)
             .get();
 
         _rides = snapshot.docs;
-        _totalRides = _rides.length;
-        _totalEarnings = 0;
-        
-        for (var doc in _rides) {
-          final data = doc.data() as Map<String, dynamic>;
-          final fareStr = (data['finalPrice'] ?? data['riderBid'] ?? 0).toString();
-          _totalEarnings += double.tryParse(fareStr) ?? 0.0;
+        if (_rides.isNotEmpty) {
+          _lastDocument = _rides.last;
+        }
+        if (_rides.length < _limit) {
+          _hasMore = false;
         }
       } else {
         // All Time: Use aggregation for totals, pagination for list
@@ -148,7 +159,7 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
     }
   }
 
-  Future<void> _loadMoreAllTime() async {
+  Future<void> _loadMoreRides() async {
     if (!_hasMore || _isLoadingMore || _lastDocument == null) return;
     
     setState(() => _isLoadingMore = true);
@@ -156,11 +167,27 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
+    final now = DateTime.now();
+    DateTime? startDate;
+    if (_selectedFilter == 'Today') {
+      startDate = DateTime(now.year, now.month, now.day);
+    } else if (_selectedFilter == 'This Week') {
+      startDate = DateTime(now.year, now.month, now.day).subtract(Duration(days: now.weekday - 1));
+    } else if (_selectedFilter == 'This Month') {
+      startDate = DateTime(now.year, now.month, 1);
+    }
+
     try {
-      final snapshot = await FirebaseFirestore.instance
+      Query baseQuery = FirebaseFirestore.instance
           .collection('rides')
           .where('driverId', isEqualTo: user.uid)
-          .where('status', isEqualTo: 'completed')
+          .where('status', isEqualTo: 'completed');
+
+      if (startDate != null) {
+        baseQuery = baseQuery.where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate));
+      }
+
+      final snapshot = await baseQuery
           .orderBy('completedAt', descending: true)
           .startAfterDocument(_lastDocument!)
           .limit(_limit)

@@ -7,6 +7,7 @@ import 'config/firebase_config.dart';
 import 'core/theme/app_theme.dart';
 import 'core/providers/auth_provider.dart';
 import 'core/router/app_router.dart';
+import 'core/services/admin_notification_service.dart';
 
 void main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
@@ -36,6 +37,10 @@ class ManaYatraAdminApp extends ConsumerWidget {
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
       routerConfig: router,
+      builder: (context, child) {
+        AdminNotificationService().initialize(context);
+        return child!;
+      },
     );
   }
 }

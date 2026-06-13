@@ -7,11 +7,10 @@ import '../config/theme.dart';
 import '../services/google_maps_service.dart';
 import '../utils/custom_toast.dart';
 import 'profile_details_screen.dart';
-import 'ride_history_screen.dart';
 import 'settings_screen.dart';
 import 'support_screen.dart';
-import 'emergency_contacts_screen.dart';
 import '../utils/skeleton.dart';
+import 'package:provider/provider.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -21,6 +20,168 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  bool _isPlacesExpanded = false;
+  // ── Emergency Contact Logic ────────────────────────────────────
+  final _phoneController = TextEditingController();
+  final _nameController = TextEditingController();
+  bool _isAdding = false;
+
+  Future<void> _saveEmergencyContact({Map<String, dynamic>? oldContact}) async {
+    final name = _nameController.text.trim();
+    final phone = _phoneController.text.trim();
+
+    if (name.isEmpty || phone.isEmpty) {
+      CustomToast.show(context: context, message: 'Please enter both name and phone', isError: true);
+      return;
+    }
+
+    // Basic phone validation (at least 10 digits)
+    if (phone.replaceAll(RegExp(r'\D'), '').length < 10) {
+       CustomToast.show(context: context, message: 'Please enter a valid phone number', isError: true);
+       return;
+    }
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    setState(() => _isAdding = true);
+
+    try {
+      final newContact = {
+        'name': name,
+        'phone': phone,
+        'addedAt': oldContact?['addedAt'] ?? DateTime.now().toIso8601String(),
+      };
+
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'emergencyContacts': [newContact]
+      });
+
+      _nameController.clear();
+      _phoneController.clear();
+      if (!mounted) return;
+      Navigator.pop(context); // Close the bottom sheet
+      CustomToast.show(context: context, message: oldContact == null ? 'Emergency contact added' : 'Emergency contact updated');
+    } catch (e) {
+      if (!mounted) return;
+      CustomToast.show(context: context, message: 'Failed to save contact', isError: true);
+    } finally {
+      if (mounted) setState(() => _isAdding = false);
+    }
+  }
+
+  Future<void> _removeEmergencyContact(Map<String, dynamic> contact) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Remove Emergency Contact?',
+            style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+        content: Text('This will remove your emergency contact.',
+            style: GoogleFonts.inter(color: AppTheme.text2)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child:
+                Text('Cancel', style: GoogleFonts.inter(color: AppTheme.text3)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.danger,
+              minimumSize: const Size(80, 40),
+            ),
+            child: Text('Remove', style: GoogleFonts.inter()),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(uid).update({
+          'emergencyContacts': FieldValue.delete()
+        });
+        if (mounted) CustomToast.show(context: context, message: 'Contact removed');
+      } catch (e) {
+        if (mounted) CustomToast.show(context: context, message: 'Failed to remove contact', isError: true);
+      }
+    }
+  }
+
+  void _showContactBottomSheet({Map<String, dynamic>? contactToEdit}) {
+    if (contactToEdit != null) {
+      _nameController.text = contactToEdit['name'] ?? '';
+      _phoneController.text = contactToEdit['phone'] ?? '';
+    } else {
+      _nameController.clear();
+      _phoneController.clear();
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                contactToEdit == null ? 'Add Emergency Contact' : 'Edit Emergency Contact',
+                style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'This person will be notified when you use the SOS button during a ride.',
+                style: GoogleFonts.inter(fontSize: 13, color: AppTheme.text3),
+              ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: _nameController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Contact Name',
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _phoneController,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'Phone Number',
+                  prefixIcon: Icon(Icons.phone_outlined),
+                  hintText: '+91 00000 00000',
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isAdding ? null : () => _saveEmergencyContact(oldContact: contactToEdit),
+                  child: _isAdding 
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : Text(contactToEdit == null ? 'Save Contact' : 'Update Contact'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── Saved Places Logic ────────────────────────────────────
   Future<void> _editSavedPlace(String label, String firestoreKey) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -314,7 +475,160 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    
+    final userDoc = Provider.of<DocumentSnapshot?>(context);
+
+    Widget content;
+    if (uid == null) {
+      content = const Center(child: Text("Not signed in"));
+    } else if (userDoc == null) {
+      content = ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        children: const [
+          SkeletonBox(width: double.infinity, height: 96, borderRadius: 16),
+          SizedBox(height: 24),
+          SkeletonBox(width: 100, height: 16, borderRadius: 4),
+          SizedBox(height: 12),
+          SkeletonBox(width: double.infinity, height: 180, borderRadius: 16),
+          SizedBox(height: 24),
+          SkeletonBox(width: 100, height: 16, borderRadius: 4),
+          SizedBox(height: 12),
+          SkeletonBox(width: double.infinity, height: 140, borderRadius: 16),
+        ],
+      );
+    } else {
+      final data = userDoc.data() as Map<String, dynamic>?;
+      final name = data?['name'] ?? 'Rider';
+      final phone = FirebaseAuth.instance.currentUser?.phoneNumber ?? 'Unknown';
+      final createdAt = data?['createdAt'] as Timestamp?;
+      final memberSince = createdAt != null ? createdAt.toDate().year.toString() : '2026';
+      final totalRides = data?['totalRides'] ?? 0;
+
+      content = ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        children: [
+          // ── Header Profile Info ──
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.bg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppTheme.border.withValues(alpha: 0.5)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const CircleAvatar(
+                  radius: 36,
+                  backgroundColor: AppTheme.bg2,
+                  child: Icon(Icons.person, size: 36, color: AppTheme.text3),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w800, color: AppTheme.text),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        phone,
+                        style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.edit, color: AppTheme.primary),
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
+                  ),
+                  onPressed: () {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileDetailsScreen()));
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          // ── Stats ──
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              Column(
+                children: [
+                  Text(
+                    totalRides.toString(),
+                    style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: AppTheme.text),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Total Rides',
+                    style: GoogleFonts.inter(fontSize: 13, color: AppTheme.text2),
+                  ),
+                ],
+              ),
+              Container(width: 1, height: 40, color: AppTheme.border.withValues(alpha: 0.5)),
+              Column(
+                children: [
+                  Text(
+                    memberSince,
+                    style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: AppTheme.text),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Member Since',
+                    style: GoogleFonts.inter(fontSize: 13, color: AppTheme.text2),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          
+
+          
+          const SizedBox(height: 24),
+          _buildSectionTitle('Saved Places'),
+          _buildSavedPlacesSection(data),
+
+          const SizedBox(height: 24),
+          _buildSectionTitle('Emergency Contact'),
+          _buildEmergencyContactSection(data),
+          
+          const SizedBox(height: 24),
+          _buildSectionTitle('Preferences'),
+          _buildSettingsGroup(
+            children: [
+              _buildTile(
+                icon: Icons.settings_outlined,
+                title: 'Settings',
+                onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+                },
+                showDivider: true,
+              ),
+              _buildTile(
+                icon: Icons.help_outline,
+                title: 'Help',
+                onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen()));
+                },
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
@@ -323,158 +637,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         elevation: 0,
         centerTitle: true,
       ),
-      body: uid == null 
-          ? const Center(child: Text("Not signed in"))
-          : StreamBuilder<DocumentSnapshot>(
-              stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return ListView(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-                    children: const [
-                      SkeletonBox(width: double.infinity, height: 96, borderRadius: 16),
-                      SizedBox(height: 24),
-                      SkeletonBox(width: 100, height: 16, borderRadius: 4),
-                      SizedBox(height: 12),
-                      SkeletonBox(width: double.infinity, height: 180, borderRadius: 16),
-                      SizedBox(height: 24),
-                      SkeletonBox(width: 100, height: 16, borderRadius: 4),
-                      SizedBox(height: 12),
-                      SkeletonBox(width: double.infinity, height: 140, borderRadius: 16),
-                    ],
-                  );
-                }
-
-                final data = snapshot.data!.data() as Map<String, dynamic>?;
-                final name = data?['name'] ?? 'Rider';
-                final phone = FirebaseAuth.instance.currentUser?.phoneNumber ?? 'Unknown';
-                final createdAt = data?['createdAt'] as Timestamp?;
-                final memberSince = createdAt != null ? createdAt.toDate().year.toString() : '2026';
-                final totalRides = data?['totalRides'] ?? 0;
-
-                return ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-                  children: [
-                    // ── Header Profile Info ──
-                    Column(
-                      children: [
-                        const CircleAvatar(
-                          radius: 48,
-                          backgroundColor: AppTheme.bg2,
-                          child: Icon(Icons.person, size: 48, color: AppTheme.text3),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          name,
-                          style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: AppTheme.text),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          phone,
-                          style: GoogleFonts.inter(fontSize: 16, color: AppTheme.text2),
-                        ),
-                        const SizedBox(height: 16),
-                        OutlinedButton(
-                          onPressed: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileDetailsScreen()));
-                          },
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(140, 40),
-                            padding: const EdgeInsets.symmetric(horizontal: 24),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                            side: const BorderSide(color: AppTheme.border, width: 1),
-                          ),
-                          child: Text('Edit Profile', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 14)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 32),
-                    
-                    // ── Stats ──
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        Column(
-                          children: [
-                            Text(
-                              totalRides.toString(),
-                              style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: AppTheme.text),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Total Rides',
-                              style: GoogleFonts.inter(fontSize: 13, color: AppTheme.text2),
-                            ),
-                          ],
-                        ),
-                        Container(width: 1, height: 40, color: AppTheme.border.withValues(alpha: 0.5)),
-                        Column(
-                          children: [
-                            Text(
-                              memberSince,
-                              style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: AppTheme.text),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Member Since',
-                              style: GoogleFonts.inter(fontSize: 13, color: AppTheme.text2),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    
-                    const SizedBox(height: 24),
-                    _buildSectionTitle('Dashboard'),
-                    _buildSettingsGroup(
-                      children: [
-                        _buildTile(
-                          icon: Icons.history,
-                          title: 'Ride History',
-                          onTap: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => const RideHistoryScreen()));
-                          },
-                          showDivider: true,
-                        ),
-                        _buildTile(
-                          icon: Icons.emergency_share_outlined,
-                          title: 'Emergency Contacts',
-                          onTap: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => const EmergencyContactsScreen()));
-                          },
-                        ),
-                      ],
-                    ),
-                    
-                    const SizedBox(height: 24),
-                    _buildSectionTitle('Saved Places'),
-                    _buildSavedPlacesSection(data),
-
-                    const SizedBox(height: 24),
-                    _buildSectionTitle('Preferences'),
-                    _buildSettingsGroup(
-                      children: [
-                        _buildTile(
-                          icon: Icons.settings_outlined,
-                          title: 'Settings',
-                          onTap: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
-                          },
-                          showDivider: true,
-                        ),
-                        _buildTile(
-                          icon: Icons.help_outline,
-                          title: 'Help',
-                          onTap: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen()));
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
-                );
-              },
-            ),
+      body: content,
     );
   }
 
@@ -541,7 +704,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     ];
 
-    for (var i = 0; i < customPlaces.length; i++) {
+    for (var i = 0; i < (_isPlacesExpanded ? customPlaces.length : (customPlaces.isNotEmpty ? 1 : 0)); i++) {
       final place = customPlaces[i];
       children.add(Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
@@ -550,7 +713,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
       children.add(_buildCustomPlaceRow(place));
     }
 
-    if (customPlaces.length < 5) {
+    if (customPlaces.isNotEmpty) {
+      children.add(
+        InkWell(
+          onTap: () => setState(() => _isPlacesExpanded = !_isPlacesExpanded),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(_isPlacesExpanded ? 'Show Less' : 'Show All Saved Places', style: GoogleFonts.inter(color: AppTheme.primary, fontWeight: FontWeight.w600, fontSize: 13)),
+                const SizedBox(width: 4),
+                Icon(_isPlacesExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: AppTheme.primary, size: 20),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (customPlaces.length < 5 && (_isPlacesExpanded || customPlaces.isEmpty)) {
       children.add(Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Divider(color: AppTheme.border.withValues(alpha: 0.5), height: 1, indent: 44),
@@ -603,6 +785,56 @@ class _ProfileScreenState extends State<ProfileScreen> {
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmergencyContactSection(Map<String, dynamic>? data) {
+    final contacts = (data?['emergencyContacts'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+    final contact = contacts.isNotEmpty ? contacts.first : null;
+
+    return InkWell(
+      onTap: contact == null ? () => _showContactBottomSheet(contactToEdit: null) : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(contact != null ? Icons.emergency_share : Icons.emergency_share_outlined, size: 24, color: contact != null ? AppTheme.danger : AppTheme.text3),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    contact?['name'] ?? 'Add Emergency Contact',
+                    style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.text),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    contact?['phone'] ?? 'For SOS alerts during a ride',
+                    style: GoogleFonts.inter(fontSize: 13, color: contact != null ? AppTheme.text2 : AppTheme.text3),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            if (contact != null) ...[
+              IconButton(
+                icon: const Icon(Icons.edit, size: 20, color: AppTheme.primary),
+                onPressed: () => _showContactBottomSheet(contactToEdit: contact),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete, size: 20, color: AppTheme.danger),
+                onPressed: () => _removeEmergencyContact(contact),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            ] else
+              const Icon(Icons.add, size: 20, color: AppTheme.text),
           ],
         ),
       ),

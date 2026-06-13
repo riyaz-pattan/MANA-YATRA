@@ -112,22 +112,29 @@ class _MatchingScreenState extends State<MatchingScreen>
   }
 
   void _listenBids() {
-    _bidListener = FirebaseFirestore.instance
-        .collection('bids')
-        .where('rideId', isEqualTo: widget.rideId)
-        .snapshots()
-        .listen((snap) {
+    _bidListener = FirebaseDatabase.instance
+        .ref('active_bids/${widget.rideId}')
+        .onValue
+        .listen((event) {
+      if (!event.snapshot.exists) {
+        setState(() => _bids = []);
+        return;
+      }
+      
+      final Map<dynamic, dynamic> bidsMap = event.snapshot.value as Map<dynamic, dynamic>;
+      final List<Map<String, dynamic>> parsedBids = [];
+      
+      bidsMap.forEach((driverId, bidData) {
+        if (bidData is Map) {
+          final data = Map<String, dynamic>.from(bidData);
+          data['id'] = driverId; // bidId is the driverId in Scenario B
+          parsedBids.add(data);
+        }
+      });
+      
       setState(() {
-        _bids = snap.docs.map((d) {
-          final data = d.data();
-          data['id'] = d.id;
-          return data;
-        }).where((b) =>
-            b['status'] != 'rejected' &&
-            b['status'] != 'rejected_by_system' &&
-            b['status'] != 'withdrawn').toList();
-        _bids.sort((a, b) =>
-            (a['price'] as num).compareTo(b['price'] as num));
+        _bids = parsedBids;
+        _bids.sort((a, b) => (a['price'] as num).compareTo(b['price'] as num));
       });
     });
   }
@@ -173,9 +180,11 @@ class _MatchingScreenState extends State<MatchingScreen>
 
   Future<void> _declineBid(String bidId, String driverId) async {
     try {
-      await FirebaseFirestore.instance.collection('bids').doc(bidId).update({
-        'status': 'rejected',
-      });
+      // Remove the bid entirely from the active_bids RTDB folder
+      await FirebaseDatabase.instance
+          .ref('active_bids/${widget.rideId}/$driverId')
+          .remove();
+          
       // Notify driver instantly via RTDB (separate decline node)
       await FirebaseDatabase.instance
           .ref('ride_declines/${widget.rideId}/$driverId')

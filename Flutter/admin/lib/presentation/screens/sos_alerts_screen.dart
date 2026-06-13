@@ -100,7 +100,7 @@ class _SOSAlertsScreenState extends ConsumerState<SOSAlertsScreen> {
     final text3Color = isDark ? AppTheme.darkText3 : AppTheme.lightText3;
 
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('sos_alerts').orderBy('createdAt', descending: true).snapshots(),
+      stream: FirebaseFirestore.instance.collection('sos_alerts').orderBy('createdAt', descending: true).limit(100).snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 

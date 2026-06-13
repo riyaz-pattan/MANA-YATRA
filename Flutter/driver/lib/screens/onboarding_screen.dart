@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -720,101 +721,113 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
               // Referral Code
               if (!widget.isResubmission) ...[
-                const SizedBox(height: 40),
-                GestureDetector(
-                  onTap: () => setState(() => _showReferralField = !_showReferralField),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                    decoration: BoxDecoration(
-                      color: AppTheme.bg,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Row(
+                StreamBuilder<DatabaseEvent>(
+                  stream: FirebaseDatabase.instance.ref('config/feature_flags/enable_referrals').onValue,
+                  builder: (context, snapshot) {
+                    final isEnabled = snapshot.data?.snapshot.value != false; // true by default
+                    if (!isEnabled) return const SizedBox.shrink();
+
+                    return Column(
                       children: [
-                        Icon(
-                          _showReferralField ? Icons.card_giftcard : Icons.card_giftcard_outlined,
-                          size: 22,
-                          color: _showReferralField ? AppTheme.accent : AppTheme.text3,
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Have a referral code?',
-                          style: GoogleFonts.inter(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: _showReferralField ? AppTheme.accent : AppTheme.text2,
+                        const SizedBox(height: 40),
+                        GestureDetector(
+                          onTap: () => setState(() => _showReferralField = !_showReferralField),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                            decoration: BoxDecoration(
+                              color: AppTheme.bg,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  _showReferralField ? Icons.card_giftcard : Icons.card_giftcard_outlined,
+                                  size: 22,
+                                  color: _showReferralField ? AppTheme.accent : AppTheme.text3,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Have a referral code?',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    color: _showReferralField ? AppTheme.accent : AppTheme.text2,
+                                  ),
+                                ),
+                                const Spacer(),
+                                Icon(
+                                  _showReferralField ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                                  size: 22,
+                                  color: AppTheme.text3,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                        const Spacer(),
-                        Icon(
-                          _showReferralField ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                          size: 22,
-                          color: AppTheme.text3,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                AnimatedCrossFade(
-                  firstChild: const SizedBox.shrink(),
-                  secondChild: Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: AppTheme.bg,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: TextField(
-                        controller: _referralCodeController,
-                        textCapitalization: TextCapitalization.characters,
-                        inputFormatters: [UpperCaseTextFormatter()],
-                        maxLength: 6,
-                        onChanged: (val) {
-                          final upper = val.toUpperCase();
-                          if (upper.startsWith('G-')) {
-                            _referralCodeController.text = upper.substring(2);
-                            _referralCodeController.selection = TextSelection.collapsed(offset: _referralCodeController.text.length);
-                          } else if (upper.startsWith('G') && upper.length > 1) {
-                            _referralCodeController.text = upper.substring(1);
-                            _referralCodeController.selection = TextSelection.collapsed(offset: _referralCodeController.text.length);
-                          }
-                          setState(() {});
-                        },
-                        style: GoogleFonts.inter(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 2,
-                        ),
-                        decoration: InputDecoration(
-                          prefixIcon: Padding(
-                            padding: const EdgeInsets.only(left: 16, right: 4),
-                            child: Text(
-                              'G-',
-                              style: GoogleFonts.inter(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 16,
-                                color: AppTheme.text,
+                        AnimatedCrossFade(
+                          firstChild: const SizedBox.shrink(),
+                          secondChild: Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: AppTheme.bg,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: TextField(
+                                controller: _referralCodeController,
+                                textCapitalization: TextCapitalization.characters,
+                                inputFormatters: [UpperCaseTextFormatter()],
+                                maxLength: 6,
+                                onChanged: (val) {
+                                  final upper = val.toUpperCase();
+                                  if (upper.startsWith('G-')) {
+                                    _referralCodeController.text = upper.substring(2);
+                                    _referralCodeController.selection = TextSelection.collapsed(offset: _referralCodeController.text.length);
+                                  } else if (upper.startsWith('G') && upper.length > 1) {
+                                    _referralCodeController.text = upper.substring(1);
+                                    _referralCodeController.selection = TextSelection.collapsed(offset: _referralCodeController.text.length);
+                                  }
+                                  setState(() {});
+                                },
+                                style: GoogleFonts.inter(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 2,
+                                ),
+                                decoration: InputDecoration(
+                                  prefixIcon: Padding(
+                                    padding: const EdgeInsets.only(left: 16, right: 4),
+                                    child: Text(
+                                      'G-',
+                                      style: GoogleFonts.inter(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 16,
+                                        color: AppTheme.text,
+                                      ),
+                                    ),
+                                  ),
+                                  prefixIconConstraints: const BoxConstraints(minWidth: 0),
+                                  suffixIcon: _referralCodeController.text.trim().length == 6
+                                      ? const Icon(Icons.check_circle, color: AppTheme.success, size: 20)
+                                      : null,
+                                  hintText: 'XXXXXX',
+                                  hintStyle: GoogleFonts.inter(
+                                    color: AppTheme.text3,
+                                    letterSpacing: 2,
+                                  ),
+                                  counterText: '',
+                                  border: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                                ),
                               ),
                             ),
                           ),
-                          prefixIconConstraints: const BoxConstraints(minWidth: 0),
-                          suffixIcon: _referralCodeController.text.trim().length == 6
-                              ? const Icon(Icons.check_circle, color: AppTheme.success, size: 20)
-                              : null,
-                          hintText: 'XXXXXX',
-                          hintStyle: GoogleFonts.inter(
-                            color: AppTheme.text3,
-                            letterSpacing: 2,
-                          ),
-                          counterText: '',
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                          crossFadeState: _showReferralField ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                          duration: const Duration(milliseconds: 250),
                         ),
-                      ),
-                    ),
-                  ),
-                  crossFadeState: _showReferralField ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-                  duration: const Duration(milliseconds: 250),
+                      ],
+                    );
+                  }
                 ),
               ],
 

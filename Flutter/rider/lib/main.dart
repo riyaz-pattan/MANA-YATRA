@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'config/firebase_config.dart';
@@ -18,10 +19,12 @@ import 'screens/main_screen.dart';
 import 'screens/profile_setup_screen.dart';
 
 import 'screens/active_ride_screen.dart';
+import 'screens/matching_screen.dart';
 import 'screens/custom_splash_screen.dart';
 import 'screens/maintenance_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'utils/custom_toast.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'services/action_queue_service.dart';
 import 'services/local_notifications_service.dart';
@@ -31,8 +34,11 @@ import 'repositories/ride_repository.dart';
 import 'repositories/auth_repository.dart';
 import 'services/analytics_service.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
-import 'package:upgrader/upgrader.dart';
-
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:in_app_update/in_app_update.dart';
+import 'dart:io';
+import 'utils/version_utils.dart';
+import 'screens/force_update_screen.dart';
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
@@ -49,6 +55,7 @@ late final FirestoreRideRepository rideRepository;
 late final FirebaseAuthRepository authRepository;
 late final AnalyticsService analyticsService;
 late final PricingService pricingService;
+late final PackageInfo packageInfo;
 
 void main() {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
@@ -83,6 +90,17 @@ class _AppInitializerState extends State<AppInitializer> {
         await dotenv.load(fileName: ".env");
         await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
 
+        final remoteConfig = FirebaseRemoteConfig.instance;
+        await remoteConfig.setConfigSettings(RemoteConfigSettings(
+          fetchTimeout: const Duration(minutes: 1),
+          minimumFetchInterval: const Duration(minutes: 1), // Reduced for testing dynamic ads
+        ));
+        try {
+          await remoteConfig.fetchAndActivate();
+        } catch (e) {
+          debugPrint('Failed to fetch remote config: $e');
+        }
+
         await FirebaseAppCheck.instance.activate(
           androidProvider: kDebugMode
               ? AndroidProvider.debug
@@ -100,6 +118,8 @@ class _AppInitializerState extends State<AppInitializer> {
         // Initialize pricing service
         pricingService = PricingService();
         await pricingService.init();
+
+        packageInfo = await PackageInfo.fromPlatform();
 
         rideRepository = FirestoreRideRepository(syncEngine: syncEngine);
         authRepository = FirebaseAuthRepository();
@@ -173,11 +193,21 @@ class ManaYatraRiderApp extends StatelessWidget {
         Provider<RideRepository>.value(value: rideRepository),
         Provider<AuthRepository>.value(value: authRepository),
       ],
-      child: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('config').doc('feature_flags').snapshots(),
+      child: StreamBuilder<DatabaseEvent>(
+        stream: FirebaseDatabase.instance.ref('config').onValue,
         builder: (context, configSnap) {
-          final isMaintenance = configSnap.data?.data() != null 
-              && (configSnap.data!.data() as Map<String, dynamic>)['maintenance_mode'] == true;
+          final rawData = configSnap.data?.snapshot.value;
+          final rawMap = rawData as Map<dynamic, dynamic>?;
+          final isMaintenance = rawMap != null && rawMap['feature_flags']?['maintenance_mode'] == true;
+
+          final appVersionsRaw = rawMap?['app_versions'];
+          final appVersions = appVersionsRaw is Map ? appVersionsRaw['rider'] as Map? : null;
+          final minVersion = appVersions?['min_required_version']?.toString() ?? '0.0.0';
+          final latestVersion = appVersions?['latest_version']?.toString() ?? '0.0.0';
+          final currentVersion = packageInfo.version;
+
+          final isForceUpdate = compareVersions(currentVersion, minVersion) < 0;
+          final needsFlexibleUpdate = !isForceUpdate && compareVersions(currentVersion, latestVersion) < 0;
 
           return MaterialApp(
             scaffoldMessengerKey: rootScaffoldMessengerKey,
@@ -189,6 +219,11 @@ class ManaYatraRiderApp extends StatelessWidget {
               return Consumer<RideProvider>(
                 builder: (context, provider, _) {
                   final hasActiveRide = provider.persistedRideId != null;
+                  
+                  if (isForceUpdate) {
+                    return const ForceUpdateScreen();
+                  }
+
                   // Lock out if maintenance is ON and the user does NOT have an active ride
                   if (isMaintenance && !hasActiveRide) {
                     return const MaintenanceScreen();
@@ -197,16 +232,63 @@ class ManaYatraRiderApp extends StatelessWidget {
                 },
               );
             },
-            home: UpgradeAlert(
-              showIgnore: true,
-              showLater: true,
-              upgrader: Upgrader(),
+            home: FlexibleUpdateWrapper(
+              needsFlexibleUpdate: needsFlexibleUpdate,
               child: const AuthGate(),
             ),
           );
         }
       ),
     );
+  }
+}
+
+class FlexibleUpdateWrapper extends StatefulWidget {
+  final bool needsFlexibleUpdate;
+  final Widget child;
+  const FlexibleUpdateWrapper({super.key, required this.needsFlexibleUpdate, required this.child});
+
+  @override
+  State<FlexibleUpdateWrapper> createState() => _FlexibleUpdateWrapperState();
+}
+
+class _FlexibleUpdateWrapperState extends State<FlexibleUpdateWrapper> {
+  bool _updateTriggered = false;
+
+  @override
+  void didUpdateWidget(FlexibleUpdateWrapper oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _checkUpdate();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _checkUpdate();
+  }
+
+  void _checkUpdate() {
+    if (widget.needsFlexibleUpdate && !_updateTriggered && Platform.isAndroid) {
+      _updateTriggered = true;
+      _triggerInAppUpdate();
+    }
+  }
+
+  Future<void> _triggerInAppUpdate() async {
+    try {
+      final info = await InAppUpdate.checkForUpdate();
+      if (info.updateAvailability == UpdateAvailability.updateAvailable) {
+        await InAppUpdate.startFlexibleUpdate();
+        await InAppUpdate.completeFlexibleUpdate();
+      }
+    } catch (e) {
+      debugPrint("InAppUpdate Error: \$e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.child;
   }
 }
 
@@ -272,72 +354,59 @@ class AuthGate extends StatelessWidget {
           });
 
           // Check for a persisted active ride (offline startup recovery)
-          return Selector<RideProvider, String?>(
-            selector: (context, provider) => provider.persistedRideId,
-            builder: (context, persistedRideId, _) {
-              if (persistedRideId != null) {
-                return ActiveRideScreen(rideId: persistedRideId);
-              }
-              return _NameCheckGate(user: user);
-            },
+          return StreamProvider<DocumentSnapshot?>.value(
+            value: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
+            initialData: null,
+            child: Selector<RideProvider, RideProvider>(
+              selector: (context, provider) => provider,
+              builder: (context, provider, _) {
+                final persistedRideId = provider.persistedRideId;
+                final status = provider.persistedRideStatus;
+                
+                if (persistedRideId != null) {
+                  if (status == 'searching' || status == 'bidding') {
+                    return MatchingScreen(rideId: persistedRideId);
+                  } else {
+                    return ActiveRideScreen(rideId: persistedRideId);
+                  }
+                }
+                return _NameCheckGate(user: user);
+              },
+            ),
           );
       },
     );
   }
 }
 
-class _NameCheckGate extends StatefulWidget {
+class _NameCheckGate extends StatelessWidget {
   final User user;
   const _NameCheckGate({required this.user});
 
   @override
-  State<_NameCheckGate> createState() => _NameCheckGateState();
-}
-
-class _NameCheckGateState extends State<_NameCheckGate> {
-  late final Stream<DocumentSnapshot> _userStream;
-
-  @override
-  void initState() {
-    super.initState();
-    _userStream = FirebaseFirestore.instance
-        .collection('users')
-        .doc(widget.user.uid)
-        .snapshots();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return StreamBuilder<DocumentSnapshot>(
-      stream: _userStream,
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const CustomSplashScreen();
-        }
+    final doc = Provider.of<DocumentSnapshot?>(context);
 
-        if (snap.hasError) {
-          return MainScreen(key: mainScreenKey);
-        }
+    if (doc == null) {
+      return const CustomSplashScreen();
+    }
 
-        final doc = snap.data;
-        final data = doc?.data() as Map<String, dynamic>?;
-        final hasName =
-            data != null &&
-            data.containsKey('name') &&
-            (data['name']?.toString() ?? '').trim().isNotEmpty;
+    final data = doc.data() as Map<String, dynamic>?;
+    final hasName =
+        data != null &&
+        data.containsKey('name') &&
+        (data['name']?.toString() ?? '').trim().isNotEmpty;
 
-        // If we have data, but it's from cache AND we don't have a name yet,
-        // it might be because the server hasn't sent the real document yet.
-        // So we show loading until we hear from the server to prevent a flash.
-        if (doc != null && doc.metadata.isFromCache && !hasName) {
-          return const CustomSplashScreen();
-        }
+    // If we have data, but it's from cache AND we don't have a name yet,
+    // it might be because the server hasn't sent the real document yet.
+    // So we show loading until we hear from the server to prevent a flash.
+    if (doc.metadata.isFromCache && !hasName) {
+      return const CustomSplashScreen();
+    }
 
-        if (hasName) {
-          return MainScreen(key: mainScreenKey);
-        }
-        return const ProfileSetupScreen();
-      },
-    );
+    if (hasName) {
+      return MainScreen(key: mainScreenKey);
+    }
+    return const ProfileSetupScreen();
   }
 }

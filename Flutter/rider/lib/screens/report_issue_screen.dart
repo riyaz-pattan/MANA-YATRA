@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../utils/custom_toast.dart';
+import 'package:provider/provider.dart';
 
 class ReportIssueScreen extends StatefulWidget {
   final String? initialRideId;
@@ -95,10 +96,11 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
       String phone = '';
 
       if (user != null) {
-        final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-        if (doc.exists) {
-          name = doc.data()?['name'] ?? 'Unknown Rider';
-          phone = doc.data()?['phone'] ?? '';
+        final userDoc = Provider.of<DocumentSnapshot?>(context, listen: false);
+        if (userDoc != null && userDoc.exists) {
+          final data = userDoc.data() as Map<String, dynamic>?;
+          name = data?['name'] ?? 'Unknown Rider';
+          phone = data?['phone'] ?? '';
         }
       }
 

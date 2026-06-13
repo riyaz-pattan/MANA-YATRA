@@ -591,36 +591,7 @@ class _AdminShellState extends ConsumerState<AdminShell>
             tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
           ),
 
-          // ── Notifications ──
-          Stack(
-            children: [
-              IconButton(
-                icon: Icon(
-                  Icons.notifications_outlined,
-                  size: 20,
-                  color: text2Color,
-                ),
-                onPressed: () {
-                  // TODO: Open notifications panel
-                },
-                tooltip: 'Notifications',
-              ),
-              Positioned(
-                right: 8,
-                top: 8,
-                child: Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: AppTheme.danger,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ),
-            ],
-          ),
 
-          const SizedBox(width: 8),
 
           // ── User Profile ──
           PopupMenuButton<String>(
@@ -784,15 +755,7 @@ class _AdminShellState extends ConsumerState<AdminShell>
                   isDark ? ThemeMode.light : ThemeMode.dark;
             },
           ),
-          IconButton(
-            icon: Icon(
-              Icons.notifications_outlined,
-              size: 20,
-              color: isDark ? AppTheme.darkText2 : AppTheme.lightText2,
-            ),
-            onPressed: () {},
-          ),
-          const SizedBox(width: 4),
+
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),

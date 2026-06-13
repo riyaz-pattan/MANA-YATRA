@@ -28,6 +28,7 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
   String _searchQuery = '';
 
   final Set<String> _selectedUsers = {};
+  final Map<String, bool> _localBlockOverrides = {};
 
   int _allCount = 0;
   int _activeCount = 0;
@@ -157,6 +158,7 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
       _users.clear();
       _lastDocument = null;
       _hasMore = true;
+      _localBlockOverrides.clear();
     });
     _fetchUsers();
   }
@@ -168,6 +170,7 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
       _lastDocument = null;
       _hasMore = true;
       _selectedUsers.clear();
+      _localBlockOverrides.clear();
     });
     _fetchUsers();
   }
@@ -369,7 +372,7 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
     final name = data['name'] ?? 'Guest Rider';
     final phone = data['phone'] ?? 'Hidden (Phone Auth)';
     final totalRides = data['totalCompletedRides'] ?? 0;
-    final isBlk = data['isBlocked'] == true || data['isBlocked'] == 'true';
+    final isBlk = _localBlockOverrides[id] ?? (data['isBlocked'] == true || data['isBlocked'] == 'true');
 
     final status = isBlk ? 'Blocked' : 'Active';
     final statusColor = isBlk ? AppTheme.danger : AppTheme.success;
@@ -454,16 +457,21 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
                   'isBlocked': !isBlk,
                 });
                 setState(() {
-                   // Optimistic update locally
-                   final index = _users.indexWhere((doc) => doc.id == id);
-                   if (index != -1) {
-                      // We don't have easy local mutation map like drivers screen, 
-                      // but updating the DB will reflect on next fetch. 
-                      // Let's just re-fetch the users.
+                   _localBlockOverrides[id] = !isBlk;
+                   if (!isBlk) {
+                       _blockedCount++;
+                       _activeCount--;
+                   } else {
+                       _blockedCount--;
+                       _activeCount++;
+                   }
+                   
+                   if (_filterStatus == 'active' && !_localBlockOverrides[id]!) {
+                        _users.removeWhere((d) => d.id == id);
+                   } else if (_filterStatus == 'blocked' && _localBlockOverrides[id]!) {
+                        _users.removeWhere((d) => d.id == id);
                    }
                 });
-                _fetchCounts();
-                _fetchUsers();
               },
             ),
           ],
