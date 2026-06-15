@@ -21,7 +21,6 @@ class AdCampaignScreen extends ConsumerStatefulWidget {
 }
 
 class _AdCampaignScreenState extends ConsumerState<AdCampaignScreen> {
-  final _titleController = TextEditingController();
   final _actionUrlController = TextEditingController();
   Uint8List? _imageBytes;
   bool _isActive = true;
@@ -32,7 +31,6 @@ class _AdCampaignScreenState extends ConsumerState<AdCampaignScreen> {
 
   @override
   void dispose() {
-    _titleController.dispose();
     _actionUrlController.dispose();
     super.dispose();
   }
@@ -45,8 +43,8 @@ class _AdCampaignScreenState extends ConsumerState<AdCampaignScreen> {
   }
 
   Future<void> _publishCampaign() async {
-    if (_titleController.text.trim().isEmpty || _imageBytes == null) {
-      _showSnackBar('Please enter title and select an image', isError: true);
+    if (_imageBytes == null) {
+      _showSnackBar('Please select an image', isError: true);
       return;
     }
     setState(() => _isPublishing = true);
@@ -58,7 +56,6 @@ class _AdCampaignScreenState extends ConsumerState<AdCampaignScreen> {
       final payload = {
         'isActive': _isActive,
         'imageUrl': imageUrl,
-        'title': _titleController.text.trim(),
         'actionUrl': _actionUrlController.text.trim(),
         'targetLat': _targetLat,
         'targetLng': _targetLng,
@@ -80,7 +77,6 @@ class _AdCampaignScreenState extends ConsumerState<AdCampaignScreen> {
       if (mounted) {
         _showSnackBar('Campaign Published!');
         setState(() {
-          _titleController.clear();
           _actionUrlController.clear();
           _imageBytes = null;
         });
@@ -202,7 +198,7 @@ class _AdCampaignScreenState extends ConsumerState<AdCampaignScreen> {
                       height: 50,
                       decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), image: DecorationImage(image: NetworkImage(data['imageUrl'] ?? ''), fit: BoxFit.cover)),
                     ),
-                    title: Text(data['title'] ?? 'No Title', style: GoogleFonts.inter(color: textColor, fontWeight: FontWeight.w600)),
+                    title: Text(data['actionUrl'] != null && data['actionUrl'].toString().isNotEmpty ? 'Link: ${data['actionUrl']}' : 'No Link', style: GoogleFonts.inter(color: textColor, fontWeight: FontWeight.w600)),
                     subtitle: Text('Created: $date', style: GoogleFonts.inter(color: text3Color, fontSize: 12)),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -248,8 +244,6 @@ class _AdCampaignScreenState extends ConsumerState<AdCampaignScreen> {
                   : Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.upload, color: text3Color), Text('Upload Banner', style: GoogleFonts.inter(color: text3Color))]),
             ),
           ),
-          const SizedBox(height: 16),
-          TextField(controller: _titleController, style: GoogleFonts.inter(color: textColor), decoration: InputDecoration(hintText: 'Campaign Title', hintStyle: GoogleFonts.inter(color: text3Color), filled: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)))),
           const SizedBox(height: 16),
           TextField(controller: _actionUrlController, style: GoogleFonts.inter(color: textColor), decoration: InputDecoration(hintText: 'Action Link (Optional)', hintStyle: GoogleFonts.inter(color: text3Color), filled: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)))),
           const SizedBox(height: 16),

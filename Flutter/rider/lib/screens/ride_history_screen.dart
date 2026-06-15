@@ -25,9 +25,25 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
 
   bool _isLoading = true;
   bool _isLoadingMore = false;
-  List<DocumentSnapshot> _rides = [];
-  DocumentSnapshot? _lastDocument;
-  bool _hasMore = true;
+  
+  final Map<String, List<DocumentSnapshot>> _cachedRides = {
+    'All': [],
+    'Completed': [],
+    'Cancelled': [],
+  };
+  
+  final Map<String, DocumentSnapshot?> _cachedLastDocument = {
+    'All': null,
+    'Completed': null,
+    'Cancelled': null,
+  };
+  
+  final Map<String, bool> _cachedHasMore = {
+    'All': true,
+    'Completed': true,
+    'Cancelled': true,
+  };
+
   final int _limit = 15;
   final ScrollController _scrollController = ScrollController();
 
@@ -46,7 +62,7 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
 
   void _onScroll() {
     if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
-      if (!_isLoadingMore && _hasMore) {
+      if (!_isLoadingMore && _cachedHasMore[_selectedFilter]!) {
         _loadMore();
       }
     }
@@ -66,12 +82,18 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
     return query.orderBy('createdAt', descending: true);
   }
 
-  Future<void> _loadData() async {
+  Future<void> _loadData({bool forceRefresh = false}) async {
+    if (!forceRefresh && _cachedRides[_selectedFilter]!.isNotEmpty) {
+      // Data is already cached, no need to fetch or show skeleton
+      setState(() => _isLoading = false);
+      return;
+    }
+
     setState(() {
       _isLoading = true;
-      _rides = [];
-      _lastDocument = null;
-      _hasMore = true;
+      _cachedRides[_selectedFilter] = [];
+      _cachedLastDocument[_selectedFilter] = null;
+      _cachedHasMore[_selectedFilter] = true;
     });
 
     final user = FirebaseAuth.instance.currentUser;
@@ -82,12 +104,14 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
 
     try {
       final snapshot = await _buildQuery(user.uid).limit(_limit).get();
-      _rides = snapshot.docs;
-      if (_rides.isNotEmpty) {
-        _lastDocument = _rides.last;
+      final docs = snapshot.docs;
+      
+      _cachedRides[_selectedFilter] = docs;
+      if (docs.isNotEmpty) {
+        _cachedLastDocument[_selectedFilter] = docs.last;
       }
-      if (_rides.length < _limit) {
-        _hasMore = false;
+      if (docs.length < _limit) {
+        _cachedHasMore[_selectedFilter] = false;
       }
     } catch (e) {
       debugPrint('Error loading rider history: $e');
@@ -98,8 +122,15 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
     }
   }
 
+  Future<void> _onRefresh() async {
+    await _loadData(forceRefresh: true);
+  }
+
   Future<void> _loadMore() async {
-    if (!_hasMore || _isLoadingMore || _lastDocument == null) return;
+    final currentHasMore = _cachedHasMore[_selectedFilter]!;
+    final currentLastDoc = _cachedLastDocument[_selectedFilter];
+    
+    if (!currentHasMore || _isLoadingMore || currentLastDoc == null) return;
     
     setState(() => _isLoadingMore = true);
     
@@ -108,21 +139,21 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
 
     try {
       final snapshot = await _buildQuery(user.uid)
-          .startAfterDocument(_lastDocument!)
+          .startAfterDocument(currentLastDoc)
           .limit(_limit)
           .get();
 
       final newDocs = snapshot.docs;
       if (newDocs.isNotEmpty) {
         setState(() {
-          _rides.addAll(newDocs);
-          _lastDocument = newDocs.last;
+          _cachedRides[_selectedFilter]!.addAll(newDocs);
+          _cachedLastDocument[_selectedFilter] = newDocs.last;
           if (newDocs.length < _limit) {
-            _hasMore = false;
+            _cachedHasMore[_selectedFilter] = false;
           }
         });
       } else {
-        setState(() => _hasMore = false);
+        setState(() => _cachedHasMore[_selectedFilter] = false);
       }
     } catch (e) {
       debugPrint('Error loading more rides: $e');
@@ -174,29 +205,35 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
                     separatorBuilder: (_, __) => const SizedBox(height: 12),
                     itemBuilder: (_, __) => const RideHistoryCardSkeleton(),
                   )
-                : _rides.isEmpty
+                : _cachedRides[_selectedFilter]!.isEmpty
                     ? _buildEmptyState()
-                    : ListView.separated(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 16),
-                        itemCount: _rides.length + (_isLoadingMore ? 1 : 0),
-                        separatorBuilder: (_, __) => Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8.0),
-                          child: Divider(height: 1, color: AppTheme.border.withValues(alpha: 0.5)),
+                    : RefreshIndicator(
+                        onRefresh: _onRefresh,
+                        color: AppTheme.primary,
+                        backgroundColor: AppTheme.bg,
+                        child: ListView.separated(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 16),
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          itemCount: _cachedRides[_selectedFilter]!.length + (_isLoadingMore ? 1 : 0),
+                          separatorBuilder: (_, __) => Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: Divider(height: 1, color: AppTheme.border.withValues(alpha: 0.5)),
+                          ),
+                          itemBuilder: (context, index) {
+                            if (index == _cachedRides[_selectedFilter]!.length) {
+                              return const Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(16.0),
+                                  child: CircularProgressIndicator(),
+                                ),
+                              );
+                            }
+                            final ride = _cachedRides[_selectedFilter]![index].data() as Map<String, dynamic>;
+                            ride['id'] = _cachedRides[_selectedFilter]![index].id;
+                            return _buildRideCard(ride);
+                          },
                         ),
-                        itemBuilder: (context, index) {
-                          if (index == _rides.length) {
-                            return const Center(
-                              child: Padding(
-                                padding: EdgeInsets.all(16.0),
-                                child: CircularProgressIndicator(),
-                              ),
-                            );
-                          }
-                          final ride = _rides[index].data() as Map<String, dynamic>;
-                          ride['id'] = _rides[index].id;
-                          return _buildRideCard(ride);
-                        },
                       ),
           ),
         ],
@@ -274,13 +311,14 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
     final vehicleType = ride['vehicleType'] ?? 'Unknown';
     
     final distance = ride['distanceKm']?.toStringAsFixed(1) ?? '0.0';
-    final duration = ride['durationMin']?.toString() ?? '0';
+    final duration = (ride['actualDurationMin'] ?? ride['durationMin'] ?? 0).toString();
     final driverName = ride['driverName'] ?? 'Unknown Driver';
     final vehicleNumber = ride['vehicleNumber'] ?? '';
     final status = ride['status']?.toString().toLowerCase() ?? '';
 
     final bool isCancelled = status == 'cancelled' || status == 'declined';
-    final Color statusColor = isCancelled ? AppTheme.danger : AppTheme.success;
+    final bool isCompleted = status == 'completed';
+    final Color statusColor = isCancelled ? AppTheme.danger : (isCompleted ? AppTheme.success : AppTheme.primary);
 
     final pLat = (ride['pickup']?['lat'] as num?)?.toDouble() ?? 0.0;
     final pLng = (ride['pickup']?['lng'] as num?)?.toDouble() ?? 0.0;
@@ -307,7 +345,7 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  isCancelled ? 'Cancelled' : '₹$fare',
+                  isCancelled ? 'Cancelled' : (isCompleted ? '₹$fare' : 'In Progress'),
                   style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.bold, color: statusColor),
                 ),
               ),

@@ -1,6 +1,7 @@
 // lib/services/smart_tracker.dart
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -128,15 +129,21 @@ class SmartTracker {
   }
 
   Future<void> _startForegroundService(String message) async {
+    final notificationIcon = NotificationIcon(
+      metaDataName: 'com.google.firebase.messaging.default_notification_icon',
+      backgroundColor: const Color(0xFFFFD700),
+    );
     if (await FlutterForegroundTask.isRunningService) {
       await FlutterForegroundTask.updateService(
         notificationTitle: 'Gaman Driver',
         notificationText: message,
+        notificationIcon: notificationIcon,
       );
     } else {
       await FlutterForegroundTask.startService(
         notificationTitle: 'Gaman Driver',
         notificationText: message,
+        notificationIcon: notificationIcon,
         callback: startCallback,
       );
     }

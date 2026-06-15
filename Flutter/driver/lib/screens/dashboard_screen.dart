@@ -12,10 +12,13 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../config/theme.dart';
 import '../config/constants.dart';
 import '../utils/map_style.dart';
+// Removed invalid imports
+import '../services/region_service.dart';
 import '../providers/driver_provider.dart';
 import '../services/ride_signal_service.dart';
 import 'active_ride_screen.dart';
@@ -55,7 +58,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   StreamSubscription? _rideListener;
   RideSignalService? _signalService;
   StreamSubscription? _signalSub;
-  final Set<String> _declinedRides = {};
+  Set<String> _declinedRides = {};
   final Map<String, int> _biddedRides = {};
   final Map<String, StreamSubscription> _declineSubs = {};
 
@@ -88,6 +91,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _requestPermissionsSequentially();
     _listenForActiveRide();
     _loadCustomMarkers();
+    _loadDeclinedRides();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _driverProvider = context.read<DriverProvider>();
@@ -96,6 +100,36 @@ class _DashboardScreenState extends State<DashboardScreen>
       // restart the signal service so ride requests are visible immediately.
       _resumeIfOnline();
     });
+  }
+
+  Future<void> _loadDeclinedRides() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = prefs.getStringList('declinedRides_$uid') ?? [];
+      if (mounted) {
+        setState(() {
+          _declinedRides = list.toSet();
+          // Prevent race condition: filter any rides that loaded before SharedPreferences finished
+          _nearbyRides.removeWhere((r) => _declinedRides.contains(r['id']));
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveDeclinedRides() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // Keep only the last 30 declined rides to prevent infinite growth
+      final listToSave = _declinedRides.toList();
+      if (listToSave.length > 30) {
+        listToSave.removeRange(0, listToSave.length - 30);
+      }
+      await prefs.setStringList('declinedRides_$uid', listToSave);
+    } catch (_) {}
   }
 
   void _onDriverLocationChanged() {
@@ -126,6 +160,14 @@ class _DashboardScreenState extends State<DashboardScreen>
       }
       // Reset activity timer since user is actively using the app
       _lastActiveTime = DateTime.now();
+
+      // Check if a ride was assigned while backgrounded (state updated via stream but UI failed to navigate)
+      if (provider.persistedRideId != null) {
+        Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => ActiveRideScreen(rideId: provider.persistedRideId!)),
+          (route) => false,
+        );
+      }
     } else if (state == AppLifecycleState.paused) {
       // App went to background — _lastActiveTime stays at the last foreground time
       // so we can measure how long the app was backgrounded
@@ -492,11 +534,11 @@ class _DashboardScreenState extends State<DashboardScreen>
     try {
       final remoteConfig = FirebaseRemoteConfig.instance;
       final promoJson = remoteConfig.getString('promotional_banner');
-      
+
       if (promoJson.isEmpty) return;
 
       final Map<String, dynamic> promoData = jsonDecode(promoJson);
-      
+
       final bool isActive = promoData['isActive'] ?? false;
       if (!isActive) return;
 
@@ -587,10 +629,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                 data['id'] = ride.id;
 
                 context.read<DriverProvider>().setActiveRide(data);
-                Navigator.of(context).pushReplacement(
+                Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
                   MaterialPageRoute(
                     builder: (_) => ActiveRideScreen(rideId: ride.id),
                   ),
+                  (route) => false,
                 );
               } catch (e) {
                 debugPrint('Error in DashboardScreen _listenForActiveRide: $e');
@@ -787,29 +830,122 @@ class _DashboardScreenState extends State<DashboardScreen>
           return;
         }
       }
+
+      // Check Serviceable Region
+      if (provider.lat != null && provider.lng != null) {
+        final regionService = RegionService();
+        await regionService.initialize();
+        if (!regionService.isLocationServiceable(provider.lat!, provider.lng!)) {
+          _showOutOfRegionBottomSheet(provider.lat!, provider.lng!);
+          return; // Block going online
+        }
+      }
     }
 
-    final newDriverState = goingOnline ? 'ONLINE_IDLE' : 'OFFLINE';
+    try {
+      final newDriverState = goingOnline ? 'ONLINE_IDLE' : 'OFFLINE';
 
-    await FirebaseFirestore.instance.collection('drivers').doc(uid).update({
-      'driverState': newDriverState,
-      'isOnline': goingOnline, // Keep for backward compat during migration
-    });
+      await FirebaseFirestore.instance.collection('drivers').doc(uid).update({
+        'driverState': newDriverState,
+        'isOnline': goingOnline, // Keep for backward compat during migration
+      });
 
-    provider.setOnline(goingOnline);
+      provider.setOnline(goingOnline);
 
-    if (goingOnline) {
-      _lastActiveTime = DateTime.now();
-      _startAutoOfflineTimer();
-      _startSignalService(provider);
-    } else {
-      _stopAutoOfflineTimer();
-      _signalSub?.cancel();
-      _signalService?.dispose();
-      _signalService = null;
-      _clearRouteCurve();
-      setState(() => _nearbyRides = []);
+      if (goingOnline) {
+        _lastActiveTime = DateTime.now();
+        _startAutoOfflineTimer();
+        _startSignalService(provider);
+      } else {
+        _stopAutoOfflineTimer();
+        _signalSub?.cancel();
+        _signalService?.dispose();
+        _signalService = null;
+        _clearRouteCurve();
+        setState(() => _nearbyRides = []);
+      }
+    } catch (e) {
+      debugPrint('Error toggling online status: $e');
+      if (mounted) {
+        CustomToast.show(
+          context: context,
+          message: 'Failed to go online. Please try again.',
+          isError: true,
+        );
+      }
+      provider.setOnline(!goingOnline); // Revert state on error
     }
+  }
+
+  void _showOutOfRegionBottomSheet(double lat, double lng) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: AppTheme.bg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.block_rounded, color: AppTheme.primary, size: 30),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Hold tight! 🚧',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w800, color: AppTheme.text),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'We are launching in your area soon. Join the waitlist to be the first driver on the road here when we open!',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    RegionService().addToWaitlist(lat: lat, lng: lng, type: 'driver');
+                    Navigator.pop(ctx);
+                    CustomToast.show(
+                      context: context,
+                      message: 'Thanks! We will notify you when we launch in your area.',
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: Text('Join Waitlist', style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: Colors.white)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text('Close', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: AppTheme.text2)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   /// Starts a periodic timer that checks for driver inactivity.
@@ -943,6 +1079,9 @@ class _DashboardScreenState extends State<DashboardScreen>
       });
       _rebuildFareBubbles();
 
+      // Check RTDB to see if the driver has already placed a bid for any of these rides
+      _checkExistingBidsForNearbyRides();
+
       if (_nearbyRides.isNotEmpty) {
         // If it was empty, animate the camera to frame it.
         // If it wasn't empty, just silently update the curve to point to the new index 0.
@@ -965,9 +1104,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     // Start the RTDB listener
     _signalService!.start();
     setState(() => _loadingRides = true);
-
-    // Load existing bids for this driver
-    _loadExistingBids();
   }
 
   void _frameDriverAndPickup({int? rideIndex, bool animateCamera = true}) {
@@ -1003,7 +1139,11 @@ class _DashboardScreenState extends State<DashboardScreen>
         : '${(distMeters / 1000).toStringAsFixed(1)} km';
 
     // Build the curved polyline (straight if distance < 100m)
-    final curvePoints = _generateCurvePoints(driverPos, pickupPos, isStraight: distMeters < 100);
+    final curvePoints = _generateCurvePoints(
+      driverPos,
+      pickupPos,
+      isStraight: distMeters < 100,
+    );
 
     // Build the dotted polyline from curve points
     final dottedSegments = _buildDottedPolyline(curvePoints);
@@ -1065,6 +1205,10 @@ class _DashboardScreenState extends State<DashboardScreen>
       }
     });
 
+    if (markDeclined) {
+      _saveDeclinedRides();
+    }
+
     _rebuildFareBubbles();
 
     if (_nearbyRides.isNotEmpty) {
@@ -1076,7 +1220,11 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   /// Generate a smooth quadratic Bézier curve between two points.
   /// The control point is offset perpendicular to the line, creating an arc.
-  List<LatLng> _generateCurvePoints(LatLng start, LatLng end, {bool isStraight = false}) {
+  List<LatLng> _generateCurvePoints(
+    LatLng start,
+    LatLng end, {
+    bool isStraight = false,
+  }) {
     const int segments = 40;
     final points = <LatLng>[];
 
@@ -1089,7 +1237,9 @@ class _DashboardScreenState extends State<DashboardScreen>
     final double dist = math.sqrt(dLat * dLat + dLng * dLng);
 
     // Arc height proportional to distance (clamped)
-    final double arcHeight = isStraight ? 0.0 : (dist * 0.25).clamp(0.001, 0.02);
+    final double arcHeight = isStraight
+        ? 0.0
+        : (dist * 0.25).clamp(0.001, 0.02);
 
     // Perpendicular direction (rotate 90°)
     final double perpLat = -dLng / dist * arcHeight;
@@ -1227,26 +1377,41 @@ class _DashboardScreenState extends State<DashboardScreen>
     return BitmapDescriptor.bytes(bytes!.buffer.asUint8List());
   }
 
-  /// One-time load of this driver's existing pending bids.
-  Future<void> _loadExistingBids() async {
+  /// Dynamically check RTDB for existing bids for the currently visible nearby rides.
+  Future<void> _checkExistingBidsForNearbyRides() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      final bidsSnap = await FirebaseFirestore.instance
-          .collection('bids')
-          .where('driverId', isEqualTo: uid)
-          .where('status', isEqualTo: 'pending')
-          .get();
+    if (uid == null || !mounted) return;
 
-      _biddedRides.clear();
-      for (final doc in bidsSnap.docs) {
-        final rideId = doc['rideId'] as String;
-        _biddedRides[rideId] = doc['price'] as int;
-        // Start decline listener for each existing bid
-        _listenForDecline(rideId);
+    final syncEngine = context.read<SyncEngine>();
+
+    for (final ride in _nearbyRides) {
+      final rideId = ride['id'];
+      if (!_biddedRides.containsKey(rideId)) {
+        // 1. Check local SyncEngine queue (if the app was force-closed before RTDB sync finished)
+        final localPendingPrice = syncEngine.getPendingBidPrice(rideId);
+        if (localPendingPrice != null) {
+          _biddedRides[rideId] = localPendingPrice;
+          _listenForDecline(rideId);
+          if (mounted) setState(() {});
+          continue; // Skip RTDB check since we found it locally
+        }
+
+        // 2. Check RTDB (if it was successfully synced but we just restarted the app)
+        try {
+          final snap = await FirebaseDatabase.instance
+              .ref('active_bids/$rideId/$uid')
+              .get();
+          if (snap.exists && snap.value != null) {
+            final data = Map<String, dynamic>.from(snap.value as Map);
+            final price = (data['price'] as num).toInt();
+            _biddedRides[rideId] = price;
+            // Start decline listener for this bid
+            _listenForDecline(rideId);
+            if (mounted) setState(() {});
+          }
+        } catch (_) {}
       }
-      if (mounted) setState(() {});
-    } catch (_) {}
+    }
   }
 
   /// Listen for rider bid-decline on the separate `ride_declines/{rideId}/{driverUid}` node.
@@ -1283,6 +1448,16 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _placeBid(Map<String, dynamic> ride, int bidPrice) async {
     final provider = context.read<DriverProvider>();
+
+    // Block if driver already declined or rider declined this bid
+    if (_declinedRides.contains(ride['id'])) {
+      CustomToast.show(
+        context: context,
+        message: '⚠️ This ride has been declined.',
+        isError: true,
+      );
+      return;
+    }
 
     // Block if driver is in ON_RIDE state
     if (provider.isBusy) {
@@ -2085,8 +2260,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                                               const SizedBox(height: 4),
                                               Row(
                                                 children: [
-                                                  const Icon(
-                                                    Icons.electric_rickshaw,
+                                                  Icon(
+                                                    provider.profile?['vehicleType'] == 'bike'
+                                                        ? Icons.motorcycle
+                                                        : Icons.electric_rickshaw,
                                                     color: AppTheme.primary,
                                                     size: 18,
                                                   ),
@@ -2217,7 +2394,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                               ),
                                               Container(
                                                 width: 2,
-                                                height: 20,
+                                                height: 28,
                                                 margin:
                                                     const EdgeInsets.symmetric(
                                                       vertical: 3,
@@ -2238,27 +2415,27 @@ class _DashboardScreenState extends State<DashboardScreen>
                                                   CrossAxisAlignment.start,
                                               children: [
                                                 Text(
-                                                  ride['pickup']?['short_name'] ??
-                                                      ride['pickup']?['display_name'] ??
+                                                  ride['pickup']?['display_name'] ??
+                                                      ride['pickup']?['short_name'] ??
                                                       'Pickup',
                                                   style: GoogleFonts.inter(
                                                     fontSize: 13,
-                                                    fontWeight: FontWeight.w600,
+                                                    fontWeight: FontWeight.w500,
                                                   ),
-                                                  maxLines: 1,
+                                                  maxLines: 2,
                                                   overflow:
                                                       TextOverflow.ellipsis,
                                                 ),
-                                                const SizedBox(height: 14),
+                                                const SizedBox(height: 10),
                                                 Text(
-                                                  ride['drop']?['short_name'] ??
-                                                      ride['drop']?['display_name'] ??
+                                                  ride['drop']?['display_name'] ??
+                                                      ride['drop']?['short_name'] ??
                                                       'Drop',
                                                   style: GoogleFonts.inter(
                                                     fontSize: 13,
-                                                    fontWeight: FontWeight.w600,
+                                                    fontWeight: FontWeight.w500,
                                                   ),
-                                                  maxLines: 1,
+                                                  maxLines: 2,
                                                   overflow:
                                                       TextOverflow.ellipsis,
                                                 ),

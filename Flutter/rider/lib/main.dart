@@ -8,10 +8,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'config/firebase_config.dart';
 import 'config/theme.dart';
 import 'providers/ride_provider.dart';
 import 'providers/connectivity_provider.dart';
+import 'package:flutter/services.dart';
 import 'services/pricing_service.dart';
 
 import 'screens/login_screen.dart';
@@ -42,6 +44,23 @@ import 'screens/force_update_screen.dart';
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
+
+  // Handle session expiry from server when another device logs in
+  if (message.data['type'] == 'session_expired') {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('kicked_out', true);
+    
+    try {
+      // We MUST explicitly delete the FCM token in the background isolate
+      // otherwise this old device will continue receiving broadcast notifications
+      await FirebaseMessaging.instance.deleteToken();
+    } catch (e) {
+      debugPrint('Failed to delete FCM token in background: $e');
+    }
+    
+    await FirebaseAuth.instance.signOut();
+    return;
+  }
 }
 
 final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey =
@@ -59,6 +78,10 @@ late final PackageInfo packageInfo;
 
 void main() {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
   runApp(const AppInitializer());
 }
@@ -156,9 +179,18 @@ void _initFCM() {
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-    if (message.notification != null) {
-      final type = message.data['type'];
+    final type = message.data['type'];
 
+    // Session expired — another device logged in
+    if (type == 'session_expired') {
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setBool('kicked_out', true);
+        FirebaseAuth.instance.signOut();
+      });
+      return;
+    }
+
+    if (message.notification != null) {
       if (type == 'ride_status') {
         return;
       }
@@ -323,12 +355,13 @@ class AuthGate extends StatelessWidget {
         }
 
         final user = snapshot.data!;
-          // Set user in provider and load any persisted ride state
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (context.mounted) {
               final provider = context.read<RideProvider>();
-              provider.setUser(user);
-              provider.loadPersistedState();
+              if (provider.user?.uid != user.uid) {
+                provider.setUser(user);
+                provider.loadPersistedState();
+              }
             }
           });
 
@@ -357,8 +390,7 @@ class AuthGate extends StatelessWidget {
           return StreamProvider<DocumentSnapshot?>.value(
             value: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
             initialData: null,
-            child: Selector<RideProvider, RideProvider>(
-              selector: (context, provider) => provider,
+            child: Consumer<RideProvider>(
               builder: (context, provider, _) {
                 final persistedRideId = provider.persistedRideId;
                 final status = provider.persistedRideStatus;

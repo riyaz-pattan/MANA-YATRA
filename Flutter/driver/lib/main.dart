@@ -46,16 +46,43 @@ import 'utils/version_utils.dart';
 import 'screens/force_update_screen.dart';
 import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
 import 'screens/referral_screen.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: FirebaseConfig.firebaseOptions);
-  // For 'new_ride' data messages: the app is woken up.
-  // The RTDB listener (RideSignalService) will handle ride discovery
-  // once the app comes to foreground. No heavy work needed here.
+  
+  // Handle session expiry from server when another device logs in
+  if (message.data['type'] == 'session_expired') {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('kicked_out', true);
+    
+    try {
+      // We MUST explicitly delete the FCM token in the background isolate
+      // otherwise this old device will continue receiving broadcast notifications
+      await FirebaseMessaging.instance.deleteToken();
+    } catch (e) {
+      debugPrint('Failed to delete FCM token in background: $e');
+    }
+    
+    await FirebaseAuth.instance.signOut();
+    return;
+  }
+
+  // Handle new_ride data messages in the background
   if (message.data['type'] == 'new_ride') {
-    // App woken from background/killed — RTDB listener will sync on resume.
+    final rideId = message.data['rideId']?.toString();
+    if (rideId != null) {
+      final prefs = await SharedPreferences.getInstance();
+      final bool alreadyNotified = prefs.getBool('notified_$rideId') ?? false;
+
+      if (!alreadyNotified) {
+        await prefs.setBool('notified_$rideId', true);
+        LocalNotificationsService.initialize();
+        LocalNotificationsService.showRideRequestNotification(message.data);
+      }
+    }
     return;
   }
 }
@@ -75,6 +102,10 @@ late final PackageInfo packageInfo;
 
 void main() {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
   FlutterForegroundTask.initCommunicationPort();
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
   runApp(const AppInitializer());
@@ -182,8 +213,27 @@ void _initFCM() {
   FirebaseMessaging.onMessage.listen((RemoteMessage message) {
     final type = message.data['type'];
 
-    // New ride notification — RTDB listener handles this in foreground
+    // Session expired — another device logged in
+    if (type == 'session_expired') {
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setBool('kicked_out', true);
+        FirebaseAuth.instance.signOut();
+      });
+      return;
+    }
+
+    // New ride notification — show rich local notification in foreground
     if (type == 'new_ride') {
+      final rideId = message.data['rideId']?.toString();
+      if (rideId != null) {
+        SharedPreferences.getInstance().then((prefs) {
+          final bool alreadyNotified = prefs.getBool('notified_$rideId') ?? false;
+          if (!alreadyNotified) {
+            prefs.setBool('notified_$rideId', true);
+            LocalNotificationsService.showRideRequestNotification(message.data);
+          }
+        });
+      }
       return;
     }
 

@@ -200,7 +200,7 @@ class RideProvider extends ChangeNotifier {
           final status = rideDoc.data()?['status'] as String?;
           // Only recover if ride is in an active state
           if (status == 'searching' || status == 'bidding' || 
-              status == 'matched' || status == 'started') {
+              status == 'matched' || status == 'started' || status == 'payment_pending') {
             _persistedRideId = id;
             _persistedRideStatus = status;
             notifyListeners();

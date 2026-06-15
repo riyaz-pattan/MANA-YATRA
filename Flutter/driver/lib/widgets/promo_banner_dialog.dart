@@ -19,6 +19,15 @@ class PromoBannerDialog extends StatefulWidget {
     final hasSeen = prefs.getBool('seen_promo_$campaignId') ?? false;
     if (hasSeen) return;
 
+    final imageUrl = promoData['imageUrl'];
+    if (imageUrl != null && imageUrl.toString().isNotEmpty) {
+      try {
+        await precacheImage(NetworkImage(imageUrl), context);
+      } catch (e) {
+        debugPrint('Failed to precache promo image: $e');
+      }
+    }
+
     if (!context.mounted) return;
 
     showDialog(
@@ -77,7 +86,6 @@ class _PromoBannerDialogState extends State<PromoBannerDialog> with SingleTicker
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.promoData['title'] ?? 'Special Offer';
     final imageUrl = widget.promoData['imageUrl'];
 
     return ScaleTransition(
@@ -97,118 +105,39 @@ class _PromoBannerDialogState extends State<PromoBannerDialog> with SingleTicker
                 ],
               ),
               clipBehavior: Clip.hardEdge,
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Colors.white.withValues(alpha: 0.2),
-                        Colors.white.withValues(alpha: 0.05),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Image Section
-                      if (imageUrl != null && imageUrl.toString().isNotEmpty)
-                        Stack(
-                          children: [
-                            Image.network(
-                              imageUrl,
-                              height: 220,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                              errorBuilder: (ctx, err, stack) => Container(
-                                height: 120,
-                                color: Colors.black12,
-                                child: const Center(child: Icon(Icons.image_not_supported, color: Colors.white70)),
+              child: imageUrl != null && imageUrl.toString().isNotEmpty
+                  ? Stack(
+                      children: [
+                        Image.network(
+                          imageUrl,
+                          width: double.infinity,
+                          fit: BoxFit.fitWidth,
+                          errorBuilder: (ctx, err, stack) => Container(
+                            height: 200,
+                            color: Colors.black87,
+                            child: const Center(child: Icon(Icons.image_not_supported, color: Colors.white70)),
+                          ),
+                        ),
+                        // Close Button
+                        Positioned(
+                          top: 12,
+                          right: 12,
+                          child: GestureDetector(
+                            onTap: () => _dismiss(),
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.6),
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
                               ),
-                            ),
-                            // Close Button
-                            Positioned(
-                              top: 12,
-                              right: 12,
-                              child: GestureDetector(
-                                onTap: () => _dismiss(),
-                                child: Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.6),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
-                                  ),
-                                  child: const Icon(Icons.close, color: Colors.white, size: 18),
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      else
-                        Align(
-                          alignment: Alignment.topRight,
-                          child: Padding(
-                            padding: const EdgeInsets.all(12.0),
-                            child: IconButton(
-                              icon: const Icon(Icons.close, color: Colors.white),
-                              onPressed: _dismiss,
+                              child: const Icon(Icons.close, color: Colors.white, size: 18),
                             ),
                           ),
                         ),
-
-                      // Content Section
-                      Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          children: [
-                            Text(
-                              title,
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.outfit(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                                shadows: [
-                                  Shadow(color: Colors.black.withValues(alpha: 0.3), offset: const Offset(0, 2), blurRadius: 4),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    'Tap to view offer',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.white.withValues(alpha: 0.9),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 12),
-                                ],
-                              ),
-                            )
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+                      ],
+                    )
+                  : const SizedBox.shrink(),
             ),
           ),
         ),

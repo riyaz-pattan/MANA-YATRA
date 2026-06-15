@@ -605,26 +605,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildEmergencyContactSection(data),
           
           const SizedBox(height: 24),
-          _buildSectionTitle('Preferences'),
-          _buildSettingsGroup(
-            children: [
-              _buildTile(
-                icon: Icons.settings_outlined,
-                title: 'Settings',
-                onTap: () {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
-                },
-                showDivider: true,
-              ),
-              _buildTile(
-                icon: Icons.help_outline,
-                title: 'Help',
-                onTap: () {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen()));
-                },
-              ),
-            ],
-          ),
         ],
       );
     }
@@ -656,27 +636,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildSettingsGroup({required List<Widget> children}) {
-    return Column(
-      children: children,
-    );
-  }
 
-  Widget _buildTile({required IconData icon, required String title, required VoidCallback onTap, bool showDivider = false}) {
-    return Column(
-      children: [
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          onTap: onTap,
-          leading: Icon(icon, color: AppTheme.text, size: 24),
-          title: Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16, color: AppTheme.text)),
-          trailing: const Icon(Icons.chevron_right, color: AppTheme.text3, size: 20),
-        ),
-        if (showDivider)
-          Divider(height: 1, indent: 44, color: AppTheme.border.withValues(alpha: 0.5)),
-      ],
-    );
-  }
 
   Widget _buildSavedPlacesSection(Map<String, dynamic>? data) {
     final homePlace = data?['savedHome'] as Map<String, dynamic>?;
@@ -732,7 +692,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     }
 
-    if (customPlaces.length < 5 && (_isPlacesExpanded || customPlaces.isEmpty)) {
+    if (customPlaces.length < 5) {
       children.add(Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Divider(color: AppTheme.border.withValues(alpha: 0.5), height: 1, indent: 44),
@@ -760,7 +720,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
         child: Row(
           children: [
-            const Icon(Icons.star_rounded, size: 24, color: AppTheme.text),
+            Icon(_getIconForPlaceName(label), size: 24, color: AppTheme.text),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -887,6 +847,71 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       ),
     );
+  }
+
+  IconData _getIconForPlaceName(String name) {
+    final lowerName = name.toLowerCase();
+    
+    // Gym / Fitness
+    if (lowerName.contains('gym') || lowerName.contains('fitness') || lowerName.contains('workout') || lowerName.contains('club')) {
+      return Icons.fitness_center;
+    }
+    // Education
+    if (lowerName.contains('school') || lowerName.contains('college') || lowerName.contains('university') || lowerName.contains('academy')) {
+      return Icons.school;
+    }
+    // Health / Hospital
+    if (lowerName.contains('hospital') || lowerName.contains('clinic') || lowerName.contains('doctor') || lowerName.contains('medical')) {
+      return Icons.local_hospital;
+    }
+    // Food / Cafe
+    if (lowerName.contains('cafe') || lowerName.contains('coffee') || lowerName.contains('bakery') || lowerName.contains('starbucks')) {
+      return Icons.local_cafe;
+    }
+    // Restaurant
+    if (lowerName.contains('restaurant') || lowerName.contains('food') || lowerName.contains('pizza') || lowerName.contains('burger') || lowerName.contains('hotel') || lowerName.contains('dhaba')) {
+      return Icons.restaurant;
+    }
+    // Shopping / Mall
+    if (lowerName.contains('mall') || lowerName.contains('shop') || lowerName.contains('store') || lowerName.contains('market') || lowerName.contains('mart')) {
+      return Icons.shopping_bag;
+    }
+    // Travel / Transport
+    if (lowerName.contains('airport') || lowerName.contains('flight')) {
+      return Icons.local_airport;
+    }
+    if (lowerName.contains('station') || lowerName.contains('railway') || lowerName.contains('train')) {
+      return Icons.train;
+    }
+    if (lowerName.contains('bus') || lowerName.contains('stand')) {
+      return Icons.directions_bus;
+    }
+    // Entertainment
+    if (lowerName.contains('movie') || lowerName.contains('cinema') || lowerName.contains('theatre') || lowerName.contains('theater')) {
+      return Icons.movie;
+    }
+    if (lowerName.contains('park') || lowerName.contains('garden')) {
+      return Icons.park;
+    }
+    // Work / Office
+    if (lowerName.contains('office') || lowerName.contains('work') || lowerName.contains('company') || lowerName.contains('tech')) {
+      return Icons.business;
+    }
+    // Friends / Family
+    if (lowerName.contains('friend') || lowerName.contains('mom') || lowerName.contains('dad') || lowerName.contains('brother') || lowerName.contains('sister') || lowerName.contains('uncle') || lowerName.contains('aunt') || lowerName.contains('house')) {
+      return Icons.house;
+    }
+    // Bank / Finance
+    if (lowerName.contains('bank') || lowerName.contains('atm')) {
+      return Icons.account_balance;
+    }
+    // Religious
+    if (lowerName.contains('temple') || lowerName.contains('church') || lowerName.contains('mosque') || lowerName.contains('mandir') || lowerName.contains('masjid') || lowerName.contains('gurudwara')) {
+      return Icons.place; 
+    }
+
+    // Default Fallback
+    return Icons.star_rounded;
   }
 }
 

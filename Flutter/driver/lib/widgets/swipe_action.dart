@@ -1,5 +1,6 @@
 // lib/widgets/swipe_action.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class SwipeAction extends StatefulWidget {
@@ -20,26 +21,74 @@ class SwipeAction extends StatefulWidget {
   State<SwipeAction> createState() => _SwipeActionState();
 }
 
-class _SwipeActionState extends State<SwipeAction> {
-  double _dragProgress = 0.0;
+class _SwipeActionState extends State<SwipeAction> with TickerProviderStateMixin {
+  late AnimationController _positionController;
+  late AnimationController _shimmerController;
+  
   bool _completed = false;
+  double _lastHapticValue = 0.0;
+  
+  @override
+  void initState() {
+    super.initState();
+    _positionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _positionController.addListener(() {
+      setState(() {});
+      
+      // Haptic feedback during drag (every ~10%)
+      if (!_completed && _positionController.value - _lastHapticValue > 0.1) {
+        HapticFeedback.selectionClick();
+        _lastHapticValue = _positionController.value;
+      } else if (!_completed && _lastHapticValue - _positionController.value > 0.1) {
+        HapticFeedback.selectionClick();
+        _lastHapticValue = _positionController.value;
+      }
+    });
+
+    _shimmerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _positionController.dispose();
+    _shimmerController.dispose();
+    super.dispose();
+  }
   
   void _onHorizontalDragUpdate(DragUpdateDetails details, double maxWidth) {
     if (_completed) return;
-    setState(() {
-      _dragProgress += details.delta.dx / (maxWidth - 56);
-      if (_dragProgress < 0.0) _dragProgress = 0.0;
-      if (_dragProgress >= 1.0) {
-        _dragProgress = 1.0;
-        _completed = true;
-        widget.onSwipe();
-      }
-    });
+    final handleWidth = 56.0;
+    _positionController.value += details.delta.dx / (maxWidth - handleWidth);
   }
 
   void _onHorizontalDragEnd(DragEndDetails details) {
-    if (!_completed) {
-      setState(() => _dragProgress = 0.0); // Reset if not fully swiped
+    if (_completed) return;
+    
+    // Forgiving Threshold Snap
+    if (_positionController.value > 0.75) {
+      _positionController.animateTo(
+        1.0, 
+        curve: Curves.easeOutBack,
+      ).then((_) {
+        if (!mounted) return;
+        setState(() {
+          _completed = true;
+        });
+        HapticFeedback.heavyImpact();
+        widget.onSwipe();
+      });
+    } else {
+      // Advanced Spring Physics when snapping back
+      _positionController.animateTo(
+        0.0,
+        curve: Curves.easeOutBack,
+      );
     }
   }
 
@@ -49,19 +98,39 @@ class _SwipeActionState extends State<SwipeAction> {
       builder: (context, constraints) {
         final maxWidth = constraints.maxWidth;
         final handleWidth = 56.0;
-        final dragOffset = _dragProgress * (maxWidth - handleWidth);
+        final progress = _positionController.value;
+        final dragOffset = progress * (maxWidth - handleWidth);
+
+        // Dynamic Color Gradient Morphing
+        final trackColor = Color.lerp(
+          widget.baseColor.withValues(alpha: 0.1),
+          widget.activeColor.withValues(alpha: 0.2),
+          progress,
+        );
+        
+        final thumbColor = Color.lerp(
+          widget.activeColor,
+          widget.activeColor, 
+          progress,
+        ) ?? widget.activeColor;
 
         return Container(
           height: 56,
           decoration: BoxDecoration(
-            color: widget.baseColor.withValues(alpha: 0.1),
+            color: trackColor,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: widget.baseColor.withValues(alpha: 0.3)),
+            border: Border.all(
+              color: Color.lerp(
+                widget.baseColor.withValues(alpha: 0.3),
+                widget.activeColor.withValues(alpha: 0.3),
+                progress,
+              )!,
+            ),
           ),
           child: Stack(
             children: [
               // Overlay as you swipe
-              if (_dragProgress > 0)
+              if (progress > 0)
                 Positioned(
                   left: 0,
                   top: 0,
@@ -69,25 +138,60 @@ class _SwipeActionState extends State<SwipeAction> {
                   width: dragOffset + handleWidth - 8,
                   child: Container(
                     decoration: BoxDecoration(
-                      color: widget.activeColor.withValues(alpha: 0.2),
+                      gradient: LinearGradient(
+                        colors: [
+                          widget.activeColor.withValues(alpha: 0.1),
+                          widget.activeColor.withValues(alpha: 0.3),
+                        ],
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                      ),
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
                 ),
-              // Background Text
+                
+              // Background Text with Micro-Animations
               Center(
                 child: Padding(
                   padding: const EdgeInsets.only(left: 20),
-                  child: Text(
-                    widget.text,
-                    style: GoogleFonts.inter(
-                      color: widget.baseColor,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 15,
+                  child: Transform.translate(
+                    offset: Offset(progress * 30, 0), // Slide right
+                    child: Opacity(
+                      opacity: (1.0 - (progress * 1.5)).clamp(0.0, 1.0), // Fade out
+                      child: AnimatedBuilder(
+                        animation: _shimmerController,
+                        builder: (context, child) {
+                          return ShaderMask(
+                            shaderCallback: (bounds) {
+                              return LinearGradient(
+                                colors: [
+                                  widget.baseColor.withValues(alpha: 0.5),
+                                  widget.baseColor,
+                                  widget.baseColor.withValues(alpha: 0.5),
+                                ],
+                                stops: const [0.0, 0.5, 1.0],
+                                begin: Alignment(-1.0 + (_shimmerController.value * 3), 0),
+                                end: Alignment(0.0 + (_shimmerController.value * 3), 0),
+                              ).createShader(bounds);
+                            },
+                            child: child,
+                          );
+                        },
+                        child: Text(
+                          widget.text,
+                          style: GoogleFonts.inter(
+                            color: Colors.white, 
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
+              
               // Draggable Handle
               Positioned(
                 left: dragOffset,
@@ -100,7 +204,7 @@ class _SwipeActionState extends State<SwipeAction> {
                     width: handleWidth,
                     margin: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: widget.activeColor,
+                      color: thumbColor,
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: [
                         BoxShadow(
@@ -110,10 +214,33 @@ class _SwipeActionState extends State<SwipeAction> {
                         ),
                       ],
                     ),
-                    child: const Icon(
-                      Icons.arrow_forward_ios_rounded,
-                      color: Colors.white,
-                      size: 20,
+                    child: Center(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        transitionBuilder: (child, animation) {
+                          return ScaleTransition(
+                            scale: animation,
+                            child: FadeTransition(
+                              opacity: animation,
+                              child: child,
+                            ),
+                          );
+                        },
+                        // Icon morphing based on completion/threshold
+                        child: (_completed || progress > 0.95)
+                            ? const Icon(
+                                Icons.check_rounded,
+                                key: ValueKey('check'),
+                                color: Colors.white,
+                                size: 24,
+                              )
+                            : const Icon(
+                                Icons.arrow_forward_ios_rounded,
+                                key: ValueKey('arrow'),
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                      ),
                     ),
                   ),
                 ),

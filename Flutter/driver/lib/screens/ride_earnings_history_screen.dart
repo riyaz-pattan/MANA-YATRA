@@ -698,7 +698,7 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
     final date = timestamp != null ? DateFormat('MMM dd, hh:mm a').format(timestamp.toDate().toLocal()) : 'Unknown Date';
     
     final distance = ride['distanceKm']?.toStringAsFixed(1) ?? '0.0';
-    final duration = ride['durationMin']?.toString() ?? '0';
+    final duration = (ride['actualDurationMin'] ?? ride['durationMin'] ?? 0).toString();
     final vehicleType = ride['vehicleType'] ?? 'Unknown';
 
     return Container(
@@ -731,7 +731,7 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
           const SizedBox(height: 12),
           Row(
             children: [
-              _buildInfoChip(Icons.electric_rickshaw, vehicleType.toString().toUpperCase()),
+              _buildInfoChip(_getVehicleIcon(vehicleType.toString()), vehicleType.toString().toUpperCase()),
               const SizedBox(width: 12),
               _buildInfoChip(Icons.route, '$distance km'),
               const SizedBox(width: 12),
@@ -798,4 +798,23 @@ class _RideEarningsHistoryScreenState extends State<RideEarningsHistoryScreen> {
       ],
     );
   }
+
+  IconData _getVehicleIcon(String type) {
+    switch (type.toLowerCase()) {
+      case 'bike':
+      case 'motorcycle':
+        return Icons.motorcycle;
+      case 'auto':
+      case 'rickshaw':
+        return Icons.electric_rickshaw;
+      case 'car':
+      case 'cab':
+      case 'mini':
+      case 'sedan':
+        return Icons.directions_car;
+      default:
+        return Icons.local_taxi;
+    }
+  }
 }
+

@@ -52,8 +52,10 @@ class DriverProvider extends ChangeNotifier {
   bool get isOnline => _driverState != DriverState.offline;
   bool get isBusy => _driverState == DriverState.onRide;
 
-  bool get isApproved => _profile?['isApproved'] == true || _profile?['isApproved'] == 'true';
-  bool get isBlocked => _profile?['isBlocked'] == true || _profile?['isBlocked'] == 'true';
+  bool get isApproved =>
+      _profile?['isApproved'] == true || _profile?['isApproved'] == 'true';
+  bool get isBlocked =>
+      _profile?['isBlocked'] == true || _profile?['isBlocked'] == 'true';
   bool get hasProfile => _profile != null;
   bool get isSubscriptionActive {
     if (_profile == null) return false;
@@ -67,10 +69,10 @@ class DriverProvider extends ChangeNotifier {
   void setUser(User? user) {
     _user = user;
     _authLoading = false;
-    
+
     // Cancel existing subscription if any
     _profileSubscription?.cancel();
-    
+
     if (user != null) {
       _initSessionAndListen(user);
     } else {
@@ -99,12 +101,12 @@ class DriverProvider extends ChangeNotifier {
         notifyListeners();
       };
     }
-    
+
     _setupPresence();
     _setPresence(false); // Start with offline presence
 
     final localDeviceId = await DeviceSessionManager.getDeviceId();
-    
+
     // Update Firestore with the current device ID and force offline state
     try {
       await FirebaseFirestore.instance.collection('drivers').doc(user.uid).set({
@@ -115,58 +117,70 @@ class DriverProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('[DriverProvider] Failed to update deviceId: $e');
     }
-    
+
     // Start real-time profile listener
     _profileSubscription = FirebaseFirestore.instance
         .collection('drivers')
         .doc(user.uid)
         .snapshots()
-        .listen((snap) {
-      if (snap.exists) {
-        final data = snap.data()!;
-        final remoteDeviceId = data['deviceId'] as String?;
-        
-        // If the database device ID changes and doesn't match our local device ID,
-        // it means the user logged in from another device.
-        if (remoteDeviceId != null && remoteDeviceId != localDeviceId) {
-          debugPrint('[DriverProvider] Logged in from another device. Forcing logout.');
-          
-          SharedPreferences.getInstance().then((prefs) {
-            prefs.setBool('kicked_out', true);
-            FirebaseAuth.instance.signOut();
-          });
-          return;
-        }
-        
-        setProfile(data);
-      } else {
-        // No profile doc — stop loading so AuthGate shows OnboardingScreen
-        _profileLoading = false;
-        _profile = null;
-        notifyListeners();
-      }
-    }, onError: (error) {
-      debugPrint('[DriverProvider] Profile listener error: $error');
-      _profileLoading = false;
-      notifyListeners();
-    });
+        .listen(
+          (snap) {
+            if (snap.exists) {
+              final data = snap.data()!;
+              final remoteDeviceId = data['deviceId'] as String?;
+
+              // If the database device ID changes and doesn't match our local device ID,
+              // it means the user logged in from another device.
+              if (remoteDeviceId != null && remoteDeviceId != localDeviceId) {
+                debugPrint(
+                  '[DriverProvider] Logged in from another device. Forcing logout.',
+                );
+
+                SharedPreferences.getInstance().then((prefs) {
+                  prefs.setBool('kicked_out', true);
+                  FirebaseAuth.instance.signOut();
+                });
+                return;
+              }
+
+              setProfile(data);
+            } else {
+              // No profile doc — stop loading so AuthGate shows OnboardingScreen
+              _profileLoading = false;
+              _profile = null;
+              notifyListeners();
+            }
+          },
+          onError: (error) {
+            debugPrint('[DriverProvider] Profile listener error: $error');
+            _profileLoading = false;
+            notifyListeners();
+          },
+        );
   }
 
   void setProfile(Map<String, dynamic>? profile) {
     _profile = profile;
     _profileLoading = false; // First snapshot received — done loading
-    // NOTE: We do NOT restore driverState from Firestore here.
-    // The driver always starts OFFLINE on a fresh app session.
-    // The state is only changed when the driver explicitly toggles online.
-    // _driverState stays as whatever it was set to (OFFLINE from init).
+
+    // If the server forced us offline (e.g., cron job expired subscription, or admin block),
+    // sync the local memory state to match.
+    if (profile != null &&
+        profile['isOnline'] == false &&
+        _driverState != DriverState.offline) {
+      _driverState = DriverState.offline;
+      if (_tracker != null) {
+        _tracker!.setMode(TrackingMode.offline);
+      }
+    }
+
     notifyListeners();
   }
 
   void setOnline(bool online) {
     _driverState = online ? DriverState.onlineIdle : DriverState.offline;
     if (_tracker != null) {
-      _tracker!.setMode(
-          online ? TrackingMode.discovery : TrackingMode.offline);
+      _tracker!.setMode(online ? TrackingMode.discovery : TrackingMode.offline);
     }
     _setPresence(online);
     notifyListeners();
@@ -183,9 +197,11 @@ class DriverProvider extends ChangeNotifier {
     _persistRideId(rideId);
     if (_tracker != null) {
       _tracker!.setRideId(rideId);
-      _tracker!.setMode(ride != null
-          ? TrackingMode.activeRide
-          : (isOnline ? TrackingMode.discovery : TrackingMode.offline));
+      _tracker!.setMode(
+        ride != null
+            ? TrackingMode.activeRide
+            : (isOnline ? TrackingMode.discovery : TrackingMode.offline),
+      );
     }
     notifyListeners();
   }
@@ -217,23 +233,27 @@ class DriverProvider extends ChangeNotifier {
             .collection('rides')
             .doc(id)
             .get();
-        
+
         if (rideDoc.exists) {
           final status = rideDoc.data()?['status'] as String?;
-          if (status == 'matched' || status == 'started') {
+          if (status == 'matched' ||
+              status == 'started' ||
+              status == 'payment_pending') {
             _persistedRideId = id;
             notifyListeners();
             return;
           }
         }
-        
+
         // Ride is finished or doesn't exist — clear stale persistence
         await prefs.remove(_kActiveRideKey);
         _persistedRideId = null;
       }
     } catch (e) {
       // On network error, still recover from local state (offline-first)
-      debugPrint('[DriverProvider] Firestore validation failed, falling back to local: $e');
+      debugPrint(
+        '[DriverProvider] Firestore validation failed, falling back to local: $e',
+      );
       final prefs = await SharedPreferences.getInstance();
       final id = prefs.getString(_kActiveRideKey);
       if (id != null && id.isNotEmpty) {
@@ -259,35 +279,53 @@ class DriverProvider extends ChangeNotifier {
   void _setupPresence() {
     _connectedSubscription?.cancel();
     if (_user == null) return;
-    
-    _connectedSubscription = FirebaseDatabase.instance.ref('.info/connected').onValue.listen((event) {
-      final connected = event.snapshot.value as bool? ?? false;
-      if (connected && isOnline) {
-        _setPresence(true);
-      }
-    }, onError: (error) {
-      debugPrint('[DriverProvider] Presence listener error: $error');
-    });
+
+    _connectedSubscription = FirebaseDatabase.instance
+        .ref('.info/connected')
+        .onValue
+        .listen(
+          (event) {
+            final connected = event.snapshot.value as bool? ?? false;
+            if (connected && isOnline) {
+              _setPresence(true);
+            }
+          },
+          onError: (error) {
+            debugPrint('[DriverProvider] Presence listener error: $error');
+          },
+        );
   }
 
   Future<void> _setPresence(bool online) async {
     if (_user == null) return;
-    
+
     _presenceReqId++;
     final currentReqId = _presenceReqId;
-    
+
     final presenceRef = FirebaseDatabase.instance.ref('presence/${_user!.uid}');
     for (int attempt = 0; attempt < 2; attempt++) {
-      if (currentReqId != _presenceReqId) return; // Abort if newer request exists
+      if (currentReqId != _presenceReqId)
+        return; // Abort if newer request exists
       try {
         if (online) {
-          await presenceRef.onDisconnect().update({'isOnline': false, 'updatedAt': ServerValue.timestamp});
-          if (currentReqId != _presenceReqId) return; // Re-check before final set
-          await presenceRef.set({'isOnline': true, 'updatedAt': ServerValue.timestamp});
+          await presenceRef.onDisconnect().update({
+            'isOnline': false,
+            'updatedAt': ServerValue.timestamp,
+          });
+          if (currentReqId != _presenceReqId)
+            return; // Re-check before final set
+          await presenceRef.set({
+            'isOnline': true,
+            'updatedAt': ServerValue.timestamp,
+          });
         } else {
           await presenceRef.onDisconnect().cancel();
-          if (currentReqId != _presenceReqId) return; // Re-check before final update
-          await presenceRef.update({'isOnline': false, 'updatedAt': ServerValue.timestamp});
+          if (currentReqId != _presenceReqId)
+            return; // Re-check before final update
+          await presenceRef.update({
+            'isOnline': false,
+            'updatedAt': ServerValue.timestamp,
+          });
         }
         return; // success
       } catch (e) {

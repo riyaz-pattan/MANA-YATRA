@@ -50,6 +50,17 @@ class SyncEngine extends ChangeNotifier {
   /// Whether the engine believes Firebase is reachable.
   bool get isFirebaseReachable => _isFirebaseReachable;
 
+  /// Check if there's a pending bid in the local queue for a specific ride.
+  int? getPendingBidPrice(String rideId) {
+    try {
+      final item = _queue.getPendingItems().firstWhere((item) => 
+          item.type == 'PLACE_BID' && item.payload['rideId'] == rideId);
+      return (item.payload['price'] as num?)?.toInt();
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Start the engine. Call once after Hive + Firebase are initialized.
   void start() {
     // Listen to Firebase RTDB /.info/connected for real connectivity check

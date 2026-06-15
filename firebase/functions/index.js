@@ -587,8 +587,8 @@ exports.placeBid = functions.https.onCall(async (data, context) => {
   }
 
   try {
-    // Create bid document
-    const bidRef = await db.collection("bids").add({
+    // Create bid document for RTDB
+    const rtdbBidData = {
       rideId,
       riderId: riderId || ride.riderId,
       driverId,
@@ -602,8 +602,11 @@ exports.placeBid = functions.https.onCall(async (data, context) => {
       driverLat: driverLat || null,
       driverLng: driverLng || null,
       status: "pending",
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+      createdAt: admin.database.ServerValue.TIMESTAMP,
+    };
+    
+    // Write instantly to RTDB for Rider app updates (0 Firestore writes)
+    await admin.database().ref(`active_bids/${rideId}/${driverId}`).set(rtdbBidData);
 
     // Update driver state
     const driverUpdates = {
@@ -619,7 +622,7 @@ exports.placeBid = functions.https.onCall(async (data, context) => {
     await db.collection("drivers").doc(driverId).update(driverUpdates);
 
     await recordOperation(db, operationId, "placeBid");
-    return { success: true, bidId: bidRef.id };
+    return { success: true, bidId: driverId };
   } catch (error) {
     if (error instanceof functions.https.HttpsError) throw error;
     console.error("placeBid error:", error);
@@ -1396,12 +1399,41 @@ exports.onDriverRegistered = functions.firestore
 /**
  * onDriverApproved
  * Notifies the driver when their account is approved or rejected.
+ * Also handles session enforcement: when deviceId changes, invalidate the old FCM token.
  */
 exports.onDriverApproved = functions.firestore
   .document("drivers/{driverId}")
   .onUpdate(async (change, context) => {
     const before = change.before.data();
     const after = change.after.data();
+
+    // ── SESSION ENFORCEMENT ──
+    // When deviceId changes, a new device logged in. Invalidate the old FCM token
+    // so the killed/terminated old device stops receiving notifications.
+    const oldDeviceId = before.deviceId;
+    const newDeviceId = after.deviceId;
+    const oldFcmToken = before.fcmToken;
+    const newFcmToken = after.fcmToken;
+
+    if (oldDeviceId && newDeviceId && oldDeviceId !== newDeviceId && oldFcmToken && oldFcmToken !== newFcmToken) {
+      console.log(`[Session] Driver ${context.params.driverId}: device changed from ${oldDeviceId} to ${newDeviceId}. Invalidating old FCM token.`);
+      try {
+        // Send a silent "session_expired" data message to the OLD token
+        // so the old device can sign out if it's still alive in background
+        await admin.messaging().send({
+          token: oldFcmToken,
+          data: { type: "session_expired" },
+          android: { priority: "high" },
+        }).catch(() => {});
+
+        // Unsubscribe the old token from known broadcast topics on the server side
+        // to guarantee they don't receive new rides even if their phone OS kills the background isolate
+        await admin.messaging().unsubscribeFromTopic(oldFcmToken, 'drivers').catch(() => {});
+        await admin.messaging().unsubscribeFromTopic(oldFcmToken, `driver_${context.params.driverId}`).catch(() => {});
+      } catch (e) {
+        console.log(`[Session] Old token send failed (expected if token expired):`, e.message);
+      }
+    }
 
     const wasApproved = before.isApproved === true || before.isApproved === "true";
     const isApproved = after.isApproved === true || after.isApproved === "true";
@@ -1719,8 +1751,10 @@ exports.onRideCreated = functions.firestore
     const chunk1 = targetHashes.slice(0, 5);
     const chunk2 = targetHashes.slice(5, 9);
 
-    const pickupName = (data.pickup && data.pickup.short_name) || "Nearby";
-    const dropName = (data.drop && data.drop.short_name) || "Destination";
+    const pickupShort = (data.pickup && data.pickup.short_name) || "Nearby";
+    const dropShort = (data.drop && data.drop.short_name) || "Destination";
+    const pickupFull = (data.pickup && data.pickup.display_name) || pickupShort;
+    const dropFull = (data.drop && data.drop.display_name) || dropShort;
     const fareLabel = data.riderBid ? `₹${data.riderBid}` : "Open bid";
     const distLabel = data.distanceKm ? `${data.distanceKm} km` : "";
 
@@ -1730,22 +1764,30 @@ exports.onRideCreated = functions.firestore
       try {
         await admin.messaging().send({
           condition: condition,
-          notification: {
-            title: `New ${vehicleType} ride — ${fareLabel}`,
-            body: `${pickupName} → ${dropName}${distLabel ? " · " + distLabel : ""}`,
-          },
           data: {
             type: "new_ride",
             rideId: rideId,
+            vehicleType: vehicleType,
+            fareLabel: fareLabel,
+            distLabel: distLabel,
+            pickupShort: pickupShort,
+            dropShort: dropShort,
+            pickupFull: pickupFull,
+            dropFull: dropFull,
+            pickupLat: data.pickup?.lat?.toString() ?? '',
+            pickupLng: data.pickup?.lng?.toString() ?? '',
+            isExpanded: "false"
           },
           android: {
             priority: "high",
-            notification: {
-              channelId: "ride_alerts",
-              sound: "default",
-              priority: "high",
-            },
           },
+          apns: {
+            payload: {
+              aps: {
+                "content-available": 1
+              }
+            }
+          }
         });
       } catch (e) {
         console.error("FCM Send Error:", e);
@@ -1850,9 +1892,12 @@ exports.manageActiveRides = functions.pubsub
           console.error(`Failed to expand RTDB signals for ride ${rideId}:`, e);
         }
 
-        const pickupName = (data.pickup && data.pickup.short_name) || "Nearby";
-        const dropName = (data.drop && data.drop.short_name) || "Destination";
+        const pickupShort = (data.pickup && data.pickup.short_name) || "Nearby";
+        const dropShort = (data.drop && data.drop.short_name) || "Destination";
+        const pickupFull = (data.pickup && data.pickup.display_name) || pickupShort;
+        const dropFull = (data.drop && data.drop.display_name) || dropShort;
         const fareLabel = data.riderBid ? `₹${data.riderBid}` : "Open bid";
+        const distLabel = data.distanceKm ? `${data.distanceKm} km` : "";
 
         const chunk1 = expandedHashes.slice(0, 5);
         const chunk2 = expandedHashes.slice(5, 9);
@@ -1863,19 +1908,30 @@ exports.manageActiveRides = functions.pubsub
           promises.push(
             admin.messaging().send({
               condition,
-              notification: {
-                title: `${vehicleType} ride nearby — ${fareLabel}`,
-                body: `${pickupName} → ${dropName} (expanded search)`,
+              data: {
+                type: "new_ride",
+                rideId: rideId,
+                vehicleType: vehicleType,
+                fareLabel: fareLabel,
+                distLabel: distLabel,
+                pickupShort: pickupShort,
+                dropShort: dropShort,
+                pickupFull: pickupFull,
+                dropFull: dropFull,
+                pickupLat: data.pickup?.lat?.toString() ?? '',
+                pickupLng: data.pickup?.lng?.toString() ?? '',
+                isExpanded: "true"
               },
-              data: { type: "new_ride", rideId },
               android: {
                 priority: "high",
-                notification: {
-                  channelId: "ride_alerts",
-                  sound: "default",
-                  priority: "high",
-                },
               },
+              apns: {
+                payload: {
+                  aps: {
+                    "content-available": 1
+                  }
+                }
+              }
             }).catch(e => console.error("Expanded FCM Send Error:", e))
           );
         };
@@ -2984,6 +3040,40 @@ exports.maintainRideStats = functions.firestore
   });
 
 /**
+ * onUserDeviceChanged
+ * Session enforcement for riders: when deviceId changes, invalidate the old FCM token.
+ */
+exports.onUserDeviceChanged = functions.firestore
+  .document("users/{userId}")
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+
+    const oldDeviceId = before.deviceId;
+    const newDeviceId = after.deviceId;
+    const oldFcmToken = before.fcmToken;
+    const newFcmToken = after.fcmToken;
+
+    if (oldDeviceId && newDeviceId && oldDeviceId !== newDeviceId && oldFcmToken && oldFcmToken !== newFcmToken) {
+      console.log(`[Session] Rider ${context.params.userId}: device changed from ${oldDeviceId} to ${newDeviceId}. Invalidating old FCM token.`);
+      try {
+        await admin.messaging().send({
+          token: oldFcmToken,
+          data: { type: "session_expired" },
+          android: { priority: "high" },
+        }).catch(() => {});
+
+        // Unsubscribe the old token from known broadcast topics on the server side
+        await admin.messaging().unsubscribeFromTopic(oldFcmToken, 'riders').catch(() => {});
+        await admin.messaging().unsubscribeFromTopic(oldFcmToken, 'all_riders').catch(() => {});
+        await admin.messaging().unsubscribeFromTopic(oldFcmToken, `rider_${context.params.userId}`).catch(() => {});
+      } catch (e) {
+        console.log(`[Session] Old rider token send failed:`, e.message);
+      }
+    }
+  });
+
+/**
  * maintainUserStats
  * Maintains RTDB dashboard counters for riders (users).
  */
@@ -3240,3 +3330,39 @@ exports.syncPromoConfig = functions.firestore
       return null;
     }
   });
+
+// ============================================================
+// REMOTE CONFIG MANAGEMENT (SERVICEABLE AREAS)
+// ============================================================
+exports.updateServiceableAreas = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be logged in');
+  }
+  
+  const newAreasJson = data.areasJson;
+  if (!newAreasJson) {
+    throw new functions.https.HttpsError('invalid-argument', 'areasJson is required');
+  }
+
+  try {
+    const rc = admin.remoteConfig();
+    const template = await rc.getTemplate();
+    
+    if (!template.parameters) {
+      template.parameters = {};
+    }
+    
+    template.parameters['serviceable_areas'] = {
+      defaultValue: {
+        value: newAreasJson
+      },
+      valueType: 'STRING'
+    };
+    
+    await rc.publishTemplate(template);
+    return { success: true };
+  } catch (err) {
+    console.error("Error updating remote config:", err);
+    throw new functions.https.HttpsError('internal', err.message);
+  }
+});

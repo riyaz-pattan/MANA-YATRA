@@ -16,12 +16,13 @@ import '../config/constants.dart';
 import '../services/pricing_service.dart';
 import '../providers/ride_provider.dart';
 import '../services/google_maps_service.dart';
+import '../services/region_service.dart';
 import '../utils/map_style.dart';
+import 'location_search_screen.dart';
 import '../utils/custom_toast.dart';
 import 'package:uuid/uuid.dart';
 import '../utils/marker_utils.dart';
 import '../utils/skeleton.dart';
-import 'location_search_screen.dart';
 import 'matching_screen.dart';
 import 'active_ride_screen.dart';
 
@@ -55,9 +56,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   RideFlowState _flowState = RideFlowState.pickup;
   bool _calculatingRoute = false;
   Timer? _debounce;
-  Map<String, dynamic>? _savedHome;
-  Map<String, dynamic>? _savedWork;
-  List<Map<String, dynamic>>? _savedCustomPlaces;
   bool _bidBelowMinimum = false; // tracks min-fare warning state
 
   StreamSubscription? _profileSubscription;
@@ -68,7 +66,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _requestPermissionsSequentially();
-    _loadSavedPlaces();
     _loadCustomIcons();
     _pickupFocusNode.addListener(() {
       setState(() {});
@@ -483,24 +480,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _loadSavedPlaces() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    FirebaseFirestore.instance.collection('users').doc(uid).snapshots().listen((
-      snap,
-    ) {
-      final data = snap.data();
-      if (mounted) {
-        setState(() {
-          _savedHome = data?['savedHome'] as Map<String, dynamic>?;
-          _savedWork = data?['savedWork'] as Map<String, dynamic>?;
-          _savedCustomPlaces = (data?['savedCustomPlaces'] as List<dynamic>?)
-              ?.map((e) => e as Map<String, dynamic>)
-              .toList();
-        });
-      }
-    });
-  }
+
 
   void _toggleMapFocus() {
     setState(() {
@@ -804,11 +784,85 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
+    // Persist the ride ID locally so the app can recover if closed during MatchingScreen
+    provider.setActiveRide({'id': rideId, 'status': 'searching'});
+
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => MatchingScreen(rideId: rideId)),
       );
     }
+  }
+
+  void _showOutOfRegionBottomSheet(double lat, double lng) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: AppTheme.bg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.location_off_rounded, color: AppTheme.primary, size: 30),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'We haven\'t reached your area yet! 📍',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w800, color: AppTheme.text),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'We are currently operating in select zones. Let us know you are interested and we will notify you when we launch!',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(fontSize: 14, color: AppTheme.text2),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    RegionService().addToWaitlist(lat: lat, lng: lng, type: 'rider');
+                    Navigator.pop(ctx);
+                    CustomToast.show(
+                      context: context,
+                      message: 'Thanks! We will notify you when we launch in your area.',
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: Text('Notify Me When You Launch Here', style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: Colors.white)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text('Got it', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: AppTheme.text2)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -1116,15 +1170,35 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
     }
     if (_currentPos == null) return;
+
+    // Check Serviceable Region
+    final regionService = RegionService();
+    await regionService.initialize();
+    if (!regionService.isLocationServiceable(_currentPos!.latitude, _currentPos!.longitude)) {
+      _showOutOfRegionBottomSheet(_currentPos!.latitude, _currentPos!.longitude);
+      return;
+    }
+    
     if (!mounted) return;
+    
+    // Read cached user data from the global provider (0 database reads)
+    final userData = Provider.of<DocumentSnapshot?>(context, listen: false);
+    final data = userData?.data() as Map<String, dynamic>?;
+    
+    final savedHome = data?['savedHome'] as Map<String, dynamic>?;
+    final savedWork = data?['savedWork'] as Map<String, dynamic>?;
+    final savedCustomPlaces = (data?['savedCustomPlaces'] as List<dynamic>?)
+        ?.map((e) => e as Map<String, dynamic>)
+        .toList();
+
     final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => LocationSearchScreen(
           currentPosition: _currentPos!,
-          savedHome: _savedHome,
-          savedWork: _savedWork,
-          savedCustomPlaces: _savedCustomPlaces,
+          savedHome: savedHome,
+          savedWork: savedWork,
+          savedCustomPlaces: savedCustomPlaces,
           focusDrop: focusDrop,
         ),
       ),

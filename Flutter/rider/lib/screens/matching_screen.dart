@@ -17,6 +17,8 @@ import 'package:provider/provider.dart';
 import '../providers/ride_provider.dart';
 import '../utils/skeleton.dart';
 
+enum BidFilter { smart, lowestFare, nearest }
+
 class MatchingScreen extends StatefulWidget {
   final String rideId;
   const MatchingScreen({super.key, required this.rideId});
@@ -29,6 +31,7 @@ class _MatchingScreenState extends State<MatchingScreen>
     with TickerProviderStateMixin {
   Map<String, dynamic>? _ride;
   List<Map<String, dynamic>> _bids = [];
+  BidFilter _selectedFilter = BidFilter.smart;
   String? _processingBidId;
   bool _cancelling = false;
   late AnimationController _pulseController;
@@ -134,8 +137,44 @@ class _MatchingScreenState extends State<MatchingScreen>
       
       setState(() {
         _bids = parsedBids;
-        _bids.sort((a, b) => (a['price'] as num).compareTo(b['price'] as num));
+        _sortBids();
       });
+    });
+  }
+
+  void _sortBids() {
+    final pickupLat = (_ride?['pickup']?['lat'] as num?)?.toDouble();
+    final pickupLng = (_ride?['pickup']?['lng'] as num?)?.toDouble();
+
+    for (var bid in _bids) {
+      if (pickupLat != null &&
+          pickupLng != null &&
+          bid['driverLat'] != null &&
+          bid['driverLng'] != null) {
+        final distMeters = Geolocator.distanceBetween(
+          (bid['driverLat'] as num).toDouble(),
+          (bid['driverLng'] as num).toDouble(),
+          pickupLat,
+          pickupLng,
+        );
+        bid['distanceMeters'] = distMeters;
+        bid['score'] = (bid['price'] as num) + (distMeters / 1000 * 10);
+      } else {
+        bid['distanceMeters'] = 999999.0;
+        bid['score'] = 999999.0;
+      }
+    }
+
+    _bids.sort((a, b) {
+      switch (_selectedFilter) {
+        case BidFilter.lowestFare:
+          return (a['price'] as num).compareTo(b['price'] as num);
+        case BidFilter.nearest:
+          return (a['distanceMeters'] as num).compareTo(b['distanceMeters'] as num);
+        case BidFilter.smart:
+        default:
+          return (a['score'] as num).compareTo(b['score'] as num);
+      }
     });
   }
 
@@ -276,7 +315,10 @@ class _MatchingScreenState extends State<MatchingScreen>
 
               // Ride info card
               if (_ride != null) _buildRideInfoCard(),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
+
+              if (_bids.isNotEmpty) _buildFilterChips(),
+              if (_bids.isNotEmpty) const SizedBox(height: 12),
 
               // Bids list
               Expanded(
@@ -321,6 +363,63 @@ class _MatchingScreenState extends State<MatchingScreen>
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterChips() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        children: [
+          _buildChip('Smart Sort', BidFilter.smart, Icons.auto_awesome),
+          const SizedBox(width: 8),
+          _buildChip('Lowest Fare', BidFilter.lowestFare, Icons.payments_outlined),
+          const SizedBox(width: 8),
+          _buildChip('Nearest First', BidFilter.nearest, Icons.near_me_outlined),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChip(String label, BidFilter filter, IconData icon) {
+    final isSelected = _selectedFilter == filter;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedFilter = filter;
+          _sortBids();
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primary : AppTheme.bg2,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? AppTheme.primary : AppTheme.border,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: isSelected ? Colors.white : AppTheme.text2,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                color: isSelected ? Colors.white : AppTheme.text2,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -454,35 +553,49 @@ class _MatchingScreenState extends State<MatchingScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.circle,
-                          size: 8, color: AppTheme.success),
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Icon(Icons.circle,
+                            size: 8, color: AppTheme.success),
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          _ride!['pickup']?['short_name'] ?? 'Pickup',
+                          _ride!['pickup']?['display_name'] ??
+                              _ride!['pickup']?['short_name'] ??
+                              'Pickup',
                           style: GoogleFonts.inter(
                             fontSize: 13,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w500,
                           ),
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.location_on,
-                          size: 10, color: AppTheme.danger),
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Icon(Icons.location_on,
+                            size: 10, color: AppTheme.danger),
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          _ride!['drop']?['short_name'] ?? 'Drop',
+                          _ride!['drop']?['display_name'] ??
+                              _ride!['drop']?['short_name'] ??
+                              'Drop',
                           style: GoogleFonts.inter(
                             fontSize: 13,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w500,
                           ),
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -494,10 +607,26 @@ class _MatchingScreenState extends State<MatchingScreen>
             const SizedBox(width: 12),
             Column(
               children: [
+                Icon(
+                  _ride!['vehicleType'] == 'bike'
+                      ? Icons.motorcycle
+                      : Icons.electric_rickshaw,
+                  color: AppTheme.primary,
+                  size: 24,
+                ),
+                Text(
+                  _ride!['vehicleType'] == 'bike' ? 'Bike' : 'Auto',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 8),
                 Text(
                   '₹${_ride!['riderBid']}',
                   style: GoogleFonts.inter(
-                    fontSize: 24,
+                    fontSize: 22,
                     fontWeight: FontWeight.w800,
                     color: AppTheme.success,
                   ),
